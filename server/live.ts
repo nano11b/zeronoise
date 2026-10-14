@@ -1,3 +1,4 @@
+import type { ReleaseInfo } from './release';
 import type { Role } from '../shared/types';
 import type { ItemView } from './modq';
 
@@ -66,6 +67,8 @@ export const live = {
   stats: () => ({ rooms: 0, users: 0 }),
   /** Set once at process start from the server entry mtime. */
   buildId: '',
+  /** Package sha256 + commit (see release.ts). Set once at process start. */
+  release: { packageSha256: null, commit: null, branch: null, manifestSha256: null, releasedAt: null, installedAt: null } as ReleaseInfo,
   /** Bearer API: put an allowed bot in a room. Cam, mic, and screen stay off. */
   botJoin: (_roomId: string, _bot: BotIdentity): BotResult => ({ ok: false, status: 503, error: 'Not ready' }),
   /** Bearer API: post a chat line as the bot. Rate-limited by the socket layer. */

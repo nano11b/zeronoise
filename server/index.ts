@@ -2,6 +2,7 @@ import './quiet';
 import http from 'http';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import fs from 'fs';
+import { readReleaseInfo } from './release';
 import { Server, Socket } from 'socket.io';
 import { BRAND_NAME, DEFAULT_ROOMS, LIMITS } from '../shared/config';
 import { gifMarkdown } from '../shared/gifs';
@@ -803,6 +804,7 @@ function stopTrivia(room: Room, by: string | null) {
 
 // ---------- HTTP + Socket.IO ----------
 live.buildId = createHash('sha1').update(String(fs.statSync(__filename).mtimeMs)).digest('hex').slice(0, 12);
+live.release = readReleaseInfo();
 
 const app = createApp(roomList);
 const httpServer = http.createServer(app);
@@ -1028,6 +1030,7 @@ function botPostGate(roomId: string, bot: BotIdentity): { ok: true; room: Room; 
   const gate = openBotRoom(roomId, bot.id);
   if (!gate.ok) return gate;
   const uid = botUserId(bot.id);
+  if (!gate.room.members.has(uid)) restoreBotSeat(gate.room, bot);
   if (!gate.room.members.has(uid) || !botUsers.has(uid)) return { ok: false, status: 403, error: 'Join the room first' };
   if (gate.room.slowModeSec > 0) {
     const last = gate.room.lastChatAt.get(uid) ?? 0;
@@ -1042,6 +1045,7 @@ function removeBot(botId: number, only?: Room) {
   const uid = botUserId(botId);
   const ids = only ? [only.id] : [...(botRooms.get(botId) ?? [])];
   const user = botUsers.get(uid);
+  try { repo.forgetBotJoin(botId, only?.id); } catch (err) { console.error('[bots] forget join failed', (err as Error).message); }
   for (const rid of ids) {
     const room = rooms.get(rid);
     const set = botRooms.get(botId);
@@ -1062,24 +1066,38 @@ function removeBot(botId: number, only?: Room) {
   }
   broadcastRooms();
 }
-live.botJoin = (roomId, bot) => {
-  const gate = openBotRoom(roomId, bot.id);
-  if (!gate.ok) return gate;
-  const room = gate.room;
+/** Put a bot in a room's member list. `announce` posts the "joined" line (not done when restoring after a restart). */
+function seatBot(room: Room, bot: { id: number; name: string }, announce: boolean): BotResult {
   const uid = botUserId(bot.id);
   if (room.members.has(uid)) return { ok: true };
   if (room.members.size >= LIMITS.maxUsersPerRoom) return { ok: false, status: 403, error: 'Room is full' };
   if (!claimBotNick(uid, bot.name)) return { ok: false, status: 409, error: 'That name is in use' };
-  const user: UserInfo = { id: uid, nick: bot.name, cam: false, mic: false, screen: false, role: 'user', registered: false };
+  const user: UserInfo = botUsers.get(uid) ?? { id: uid, nick: bot.name, cam: false, mic: false, screen: false, role: 'user', registered: false };
   botUsers.set(uid, user);
   let set = botRooms.get(bot.id);
   if (!set) { set = new Set(); botRooms.set(bot.id, set); }
   set.add(room.id);
   room.members.add(uid);
   io.to(`room:${room.id}`).emit('user:joined', user);
-  systemMsg(room, `${bot.name} joined`);
+  if (announce) systemMsg(room, `${bot.name} joined`);
   broadcastRooms();
   return { ok: true };
+}
+/** A join remembered in the DB from before a restart: seat the bot quietly. False when there is nothing to restore. */
+function restoreBotSeat(room: Room, bot: { id: number; name: string }): boolean {
+  if (room.members.has(botUserId(bot.id))) return true;
+  let remembered = false;
+  try { remembered = repo.botJoinRemembered(bot.id, room.id); } catch { remembered = false; }
+  return remembered && seatBot(room, bot, false).ok;
+}
+live.botJoin = (roomId, bot) => {
+  const gate = openBotRoom(roomId, bot.id);
+  if (!gate.ok) return gate;
+  const r = seatBot(gate.room, bot, true);
+  if (r.ok) {
+    try { repo.rememberBotJoin(bot.id, gate.room.id); } catch (err) { console.error('[bots] remember join failed', (err as Error).message); }
+  }
+  return r;
 };
 live.botChat = (roomId, bot, raw) => {
   const gate = botPostGate(roomId, bot);
@@ -1091,6 +1109,7 @@ live.botChat = (roomId, bot, raw) => {
 live.botGif = async (roomId, bot, gifId) => {
   const opened = openBotRoom(roomId, bot.id);
   if (!opened.ok) return opened;
+  if (!opened.room.members.has(botUserId(bot.id))) restoreBotSeat(opened.room, bot);
   if (!opened.room.members.has(botUserId(bot.id))) return { ok: false, status: 403, error: 'Join the room first' };
   if (!gifsEnabled) return { ok: false, status: 503, error: 'GIF search is not configured' };
   const gate = botPostGate(roomId, bot);
@@ -1133,6 +1152,21 @@ live.botRoomMessages = (roomId, bot, query) => {
   return page(rows, rows.length ? rows[rows.length - 1].id : repo.newestMessageId(gate.room.id));
 };
 live.botGone = (botId) => { removeBot(botId); };
+/** Startup: re-seat bots whose join was remembered (quietly; no "joined" line). Stale rows are dropped. */
+function restoreBotJoins() {
+  let restored = 0;
+  let rows: ReturnType<typeof repo.rememberedBotJoins> = [];
+  try { rows = repo.rememberedBotJoins(); } catch (err) { console.error('[bots] restore joins failed', (err as Error).message); return; }
+  for (const row of rows) {
+    const room = rooms.get(row.room_id);
+    if (!row.name || !room || room.isPrivate || !repo.botAllowed(row.room_id, row.bot_id)) {
+      repo.forgetBotJoin(row.bot_id, row.room_id);
+      continue;
+    }
+    if (seatBot(room, { id: row.bot_id, name: row.name }, false).ok) restored++;
+  }
+  if (rows.length) console.log(`[bots] restored ${restored} of ${rows.length} bot room join(s)`);
+}
 
 function emitModPresence(present: boolean, user: UserInfo) {
   for (const room of rooms.values()) {
@@ -4096,6 +4130,7 @@ setInterval(guardTimer('schedule tick', scheduleTick), SCHEDULE_TICK).unref();
 setInterval(guardTimer('stats sample', statsSample), STATS_SAMPLE_MS).unref();
 
 
+restoreBotJoins();
 httpServer.listen(PORT, HOST as string, () => {
   console.log(`${BRAND_NAME} listening on http://${HOST ?? 'localhost'}:${PORT} (${isProd ? 'production' : 'development'}), data in ${DATA_DIR}`);
   if (!TURN_URLS.length) console.log('No TURN_URLS set - using STUN only (some NATs will fail to connect).');

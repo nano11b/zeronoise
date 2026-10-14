@@ -221,7 +221,7 @@ export interface RoomRow {
   /** custom lobby thumbnail id (migration 28); absent on old rows */
   thumb_id?: string | null;
   thumb_at?: number | null;
-  /** stage mode (migration 37); absent on old rows */
+  /** stage mode (migration 35); absent on old rows */
   stage_mode?: number | null;
   stage_cap?: number | null;
   /** custom room icon id (migration 34); absent on old rows */
@@ -683,6 +683,21 @@ export function removeBotAllow(roomId: string, botId: number) {
 }
 export function botAllowed(roomId: string, botId: number): boolean {
   return !!q('SELECT 1 FROM room_bots WHERE room_id = ? AND bot_id = ?').get(roomId, botId);
+}
+/** Persisted bot room joins (migration 36), so a restart does not drop a bot from its rooms. */
+export function rememberBotJoin(botId: number, roomId: string) {
+  q('INSERT INTO bot_room_joins (bot_id, room_id, joined_at) VALUES (?,?,?) ON CONFLICT DO NOTHING').run(botId, roomId, now());
+}
+export function forgetBotJoin(botId: number, roomId?: string) {
+  if (roomId === undefined) q('DELETE FROM bot_room_joins WHERE bot_id = ?').run(botId);
+  else q('DELETE FROM bot_room_joins WHERE bot_id = ? AND room_id = ?').run(botId, roomId);
+}
+export function botJoinRemembered(botId: number, roomId: string): boolean {
+  return !!q('SELECT 1 FROM bot_room_joins WHERE bot_id = ? AND room_id = ?').get(botId, roomId);
+}
+export function rememberedBotJoins(): { bot_id: number; room_id: string; name: string | null }[] {
+  return q(`SELECT j.bot_id AS bot_id, j.room_id AS room_id, b.name AS name FROM bot_room_joins j
+    LEFT JOIN bots b ON b.id = j.bot_id ORDER BY j.joined_at`).all() as { bot_id: number; room_id: string; name: string | null }[];
 }
 export function botsAllowed(roomId: string): { id: number; name: string }[] {
   return q(`SELECT b.id AS id, b.name AS name FROM room_bots rb JOIN bots b ON b.id = rb.bot_id

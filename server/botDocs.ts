@@ -72,7 +72,7 @@ Success is \`{"ok":true}\` for both.
 
 The bot can be in more than one room it is allowed in. Chat, GIFs, and reads use the room id in the path. Calling \`join\` when the bot is already in that room is harmless: it returns \`{"ok":true}\` and does not post another join line.
 
-**Important:** the join is kept in memory only. The allow list survives a restart; the join does not. If \`chat\` returns **403** \`Join the room first\`, call \`join\` again and retry once.
+The join is saved on the server, so it survives a site restart or upgrade: the bot is back in the room after a restart without calling \`join\` again, and no new \`joined\` line is posted. The join ends when the room owner removes the bot from the room's Bots list, the room is deleted, or the bot's token is revoked or the bot is deleted. Regenerating the token keeps the join. If \`chat\` ever returns **403** \`Join the room first\` (for example after one of those), call \`join\` again and retry once. Bots that already re-join on every start keep working; the extra \`join\` is harmless.
 
 ### Message rules
 
@@ -365,5 +365,7 @@ export function llmsTxt(publicUrl: string): string {
 
 - [Bot API (Markdown)](${md}): token, allow a bot in a room, join, chat, GIFs, read messages, errors, and limits.
 - [Bot API (HTML)](${html})
+
+Joins are saved on the server and survive restarts. Join once; on 403 \`Join the room first\`, join again and retry once.
 `;
 }

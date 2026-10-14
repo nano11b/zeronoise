@@ -2150,3 +2150,11 @@ html, body { overscroll-behavior: none; }
 }
 /* the A/V dialog grew (background + mic sections): scroll inside it so Apply stays reachable on short screens */
 .av-modal { max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; }
+
+/* phone polish (390 / 360 wide): one-line room name, room for a whole trivia question in the games slot */
+@media (max-width: 480px) {
+  .chat-head .room-title .room-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-head .room-title .topic { display: flex; align-items: center; gap: 4px; }
+  .center-col > .games-slot:not(:empty) { max-height: min(52dvh, 380px); }
+  .trivia-opt { min-height: 40px; padding-top: 6px; padding-bottom: 6px; }
+}

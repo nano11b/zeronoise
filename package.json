@@ -20,7 +20,9 @@
     "test:ui": "node scripts/ui-check.mjs",
     "test:pwa": "node scripts/pwa-check.mjs",
     "test:vq": "node scripts/test-vq.mjs",
-    "test:vq-browser": "node scripts/vq-browser.mjs"
+    "test:vq-browser": "node scripts/vq-browser.mjs",
+    "test:bot-joins": "node scripts/test-bot-joins.mjs",
+    "test:voice-browser": "node scripts/voice-browser.mjs"
   },
   "engines": {
     "node": ">=22.13"

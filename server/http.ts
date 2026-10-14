@@ -195,7 +195,8 @@ export function createApp(roomList: () => unknown) {
     try { repo.listActiveBans(); } catch { db = false; }
     res.setHeader('Cache-Control', 'no-store');
     res.status(db ? 200 : 500).json({
-      ok: db, app: BRAND_NAME, db, build: live.buildId, ...live.stats(),
+      ok: db, app: BRAND_NAME, db, build: live.buildId,
+      package: live.release.packageSha256, commit: live.release.commit, release: live.release, ...live.stats(),
       mail: mailConfigured, emailVerifyRequired: emailVerifyRequiredEffective(),
       tiktok: tiktokEnabled,
       uptimeSec: Math.floor(process.uptime()), startedAt: PROCESS_STARTED_AT,

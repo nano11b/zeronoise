@@ -6,7 +6,11 @@ export const DB_PATH = path.join(DATA_DIR, 'camchat.db');
 export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL;');
 
-/** Append-only list of migrations. Never edit a shipped entry; add a new one. PRAGMA user_version tracks progress. */
+/**
+ * Append-only list of migrations. Never edit a shipped entry; add a new one. PRAGMA user_version tracks progress.
+ * Each label is the user_version the entry leads to (entry index + 1). Labels 30-35 were renumbered in
+ * the comments only (they used to read 33-37 with 30 unlabeled); the SQL and order are unchanged.
+ */
 const MIGRATIONS: string[] = [
   // 1: initial schema
   `
@@ -515,7 +519,7 @@ const MIGRATIONS: string[] = [
   );
   CREATE UNIQUE INDEX IF NOT EXISTS room_emotes_name ON room_emotes(room_id, name);
   `,
-  // moderation queue: grouped targets, reasons, snapshots, claims, auto-hide, user notices
+  // 30: moderation queue: grouped targets, reasons, snapshots, claims, auto-hide, user notices
   `
   ALTER TABLE reports ADD COLUMN target_kind TEXT;
   ALTER TABLE reports ADD COLUMN target_key TEXT;
@@ -552,7 +556,7 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS user_notices_user ON user_notices(user_id, delivered_at)
   `,
-  // 33: smarter lobby - room presence privacy for friends, server copy of the block list, recently visited rooms.
+  // 31: smarter lobby - room presence privacy for friends, server copy of the block list, recently visited rooms.
   `
   ALTER TABLE users ADD COLUMN show_room INTEGER NOT NULL DEFAULT 1;
   CREATE TABLE IF NOT EXISTS user_blocks (
@@ -570,13 +574,13 @@ const MIGRATIONS: string[] = [
   ) WITHOUT ROWID;
   CREATE INDEX IF NOT EXISTS recent_rooms_user ON recent_rooms(user_id, visited_at)
   `,
-  // 34: custom room icon for the room rail / header (random id -> DATA_DIR/room-icons/<id>.webp; a new id per upload).
+  // 32: custom room icon for the room rail / header (random id -> DATA_DIR/room-icons/<id>.webp; a new id per upload).
   `
   ALTER TABLE rooms ADD COLUMN icon_id TEXT;
   ALTER TABLE rooms ADD COLUMN icon_at INTEGER;
   CREATE UNIQUE INDEX IF NOT EXISTS rooms_icon_id ON rooms(icon_id) WHERE icon_id IS NOT NULL
   `,
-  // 35: room invite links (/i/<code>), one counted use per account, and the "room mods can invite" room setting.
+  // 33: room invite links (/i/<code>), one counted use per account, and the "room mods can invite" room setting.
   `
   CREATE TABLE IF NOT EXISTS room_invites (
     code TEXT PRIMARY KEY,
@@ -603,11 +607,11 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS room_invite_uses_user ON room_invite_uses(user_id);
   ALTER TABLE rooms ADD COLUMN mods_can_invite INTEGER NOT NULL DEFAULT 0
   `,
-  // 36: per-account camera quality preset (video quality controls)
+  // 34: per-account camera quality preset (video quality controls)
   `
   ALTER TABLE users ADD COLUMN video_quality TEXT
   `,
-  // 37: batch 4a: message edit history (staff view) and stage mode
+  // 35: batch 4a: message edit history (staff view) and stage mode
   `
   CREATE TABLE IF NOT EXISTS message_edits (
     id INTEGER PRIMARY KEY,
@@ -620,6 +624,17 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS message_edits_msg ON message_edits(message_id, edited_at);
   ALTER TABLE rooms ADD COLUMN stage_mode INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE rooms ADD COLUMN stage_cap INTEGER NOT NULL DEFAULT 0
+  `,
+  // 36: bot room joins survive a restart. A row means "this bot joined this room and has not left";
+  // the allow list (room_bots) is still checked on every restore and every post.
+  `
+  CREATE TABLE IF NOT EXISTS bot_room_joins (
+    bot_id INTEGER NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+    room_id TEXT NOT NULL,
+    joined_at INTEGER NOT NULL,
+    PRIMARY KEY (bot_id, room_id)
+  ) WITHOUT ROWID;
+  CREATE INDEX IF NOT EXISTS bot_room_joins_room ON bot_room_joins(room_id)
   `,
 ];
 

@@ -6,6 +6,8 @@
 # in /home/manager/camchat-downloads/. The script checks the sha256 shipped in the tarball, then copies
 # the whole file to /var/lib/camchat/downloads. Files already there are never deleted.
 # Safe to re-run. Builds in a staging dir first; on a failed health check it rolls back automatically.
+# Deploy lock: only a package made by scripts/make-release.sh is installed. It carries camchat/RELEASE.json and
+# camchat/MANIFEST.sha256 (every file's sha256); anything else, e.g. an old v3 build, is refused before any change.
 set -Eeuo pipefail
 
 TARBALL=${TARBALL:-/home/manager/camchat.tar.gz}
@@ -85,6 +87,35 @@ refresh_downloads() {
 }
 # END refresh_downloads
 
+# BEGIN release_lock
+# Refuse a package that is not a zeronoise release: RELEASE.json (format zeronoise-release/1) must name the sha256
+# of MANIFEST.sha256, every file in the manifest must match, and no file may be outside the manifest.
+check_release() {
+  local dir="$1" rel man want got extra
+  rel="$dir/RELEASE.json"; man="$dir/MANIFEST.sha256"
+  refuse() {
+    printf '\n\033[1;31mREFUSED: %s\033[0m\n' "$1" >&2
+    printf 'This package is not an approved zeronoise release (made by scripts/make-release.sh).\n' >&2
+    printf 'Old v3 builds and hand-made tarballs are refused. Nothing was changed; the site keeps running.\n' >&2
+    rm -rf "$dir"
+    exit 3
+  }
+  [ -f "$rel" ] || refuse "no RELEASE.json approval marker in the tarball"
+  [ -f "$man" ] || refuse "no MANIFEST.sha256 in the tarball"
+  grep -q '"format": *"zeronoise-release/1"' "$rel" || refuse "RELEASE.json is not format zeronoise-release/1"
+  want=$(sed -n 's/.*"manifestSha256": *"\([0-9a-f]\{64\}\)".*/\1/p' "$rel" | head -1)
+  [ -n "$want" ] || refuse "RELEASE.json has no manifestSha256"
+  got=$(sha256sum "$man" | awk '{print $1}')
+  [ "$got" = "$want" ] || refuse "MANIFEST.sha256 does not match RELEASE.json (package was altered)"
+  (cd "$dir" && sha256sum --quiet --strict -c MANIFEST.sha256 >/dev/null 2>&1) || refuse "a file does not match MANIFEST.sha256 (package was altered)"
+  extra=$(cd "$dir" && comm -23 <(find . -type f ! -name MANIFEST.sha256 ! -name RELEASE.json | sed 's|^\./||' | LC_ALL=C sort) \
+    <(sed 's/^[0-9a-f]\{64\}  //' MANIFEST.sha256 | LC_ALL=C sort) | head -5 || true)
+  [ -z "$extra" ] || refuse "files not in MANIFEST.sha256: $(echo $extra)"
+  RELEASE_COMMIT=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$rel" | head -1)
+  echo "   approved release: commit ${RELEASE_COMMIT:-unknown}, manifest $want"
+}
+# END release_lock
+
 [ "$(id -u)" = 0 ] || die "run as root (sudo bash $0)"
 [ -f "$TARBALL" ] || die "missing $TARBALL"
 id camchat >/dev/null 2>&1 || die "user camchat does not exist"
@@ -97,6 +128,8 @@ rm -rf "$STAGE" /tmp/camchat-extract.$$
 mkdir -p /tmp/camchat-extract.$$
 tar -xzf "$TARBALL" -C /tmp/camchat-extract.$$
 [ -f /tmp/camchat-extract.$$/camchat/package.json ] || die "tarball does not contain camchat/package.json"
+say "Checking the release approval marker (deploy lock)"
+check_release /tmp/camchat-extract.$$/camchat
 mv /tmp/camchat-extract.$$/camchat "$STAGE"
 rm -rf /tmp/camchat-extract.$$
 chown -R camchat:camchat "$STAGE"
@@ -105,6 +138,10 @@ say "2/7 npm ci + build as camchat (in staging; the running service is untouched
 sudo -u camchat env HOME="$STAGE" npm_config_cache="$STAGE/.npm" npm_config_update_notifier=false \
   bash -c "cd '$STAGE' && npm ci --no-audit --no-fund && npm run build"
 [ -f "$STAGE/dist/server/server/index.js" ] || die "build output missing"
+PKG_SHA=$(sha256sum "$TARBALL" | awk '{print $1}')
+printf '{\n  "sha256": "%s",\n  "installedAt": "%s"\n}\n' "$PKG_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STAGE/PACKAGE.json"
+chown camchat:camchat "$STAGE/PACKAGE.json"
+echo "   package sha256 $PKG_SHA"
 
 say "3/7 Data dir $DATA (owned by camchat)"
 install -d -o camchat -g camchat -m 750 "$DATA"
