@@ -22,7 +22,7 @@ if find "$WORK/camchat" \( -name '*.jks' -o -name '*.keystore' -o -name '*.p12' 
   echo "refusing: keystore-like file in the package" >&2; exit 1
 fi
 cd "$WORK/camchat"
-find . -type f | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do sha256sum "$f"; done > MANIFEST.sha256
+find . -type f ! -name MANIFEST.sha256 ! -name RELEASE.json | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do sha256sum "$f"; done > MANIFEST.sha256
 MAN=$(sha256sum MANIFEST.sha256 | awk '{print $1}')
 printf '{\n  "format": "zeronoise-release/1",\n  "commit": "%s",\n  "branch": "%s",\n  "manifestSha256": "%s",\n  "createdAt": "%s"\n}\n' \
   "$COMMIT" "$BRANCH" "$MAN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > RELEASE.json
