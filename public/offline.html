@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>Offline · zeronoise</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: #0b1220; color: #e7eef8; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      display: grid; place-items: center; text-align: center;
+      padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+      box-sizing: border-box; overscroll-behavior: none;
+    }
+    main { max-width: 340px; }
+    img { width: 96px; height: 96px; border-radius: 22px; }
+    h1 { font-size: 20px; margin: 18px 0 8px; }
+    p { color: #93a4bb; margin: 0 0 20px; }
+    button { min-height: 44px; padding: 10px 22px; border-radius: 12px; border: 1px solid #39ff14; background: rgb(57 255 20 / .12); color: #b6ff9a; font: inherit; font-weight: 700; cursor: pointer; }
+    button:focus-visible { outline: 2px solid #39ff14; outline-offset: 2px; }
+    @media (prefers-reduced-motion: no-preference) { .dot { animation: pulse 1.6s ease-in-out infinite; } }
+    @keyframes pulse { 50% { opacity: .35; } }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="/icon-192.png" alt="" width="96" height="96" />
+    <h1 data-testid="offline-title">You're offline — zeronoise will reconnect when you're back</h1>
+    <p><span class="dot" aria-hidden="true">●</span> Waiting for the network…</p>
+    <button type="button" id="retry">Try again</button>
+  </main>
+  <script>
+    document.getElementById('retry').addEventListener('click', function () { location.reload(); });
+    addEventListener('online', function () { location.reload(); });
+  </script>
+</body>
+</html>

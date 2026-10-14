@@ -1,0 +1,8 @@
+{
+  "appId": "com.nano11bravo.camchat",
+  "appName": "zeronoise",
+  "siteUrl": "https://chat.nano11bravo.com",
+  "host": "chat.nano11bravo.com",
+  "scheme": "camchat",
+  "userAgentSuffix": "zeronoise/1.2.1"
+}

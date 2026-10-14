@@ -1,0 +1,12 @@
+node_modules
+dist
+data
+.env
+native/desktop/dist-builder/
+downloads/*.apk
+downloads/*.zip
+downloads/*.exe
+downloads/*.part*
+*.jks
+*.keystore
+*.p12

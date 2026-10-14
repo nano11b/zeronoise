@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">zeronoise</string>
+    <string name="title_activity_main">zeronoise</string>
+    <string name="package_name">com.nano11bravo.camchat</string>
+    <string name="custom_url_scheme">camchat</string>
+</resources>

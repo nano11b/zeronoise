@@ -1,0 +1,23 @@
+{
+  "name": "zeronoise-mobile",
+  "version": "1.2.1",
+  "private": true,
+  "description": "zeronoise for iPhone, iPad, and Android. Loads the live site in a Capacitor shell.",
+  "scripts": {
+    "sync": "cap sync",
+    "assets": "capacitor-assets generate --android --ios --iconBackgroundColor '#030605' --iconBackgroundColorDark '#030605' --splashBackgroundColor '#030605' --splashBackgroundColorDark '#030605'",
+    "open:ios": "cap open ios",
+    "open:android": "cap open android",
+    "android:debug": "npm run sync && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/ios": "8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "8.5.2",
+    "typescript": "5.7.2"
+  }
+}

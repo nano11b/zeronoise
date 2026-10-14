@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Share your screen</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #030605; color: #e8ffe4; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 8px; }
+      h1 { margin: 0; font-size: 16px; letter-spacing: -0.02em; }
+      p { margin: 0; color: #8fbf93; font-size: 13px; }
+      button { font: inherit; border: 0; border-radius: 999px; padding: 8px 14px; cursor: pointer; }
+      button.cancel { background: transparent; color: #d6ffd0; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; padding: 12px 18px 20px; }
+      .card { display: flex; flex-direction: column; gap: 8px; padding: 8px; border-radius: 12px; background: #0d1410; color: inherit; text-align: left; border: 1px solid #1f6b38; }
+      .card:hover, .card:focus { outline: 2px solid #39ff14; background: #102016; }
+      .card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 8px; background: #000; }
+      .meta { display: flex; flex-direction: column; min-width: 0; }
+      .kind { color: #39ff14; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+      .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .empty { padding: 32px 18px; color: #8fbf93; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Share your screen</h1>
+        <p>People in the room will see the screen or window you pick.</p>
+      </div>
+      <button class="cancel" type="button" id="cancel">Cancel</button>
+    </header>
+    <div class="grid" id="grid"></div>
+    <script>
+      const grid = document.getElementById('grid');
+      document.getElementById('cancel').addEventListener('click', () => window.picker.cancel());
+      window.picker.onSources((sources) => {
+        grid.textContent = '';
+        if (!sources.length) {
+          const p = document.createElement('p');
+          p.className = 'empty';
+          p.textContent = 'No screens or windows are available to share.';
+          grid.appendChild(p);
+          return;
+        }
+        for (const source of sources) {
+          const btn = document.createElement('button');
+          btn.className = 'card';
+          btn.type = 'button';
+          const img = document.createElement('img');
+          img.alt = '';
+          if (source.thumb) img.src = source.thumb;
+          const meta = document.createElement('span');
+          meta.className = 'meta';
+          const kind = document.createElement('span');
+          kind.className = 'kind';
+          kind.textContent = source.kind;
+          const name = document.createElement('span');
+          name.className = 'name';
+          name.textContent = source.name || 'Untitled';
+          meta.append(kind, name);
+          btn.append(img, meta);
+          btn.addEventListener('click', () => window.picker.choose(source.id));
+          grid.appendChild(btn);
+        }
+      });
+    </script>
+  </body>
+</html>

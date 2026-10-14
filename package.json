@@ -1,0 +1,62 @@
+{
+  "name": "camchat",
+  "version": "3.0.0",
+  "private": true,
+  "description": "zeronoise: room-based webcam, voice and text chat (WebRTC mesh + Socket.IO)",
+  "license": "MIT",
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c cyan,magenta \"tsx watch server/index.ts\" \"vite\"",
+    "build": "tsc -p tsconfig.json --noEmit && vite build && tsc -p tsconfig.server.json",
+    "start": "NODE_ENV=production node dist/server/server/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "make-admin": "node scripts/make-admin.mjs",
+    "set-moderator-bot": "node dist/server/set-moderator-bot.js",
+    "test:signaling": "node scripts/test-signaling.mjs",
+    "test:api": "node scripts/test-api.mjs",
+    "test:native": "tsx scripts/test-native-handoff.mjs",
+    "test:browser": "node scripts/browser-test.mjs",
+    "delete-test-users": "node scripts/delete-test-users.mjs",
+    "test:markdown": "node scripts/test-markdown.mjs",
+    "test:ui": "node scripts/ui-check.mjs",
+    "test:pwa": "node scripts/pwa-check.mjs",
+    "test:vq": "node scripts/test-vq.mjs",
+    "test:vq-browser": "node scripts/vq-browser.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.1.0",
+    "@sapphi-red/web-noise-suppressor": "^0.4.1",
+    "bcryptjs": "^3.0.3",
+    "dompurify": "^3.4.16",
+    "express": "^4.21.2",
+    "markdown-it": "^15.0.2",
+    "multer": "^2.4.0",
+    "proxy-addr": "^2.0.8",
+    "sharp": "^0.35.5",
+    "socket.io": "^4.8.1",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/dompurify": "^3.0.5",
+    "@types/express": "^4.17.21",
+    "@types/markdown-it": "^14.2.0",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^22.20.4",
+    "@types/proxy-addr": "^2.0.3",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/web-push": "^3.6.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "jsdom": "^30.1.1",
+    "puppeteer-core": "^23.11.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io-client": "^4.8.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  }
+}

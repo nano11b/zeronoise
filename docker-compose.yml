@@ -1,0 +1,33 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"   # expose only to the reverse proxy on the host; use "3000:3000" to test directly
+    environment:
+      PORT: 3000
+      DATA_DIR: /data
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      ADMIN_USERNAMES: ${ADMIN_USERNAMES:-}
+      TRUST_PROXY: ${TRUST_PROXY:-loopback,uniquelocal}
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_SECRET: ${TURN_SECRET:-}
+      TURN_USER: ${TURN_USER:-}
+      TURN_PASS: ${TURN_PASS:-}
+    volumes:
+      - camchat-data:/data
+
+  # Optional TURN relay. Enable with:  docker compose --profile turn up -d
+  # Edit external-ip / realm in deploy/turnserver.conf first.
+  coturn:
+    image: coturn/coturn:4.6
+    profiles: ["turn"]
+    restart: unless-stopped
+    network_mode: host          # TURN needs many UDP ports; host networking is simplest
+    volumes:
+      - ./deploy/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf", "--static-auth-secret=${TURN_SECRET:?set TURN_SECRET}"]
+
+volumes:
+  camchat-data:

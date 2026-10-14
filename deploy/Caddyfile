@@ -1,0 +1,5 @@
+# /etc/caddy/Caddyfile - replace chat.example.com with your domain (DNS A record -> VPS IP)
+chat.example.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:3000
+}

@@ -1,0 +1,69 @@
+import fs from 'fs';
+import path from 'path';
+import { randomBytes } from 'crypto';
+import sharp from 'sharp';
+import { DATA_DIR } from './env';
+import { ROOM_ICON_ID_RE, ROOM_ICON_MAX_BYTES, ROOM_ICON_SIZE } from '../shared/roomIcons';
+
+/** Mirrors room thumbnails: DATA_DIR/room-icons/<random id>.webp */
+export const ROOM_ICON_DIR = path.join(DATA_DIR, 'room-icons');
+fs.mkdirSync(ROOM_ICON_DIR, { recursive: true, mode: 0o750 });
+
+export const newIconId = () => randomBytes(16).toString('hex');
+
+export function roomIconPath(id: string): string | null {
+  if (!ROOM_ICON_ID_RE.test(id)) return null;
+  return path.join(ROOM_ICON_DIR, `${id}.webp`);
+}
+
+export function roomIconExists(id: string) {
+  const p = roomIconPath(id);
+  if (!p) return false;
+  try { return fs.statSync(p).isFile(); } catch { return false; }
+}
+
+/** Validate and re-encode to a 128×128 cover-cropped WebP. Animated GIF/WebP keep only the first frame; EXIF is stripped. */
+export async function processRoomIcon(buf: Buffer): Promise<Buffer> {
+  if (buf.length > ROOM_ICON_MAX_BYTES) throw new Error('Image too large (max 2 MB)');
+  if (buf.length < 24) throw new Error('Not a valid image');
+  try {
+    const img = sharp(buf, { failOn: 'error', animated: false, limitInputPixels: 40_000_000 }).rotate();
+    const meta = await img.metadata();
+    if (!meta.format || !['jpeg', 'png', 'webp', 'gif'].includes(meta.format)) throw new Error('Use PNG, JPEG, WebP or GIF');
+    return await img
+      .resize(ROOM_ICON_SIZE, ROOM_ICON_SIZE, { fit: 'cover', position: 'attention' })
+      .webp({ quality: 82, effort: 4 })
+      .toBuffer();
+  } catch (e) {
+    if (e instanceof Error && /too large|Use PNG|Not a valid/.test(e.message)) throw e;
+    throw new Error('Could not read image');
+  }
+}
+
+export function writeRoomIcon(id: string, webp: Buffer) {
+  const p = roomIconPath(id);
+  if (!p) throw new Error('bad icon id');
+  fs.writeFileSync(p, webp, { mode: 0o640 });
+}
+
+export function deleteRoomIcon(id: string | null | undefined) {
+  if (!id) return;
+  const p = roomIconPath(id);
+  if (!p) return;
+  try { fs.unlinkSync(p); } catch { /* missing ok */ }
+}
+
+/** Remove files no room points at (crash between write and DB update, deleted rooms). */
+export function sweepRoomIcons(inUse: Set<string>): number {
+  let n = 0;
+  let names: string[] = [];
+  try { names = fs.readdirSync(ROOM_ICON_DIR); } catch { return 0; }
+  const cutoff = Date.now() - 10 * 60_000;
+  for (const name of names) {
+    const m = /^([a-f0-9]{32})\.webp$/.exec(name);
+    if (!m || inUse.has(m[1])) continue;
+    const p = path.join(ROOM_ICON_DIR, name);
+    try { if (fs.statSync(p).mtimeMs > cutoff) continue; fs.unlinkSync(p); n++; } catch { /* ignore */ }
+  }
+  return n;
+}

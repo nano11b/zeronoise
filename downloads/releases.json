@@ -1,0 +1,24 @@
+{
+  "windows": {
+    "version": "1.2.1",
+    "file": "zeronoise-1.2.1-setup.exe",
+    "contentType": "application/octet-stream",
+    "notes": "Installs over the previous installer. Restart zeronoise when it asks.",
+    "minVersion": "1.2.0",
+    "portableFile": "zeronoise-1.2.1-win.zip",
+    "portableContentType": "application/zip"
+  },
+  "android": {
+    "version": "1.2.1",
+    "file": "zeronoise-1.2.1.apk",
+    "contentType": "application/vnd.android.package-archive",
+    "notes": "Installs over zeronoise 1.1.0 and 1.2.0. You confirm the install on the next Android screen.",
+    "minVersion": "1.1.0"
+  },
+  "ios": {
+    "version": "1.2.0",
+    "comingSoon": true,
+    "notes": "No iPhone or iPad build yet. When there is one, the app should open its store page.",
+    "storeUrl": ""
+  }
+}

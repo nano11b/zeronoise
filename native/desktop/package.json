@@ -1,0 +1,40 @@
+{
+  "name": "zeronoise",
+  "productName": "zeronoise",
+  "version": "1.2.1",
+  "private": true,
+  "description": "zeronoise for Windows. Hang out live with cam, mic, and screen share.",
+  "author": "zeronoise",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test src/nav.test.js src/mediaAccess.test.js src/updateCheck.test.js",
+    "dist:win": "electron-builder --win nsis zip --x64",
+    "dist:win:installer": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.nano11bravo.camchat",
+    "productName": "zeronoise",
+    "copyright": "zeronoise",
+    "directories": { "output": "dist-builder" },
+    "files": ["src/**/*", "assets/**/*", "config.json", "package.json"],
+    "asar": true,
+    "protocols": [{ "name": "zeronoise", "schemes": ["camchat"] }],
+    "win": {
+      "target": [{ "target": "zip", "arch": ["x64"] }],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "zeronoise",
+      "uninstallDisplayName": "zeronoise",
+      "artifactName": "zeronoise-${version}-setup.${ext}"
+    }
+  }
+}
