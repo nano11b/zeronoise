@@ -55,20 +55,24 @@ async function user(nick, width = 1280) {
   });
   if (process.env.VQ_TURN) await page.evaluateOnNewDocument(() => localStorage.setItem('camchat.relay', '1'));
   page.on('pageerror', (e) => console.log(`[${nick} pageerror]`, e.message));
-  await page.goto(URL, { waitUntil: 'networkidle0' });
-  await page.click('[data-tab="register"]');
-  await page.type('input[name="username"]', nick);
-  await page.type('input[name="email"]', `${nick.toLowerCase()}@example.com`);
-  await page.type('input[name="password"]', `pw-${nick}-secret-1`);
-  await page.type('input[name="password2"]', `pw-${nick}-secret-1`);
-  const cap = await page.$('input[name="captcha"]');
-  if (cap) {
-    const m = /What is (\d+) \+ (\d+)/.exec(await page.evaluate(() => [...document.querySelectorAll('label')].map((l) => l.textContent || '').find((t) => /What is/.test(t)) || ''));
-    if (m) await cap.type(String(+m[1] + +m[2]));
+  // the built-in CAPTCHA can change under a fast typist; retry the form a few times
+  for (let attempt = 0; ; attempt++) {
+    await page.goto(URL, { waitUntil: 'networkidle0' });
+    await page.click('[data-tab="register"]');
+    await page.type('input[name="username"]', nick);
+    await page.type('input[name="email"]', `${nick.toLowerCase()}@example.com`);
+    await page.type('input[name="password"]', `pw-${nick}-secret-1`);
+    await page.type('input[name="password2"]', `pw-${nick}-secret-1`);
+    const cap = await page.$('input[name="captcha"]');
+    if (cap) {
+      const m = /What is (\d+) \+ (\d+)/.exec(await page.evaluate(() => [...document.querySelectorAll('label')].map((l) => l.textContent || '').find((t) => /What is/.test(t)) || ''));
+      if (m) await cap.type(String(+m[1] + +m[2]));
+    }
+    await page.waitForSelector('[data-action="account-submit"]:not([disabled])');
+    await page.$eval('[data-action="account-submit"]', (b) => b.click());
+    if (await page.waitForSelector('.room-card[data-room="lobby"]', { timeout: 8000 }).then(() => true, () => false)) break;
+    if (attempt >= 3) throw new Error(`${nick} could not register`);
   }
-  await page.waitForSelector('[data-action="account-submit"]:not([disabled])');
-  await page.$eval('[data-action="account-submit"]', (b) => b.click());
-  await page.waitForSelector('.room-card[data-room="lobby"]', { timeout: 15000 });
   await page.click('.room-card[data-room="lobby"]');
   await page.waitForSelector('.composer, [data-action="composer-plus"]', { timeout: 15000 });
   return page;
