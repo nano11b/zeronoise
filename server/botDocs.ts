@@ -1,3 +1,4 @@
+import { uiThemeCss } from '../shared/uiTheme';
 import { BRAND_NAME } from '../shared/config';
 
 const UPDATED = 'October 9, 2026';
@@ -290,32 +291,34 @@ function shell(body: string): string {
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/favicon.png" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <script src="/theme-boot.js"></script>
   <style>
+    ${uiThemeCss()}
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     body {
       margin: 0; min-height: 100vh;
-      background: radial-gradient(900px 480px at 50% -10%, rgb(57 255 20 / .06), transparent 55%), #0b1220;
-      color: #e7eef8;
+      background: radial-gradient(900px 480px at 50% -10%, rgb(var(--accent-rgb) / .06), transparent 55%), var(--bg);
+      color: var(--text);
       font: 16px/1.55 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
     }
-    a { color: #39ff14; }
+    a { color: var(--accent); }
     .page { width: min(46rem, calc(100% - 32px)); margin: 0 auto; padding: 40px 0 72px; }
     .mark { height: 72px; width: auto; display: block; }
-    h1 { margin: 18px 0 8px; font-size: 28px; font-weight: 650; letter-spacing: 0; color: #e7eef8; line-height: 1.25; }
-    h2 { margin: 32px 0 8px; font-size: 20px; font-weight: 650; color: #e7eef8; }
-    h3 { margin: 22px 0 8px; font-size: 16px; font-weight: 650; color: #e7eef8; }
-    p, li, td, th { color: #e7eef8; }
-    .updated { margin: 0 0 8px; color: #93a4bb; font-size: 13px; }
+    h1 { margin: 18px 0 8px; font-size: 28px; font-weight: 650; letter-spacing: 0; color: var(--text); line-height: 1.25; }
+    h2 { margin: 32px 0 8px; font-size: 20px; font-weight: 650; color: var(--text); }
+    h3 { margin: 22px 0 8px; font-size: 16px; font-weight: 650; color: var(--text); }
+    p, li, td, th { color: var(--text); }
+    .updated { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
     ul, ol { margin: 8px 0; padding-left: 1.3em; }
     li { margin: 0 0 8px; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; background: #10192a; padding: 0 4px; border-radius: 4px; }
-    pre { background: #10192a; border: 1px solid #2c3d57; border-radius: 10px; padding: 12px 14px; overflow: auto; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; background: var(--bg-2); padding: 0 4px; border-radius: 4px; }
+    pre { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow: auto; }
     pre code { background: none; padding: 0; }
     table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 14px; }
-    th, td { text-align: left; vertical-align: top; border-bottom: 1px solid #2c3d57; padding: 8px 10px 8px 0; }
-    th { color: #93a4bb; font-weight: 650; }
-    .nav { margin: 28px 0 0; color: #93a4bb; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 8px 10px 8px 0; }
+    th { color: var(--muted); font-weight: 650; }
+    .nav { margin: 28px 0 0; color: var(--muted); font-size: 14px; }
     @media (max-width: 640px) {
       .page { padding-top: 24px; }
       h1 { font-size: 24px; }

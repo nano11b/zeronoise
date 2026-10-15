@@ -1,4 +1,5 @@
 import { isVideoQuality } from '../shared/videoQuality';
+import { isUiTheme } from '../shared/uiTheme';
 import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -244,7 +245,7 @@ export function createApp(roomList: () => unknown) {
     let deviceId = c && DEVICE_RE.test(c) ? c : typeof hdr === 'string' && DEVICE_RE.test(hdr) ? hdr : randomBytes(18).toString('base64url');
     if (deviceId !== c) setCookie(req, res, COOKIE_DID, deviceId, 2 * 365 * 86400);
     const acct = reqAccount(req);
-    const account = acct ? { ...acct, videoQuality: repo.videoQualityOf(acct.id) } : null;
+    const account = acct ? { ...acct, videoQuality: repo.videoQualityOf(acct.id), uiTheme: repo.uiThemeOf(acct.id) } : null;
     const body: MeResponse = {
       account, deviceId, google: googleEnabled, discord: discordEnabled, tiktok: tiktokEnabled, gifs: gifsEnabled, guestCamAfterMinutes: GUEST_CAM_AFTER_MINUTES,
       captchaMode, captchaSiteKey: captchaMode === 'turnstile' ? TURNSTILE_SITE_KEY : captchaMode === 'hcaptcha' ? HCAPTCHA_SITE_KEY : null,
@@ -459,6 +460,17 @@ export function createApp(roomList: () => unknown) {
     }
     live.badgesChanged(a.id);
     res.json(badgesBody(a.id));
+  });
+
+  /** body { uiTheme: 'dark' | 'dark-red' | 'dark-green' | 'dark-orange' } */
+  app.patch('/api/me/ui-theme', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const v = (req.body as { uiTheme?: unknown })?.uiTheme;
+    if (!isUiTheme(v)) return fail(res, 400, 'Pick a theme from the list');
+    repo.setUiTheme(a.id, v);
+    res.json({ ok: true, uiTheme: v });
   });
 
   /** body { videoQuality: 'auto' | 'high' | 'medium' | 'low' | 'saver' } */
@@ -2040,6 +2052,7 @@ export function createApp(roomList: () => unknown) {
     };
   };
   const botMarkdown = botApiMarkdown();
+  app.get('/docs', (_req, res) => res.redirect(302, '/docs/bots'));
   app.get('/docs/bots.md', publicDoc(botMarkdown, 'text/markdown; charset=utf-8'));
   app.get('/docs/bots', publicDoc(botApiHtml(), 'text/html; charset=utf-8'));
   app.get('/llms.txt', publicDoc(llmsTxt(PUBLIC_URL), 'text/plain; charset=utf-8'));

@@ -657,6 +657,10 @@ const MIGRATIONS: string[] = [
   ALTER TABLE rooms ADD COLUMN theme_accent TEXT;
   ALTER TABLE rooms ADD COLUMN welcome_text TEXT
   `,
+  // 38: interface theme picked by the account (null = Dark, the default).
+  `
+  ALTER TABLE users ADD COLUMN ui_theme TEXT
+  `,
 ];
 
 /**

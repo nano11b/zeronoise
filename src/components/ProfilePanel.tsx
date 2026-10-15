@@ -5,6 +5,8 @@ import { NickLabel, UserAvatar } from './UserAvatar';
 import { BadgesSection } from './Badges';
 import { BioSection, PrivacySection, PushSection } from './ProfileExtras';
 import { useInstallOffer } from '../pwa';
+import { ThemePicker } from './ThemePicker';
+import type { UiTheme } from '../../shared/uiTheme';
 
 /** Quiet, dismissible install entry: the browser prompt, or the Share -> Add to Home Screen hint on iOS. Hidden when installed. */
 function InstallItem() {
@@ -40,6 +42,14 @@ export function ProfilePanel({
   signOut?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const themeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTheme = (t: UiTheme) => {
+    onAccount({ ...account, uiTheme: t });
+    if (themeTimer.current) clearTimeout(themeTimer.current);
+    themeTimer.current = setTimeout(() => {
+      void api('/api/me/ui-theme', { uiTheme: t }, 'PATCH').catch(() => toast('Theme saved in this browser only', 'error'));
+    }, 500);
+  };
   const fileRef = useRef<HTMLInputElement>(null);
   const [bots, setBots] = useState<{ id: number; name: string; revoked: boolean }[]>([]);
   const [botName, setBotName] = useState('');
@@ -90,6 +100,7 @@ export function ProfilePanel({
           <button type="button" data-action="sign-out" onClick={signOut}>Sign out</button>
         )}
       </div>
+      <ThemePicker onSaved={saveTheme} />
       <div className="profile-preview">
         <UserAvatar nick={account.username} accountId={account.id} chatColor={account.chatColor} hasAvatar={account.hasAvatar} size={48} />
         <div>

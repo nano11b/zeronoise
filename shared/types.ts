@@ -54,6 +54,7 @@ export interface MeResponse {
     emailVerified: boolean;
     /** saved camera quality preset (null = never set; the client then uses its local / default value) */
     videoQuality?: string | null;
+    uiTheme?: string | null;
   } | null;
   deviceId: string;
   google: boolean;

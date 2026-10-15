@@ -33,6 +33,14 @@ export function videoQualityOf(id: number): string | null {
 export function setVideoQuality(id: number, v: string | null) {
   q('UPDATE users SET video_quality = ? WHERE id = ?').run(v, id);
 }
+/** Saved interface theme, or null (Dark). */
+export function uiThemeOf(id: number): string | null {
+  const r = q('SELECT ui_theme FROM users WHERE id = ?').get(id) as { ui_theme: string | null } | undefined;
+  return r?.ui_theme ?? null;
+}
+export function setUiTheme(id: number, v: string | null) {
+  q('UPDATE users SET ui_theme = ? WHERE id = ?').run(v, id);
+}
 const toAccount = (r: UserRow): Account => ({
   id: r.id, username: r.username, role: r.role, chatColor: r.chat_color ?? null, chatEffect: publicChatEffect(r.chat_effect), hasAvatar: !!r.has_avatar,
   email: r.email ?? null, emailVerified: !!r.email_verified_at,

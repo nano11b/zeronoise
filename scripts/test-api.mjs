@@ -5173,9 +5173,62 @@ try {
     ok(Object.keys(sb).every((k) => allowed.includes(k)), '/api/status has only public fields (no users, rooms, mail, env)');
     const sh = await fetch(BASE + '/status');
     const html = await sh.text();
-    ok(sh.status === 200 && /text\/html/.test(sh.headers.get('content-type') || '') && /Uptime/.test(html) && !/<script/i.test(html) && !sh.headers.get('set-cookie'), '/status page: HTML, no script, no cookie');
+    ok(sh.status === 200 && /text\/html/.test(sh.headers.get('content-type') || '') && /Uptime/.test(html) && (html.match(/<script/gi) || []).length === 1 && html.includes('<script src="/theme-boot.js"></script>') && !sh.headers.get('set-cookie'), '/status page: HTML, only the theme boot script, no cookie');
     ok(!/SESSION_SECRET|test-turn-secret|@example\.com|Nf_Owner/.test(html + JSON.stringify(sb)), 'status shows no secrets or user data');
     for (const p of [O, C]) p.s.close();
+  }
+
+  // ================= interface themes =================
+  {
+    const dbFile = path.join(DATA, 'camchat.db');
+    const { DatabaseSync } = await import('node:sqlite');
+    const d = new DatabaseSync(dbFile, { readOnly: true });
+    const ucols = d.prepare("SELECT name FROM pragma_table_info('users')").all().map((r) => r.name);
+    const uv = d.prepare('PRAGMA user_version').get().user_version;
+    d.close();
+    ok(ucols.includes('ui_theme') && uv === 38, `migration 38: users.ui_theme (user_version ${uv})`);
+    const th = await import(path.join(ROOT, 'dist/server/shared/uiTheme.js'));
+    ok(JSON.stringify(th.UI_THEMES) === JSON.stringify(['dark', 'dark-red', 'dark-green', 'dark-orange']) && th.UI_THEME_DEFAULT === 'dark', 'four themes, Dark is the default');
+    for (const t of th.UI_THEMES) {
+      const p = th.UI_PALETTES[t];
+      const pairs = [[p.text, p.bg], [p.text, p.panel], [p.text, p.panel2], [p.muted, p.bg], [p.muted, p.panel2], [p.accent, p.panel2], [p.accent2, p.panel2], [p.primaryText, p.primaryBg], [p.bg, p.accent]];
+      const worst = Math.min(...pairs.map(([a, b]) => th.contrast(a, b)));
+      ok(worst >= 4.5, `${t}: every text pair meets WCAG AA (worst ${worst.toFixed(2)}:1)`);
+    }
+    const dk = th.UI_PALETTES.dark;
+    ok(dk.bg === '#0b1220' && dk.text === '#e7eef8' && dk.accent === '#39ff14' && dk.panel === '#162033', 'Dark keeps the original colours');
+    const css = fs.readdirSync(path.join(ROOT, 'dist/client/assets')).filter((n) => n.endsWith('.css')).map((n) => fs.readFileSync(path.join(ROOT, 'dist/client/assets', n), 'utf8')).join('\n');
+    for (const t of th.UI_THEMES.filter((x) => x !== 'dark')) {
+      const p = th.UI_PALETTES[t];
+      ok(css.includes(`[data-ui-theme=${t}]`) || css.includes(`[data-ui-theme="${t}"]`), `${t} CSS block shipped`);
+      ok([p.bg, p.text, p.accent, p.primaryBg].every((c) => css.toLowerCase().includes(c)), `${t} CSS matches shared/uiTheme.ts`);
+    }
+    ok(!/rgb\(57 255 20 \//.test(fs.readFileSync(path.join(ROOT, 'src/styles.css'), 'utf8')), 'no hard-coded green glow left (all follow --accent-rgb)');
+    const boot = await fetch(BASE + '/theme-boot.js');
+    const bootJs = await boot.text();
+    ok(boot.status === 200 && /javascript/.test(boot.headers.get('content-type') || '') && bootJs.includes("localStorage.getItem('zn.uiTheme')") && bootJs.includes('data-ui-theme'), '/theme-boot.js is served');
+    for (const t of th.UI_THEMES) ok(bootJs.includes(`'${t}': '${th.UI_PALETTES[t].bg}'`), `boot script knows ${t}`);
+    const shell = await (await fetch(BASE + '/')).text();
+    const bi = shell.indexOf('<script src="/theme-boot.js"></script>');
+    ok(bi > 0 && bi < shell.indexOf('</head>') && bi < shell.indexOf('type="module"'), 'app shell runs the theme boot script in <head>, before the app (no flash)');
+    const docs = await (await fetch(BASE + '/docs/bots')).text();
+    ok(docs.includes('<script src="/theme-boot.js"></script>') && docs.includes('html[data-ui-theme="dark-red"]') && docs.indexOf('theme-boot.js') < docs.indexOf('</head>'), '/docs/bots follows the theme');
+    const st = await (await fetch(BASE + '/status')).text();
+    ok(st.includes('html[data-ui-theme="dark-orange"]') && st.includes('var(--bg)'), '/status follows the theme');
+    ok((await fetch(BASE + '/docs', { redirect: 'manual' })).headers.get('location') === '/docs/bots', '/docs goes to /docs/bots');
+    // per-account choice
+    const anon = browser(); await anon.boot();
+    ok((await anon.req('/api/me/ui-theme', { uiTheme: 'dark-red' }, 'PATCH')).status === 401, 'signed-out visitors cannot save on the server (localStorage only)');
+    const u = browser(`100.64.91.1`); await u.boot();
+    await register(u, 'Theme_User', 'theme-user-pass-99');
+    ok((await u.req('/api/me')).json.account?.uiTheme === null, 'new account: no theme saved (keeps the browser choice)');
+    ok((await u.req('/api/me/ui-theme', { uiTheme: 'pink' }, 'PATCH')).status === 400, 'unknown theme refused');
+    ok((await u.req('/api/me/ui-theme', { uiTheme: '<script>' }, 'PATCH')).status === 400, 'junk refused');
+    ok((await u.req('/api/me/ui-theme', { uiTheme: 'dark-green' }, 'PATCH')).json.uiTheme === 'dark-green', 'account saves Dark/Green');
+    ok((await u.req('/api/me')).json.account?.uiTheme === 'dark-green', 'saved theme comes back with the account');
+    ok((await u.req('/api/me/ui-theme', { uiTheme: 'dark' }, 'PATCH')).json.ok && (await u.req('/api/me')).json.account?.uiTheme === 'dark', 'switching back to Dark is saved too');
+    const pub = await u.req('/api/users/Theme_User/profile');
+    ok(!JSON.stringify(pub.json).includes('uiTheme'), 'the theme is private (not in public profiles)');
   }
 
 } catch (e) {

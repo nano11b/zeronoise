@@ -1,4 +1,6 @@
 import { badgeLabel, clientTimeZone } from './components/Badges';
+import { isUiTheme } from '../shared/uiTheme';
+import { applyUiTheme, currentUiTheme } from './uiTheme';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, EventReminder, MeResponse, PrivateMessage, Role, RoomState, UserInfo } from '../shared/types';
 import { BRAND_NAME } from '../shared/config';
@@ -38,6 +40,11 @@ export type Account = NonNullable<MeResponse['account']>;
 export default function App() {
   const [boot, setBoot] = useState<MeResponse | null>(null);
   const [account, setAccount] = useState<Account | null>(null);
+  // The account's saved interface theme wins over this browser's (null = never picked: keep the local choice).
+  useEffect(() => {
+    const t = account?.uiTheme;
+    if (isUiTheme(t) && t !== currentUiTheme()) applyUiTheme(t);
+  }, [account?.id, account?.uiTheme]);
   const [me, setMe] = useState<UserInfo | null>(null);
   const [room, setRoom] = useState<RoomState | null>(null);
   /** Bumped on socket reconnect so Room remounts (fresh mesh + history). Same room id would otherwise keep stale peers. */

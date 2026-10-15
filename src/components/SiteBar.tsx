@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { ThemePicker } from './ThemePicker';
 import type { UserInfo } from '../../shared/types';
 import { placeFixedBelow, useDismiss } from '../dropdown';
 import type { Account } from '../App';
@@ -95,6 +96,7 @@ export function SiteBar({
               <a role="menuitem" href="/download" data-action="get-app-menu">Get the app</a>
               <button type="button" role="menuitem" onClick={() => { setStatusOpen(false); wantAccount('signin'); }}>Sign in</button>
               <button type="button" role="menuitem" onClick={() => { setStatusOpen(false); wantAccount('register'); }}>Register</button>
+              <ThemePicker />
             </div>
           )}
         </div>
