@@ -31,12 +31,13 @@ eval "$(ext rollback)"
 setup(){ rm -rf opt data log; mkdir -p opt data/upgrade-backups
   for v in 20261010-234939 20261014-230333; do mkdir -p $APP.bak-$v; echo "{}" > $APP.bak-$v/package.json; echo $v > $APP.bak-$v/ver; done
   mkdir -p $APP; echo '{}' > $APP/package.json; echo new > $APP/ver
-  echo newdb > data/camchat.db; echo wal > data/camchat.db-wal; echo olddb > data/upgrade-backups/camchat.db.pre-20261014-230333; }
+  echo newdb > data/camchat.db; echo wal > data/camchat.db-wal; echo olddb > data/upgrade-backups/camchat.db.pre-20261014-230333; echo oldwal > data/upgrade-backups/camchat.db.pre-20261014-230333-wal; }
 setup; (do_rollback 0) > out 2>&1
 ok "rollback picks newest bak" "[ \"\$(cat $APP/ver)\" = 20261014-230333 ]"
 ok "db restored" "[ \"\$(cat data/camchat.db)\" = olddb ]"
 ok "current app kept" "[ \"\$(cat opt/camchat.rolledback-*/ver)\" = new ]"
 ok "current db kept" "[ \"\$(cat data/upgrade-backups/camchat.db.rolledback-*[0-9])\" = newdb ] && [ -f data/upgrade-backups/camchat.db.rolledback-*-wal ]"
+ok "db wal restored too" "[ \"\$(cat data/camchat.db-wal)\" = oldwal ]"
 ok "db backup copied not moved" "[ -f data/upgrade-backups/camchat.db.pre-20261014-230333 ]"
 ok "service stop/start" "grep -q 'stop x' log && grep -q 'start x' log"
 ok "older bak untouched" "[ -d $APP.bak-20261010-234939 ]"
@@ -45,6 +46,6 @@ ok "keep-db code only" "[ \"\$(cat data/camchat.db)\" = newdb ] && [ \"\$(cat $A
 setup; ROLLBACK_TO=$APP.bak-20261010-234939 ; (do_rollback 0) > out 2>&1; unset ROLLBACK_TO
 ok "explicit target w/o db backup keeps db" "[ \"\$(cat $APP/ver)\" = 20261010-234939 ] && [ \"\$(cat data/camchat.db)\" = newdb ] && grep -q 'no database copy' out"
 setup; HEALTH=1; (do_rollback 0) > out 2>&1 || true; HEALTH=0
-ok "failed health restores everything" "[ \"\$(cat $APP/ver)\" = new ] && [ \"\$(cat data/camchat.db)\" = newdb ] && [ -f data/camchat.db-wal ] && [ -d $APP.bak-20261014-230333 ] && [ -f data/upgrade-backups/camchat.db.pre-20261014-230333 ]"
+ok "failed health restores everything" "[ \"\$(cat $APP/ver)\" = new ] && [ \"\$(cat data/camchat.db)\" = newdb ] && [ "$(cat data/camchat.db-wal)" = wal ] && [ -d $APP.bak-20261014-230333 ] && [ -f data/upgrade-backups/camchat.db.pre-20261014-230333 ]"
 rm -rf opt/camchat.bak-*; ok "no backup dies" "! (do_rollback 0) >/dev/null 2>&1"
 echo "$pass passed, $fail failed"; [ "$fail" = 0 ]

@@ -193,7 +193,91 @@ async function sweep(width) {
   o = await click(owner, '[data-action="admin"]');
   await snap(owner, width, '24-mod-panel', o);
   if (o) { const r = await clickText(owner, /^Reports/); await snap(owner, width, '25-mod-queue', r || !!(await owner.$('[data-testid="modq-tab-badge"], .modq, [data-modq]'))); }
-  await owner.browserContext().close(); await guest.browserContext().close();
+  // ---- nine features ----
+  await closeAll(owner);
+  await owner.goto(`${BASE}/r/${room}`, { waitUntil: 'networkidle0' }).catch(() => {}); await sleep(800);
+  if (!(await owner.$('.chat-form input, .composer'))) { await click(owner, `.room-card[data-room="${room}"]`); await owner.waitForSelector('.chat-form input, .composer', { timeout: 15000 }); }
+  await sleep(600);
+  const sendAs = async (page, text) => { const i = await page.$('.chat-main .chat-form input, .chat-form input'); if (!i) return false; await i.click(); await i.type(text); await page.keyboard.press('Enter'); await sleep(900); return true; };
+  await sendAs(guest, 'kart night is friday');
+  await sleep(1200);
+  await sendAs(guest, 'who is bringing snacks');
+  await sleep(800);
+  // threads: open from a message, reply, count shows, panel fits the phone
+  o = await owner.evaluate(() => { const m = [...document.querySelectorAll('.msg')].find((x) => /kart night/.test(x.textContent || '')); const b = m?.querySelector('[data-action="reply-thread"]'); if (b) { b.click(); return true; } return false; });
+  await sleep(700);
+  if (o) { const ti = await owner.$('.thread-panel .chat-form input'); if (ti) { await ti.type('count me in'); await owner.keyboard.press('Enter'); await sleep(900); } }
+  await snap(owner, width, '26-thread-panel', o && !!(await owner.$('.thread-panel')));
+  o = await click(owner, '[data-action="close-thread"]');
+  await sleep(500);
+  const cnt = await guest.evaluate(() => [...document.querySelectorAll('[data-action="open-thread"]')].map((b) => b.textContent).join('|'));
+  ok(/1 reply/.test(cnt), `${width}px thread reply count shows for others (${cnt || 'none'})`);
+  await snap(guest, width, '27-thread-reply-count', /1 reply/.test(cnt));
+  o = await click(guest, '[data-action="open-thread"]');
+  await snap(guest, width, '27b-thread-guest-open', o && !!(await guest.$('.thread-panel')));
+  await click(guest, '[data-action="close-thread"]');
+  // search with filters
+  await click(owner, '[data-action="collapse-panel"]');
+  o = await click(owner, '[data-action="tab-search"]');
+  if (o) {
+    const q = await owner.$('[data-field="search"]');
+    if (q) await q.type('kart');
+    const f = await owner.$('[data-field="search-from"]'); if (f) await f.type(`Ph_Pal${width}`);
+    await click(owner, '[data-action="search-go"]'); await sleep(800);
+  }
+  const hits = await owner.evaluate(() => document.querySelectorAll('.side-body .search-hit, .side-body [data-hit]').length);
+  await snap(owner, width, '28-search-filters', o);
+  o = await click(owner, '[data-action="search-scope-whispers"]');
+  await snap(owner, width, '29-search-whispers', o);
+  await closeAll(owner);
+  if (await owner.$('.drawer-backdrop')) await owner.$eval('.drawer-backdrop', (e) => e.click());
+  // notifications
+  await click(owner, '[data-action="more"]');
+  o = await click(owner, '[data-action="notify"]');
+  if (o) { await click(owner, '[data-notify-level="all"]'); await click(owner, '[data-action="quiet-toggle"]'); }
+  await snap(owner, width, '30-notifications', o && !!(await owner.$('[data-notify-level]')));
+  if (o) { await click(owner, '[data-action="notify-save"]'); await sleep(600); }
+  await closeAll(owner);
+  // room theme (owner settings in Room info)
+  await click(owner, '[data-action="collapse-panel"]');
+  await click(owner, '[data-action="tab-info"]');
+  o = !!(await owner.$('[data-action="theme-save"]'));
+  if (o) {
+    await owner.$eval('[data-action="theme-save"]', (e) => e.scrollIntoView({ block: 'center' }));
+    const t = await owner.$('[data-action="accent-toggle"]'); if (t && !(await t.evaluate((e) => e.checked))) await t.evaluate((e) => e.click());
+    await sleep(200);
+    const ta = await owner.$('[data-field="welcome"]'); if (ta) { await ta.click({ clickCount: 3 }); await ta.type('Welcome to kart night! Read the pins before you race.'); }
+  }
+  await snap(owner, width, '31-theme-settings', o);
+  if (o) { await click(owner, '[data-action="theme-save"]'); await sleep(900); }
+  await closeAll(owner);
+  if (await owner.$('.drawer-backdrop')) await owner.$eval('.drawer-backdrop', (e) => e.click());
+  await sleep(500);
+  const welcome = await guest.waitForSelector('[data-room-welcome]', { timeout: 4000 }).then(() => true, () => false);
+  ok(welcome, `${width}px pinned welcome reaches the room live`);
+  await snap(guest, width, '32-theme-welcome-guest', welcome);
+  const accent = await guest.evaluate(() => !!document.querySelector('[data-accent]'));
+  ok(accent, `${width}px room accent applied`);
+  // stale tile: guest goes on cam, then drops; owner's strip collapses right away
+  o = await click(guest, '[data-action="cam"]');
+  await sleep(2500);
+  const tilesOn = await owner.evaluate(() => document.querySelectorAll('.video-tile, .tile').length);
+  await snap(owner, width, '33-cam-tile-live', o && tilesOn > 0);
+  await guest.browserContext().close();
+  await sleep(900);
+  const tilesOff = await owner.evaluate(() => document.querySelectorAll('.video-tile, .tile').length);
+  ok(tilesOff < tilesOn, `${width}px a dropped camera tile goes at once (${tilesOn} -> ${tilesOff}, within the 1.5s grace)`);
+  await snap(owner, width, '34-cam-tile-gone', tilesOff < tilesOn);
+  // mod queue with bot actions
+  o = await click(owner, '[data-action="admin"]');
+  if (o) await clickText(owner, /^Reports/);
+  await sleep(600);
+  await snap(owner, width, '35-modq-bot-actions', o && !!(await owner.$('[data-panel="bot-actions"]')));
+  await closeAll(owner);
+  // public status page
+  await owner.goto(`${BASE}/status`, { waitUntil: 'networkidle0' });
+  await snap(owner, width, '36-status-page', /Uptime/.test(await owner.content()));
+  await owner.browserContext().close();
 }
 try {
   for (const w of WIDTHS) { await sweep(w); await sleep(2000); }

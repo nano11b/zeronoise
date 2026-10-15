@@ -61,9 +61,10 @@ export function RoomThemeSettings({ roomId, theme, toast }: { roomId: string; th
         </div>
       </div>
       <p className="muted small">Wide image, cropped to 1200×300.</p>
-      <label className="check-row"><input type="checkbox" checked={useAccent} onChange={(e) => setUseAccent(e.target.checked)} data-action="accent-toggle" /> <span>Accent color</span>
+      <div className="theme-accent-row">
+        <label><input type="checkbox" checked={useAccent} onChange={(e) => setUseAccent(e.target.checked)} data-action="accent-toggle" /> Accent color</label>
         <input type="color" value={accent} disabled={!useAccent} onChange={(e) => setAccent(e.target.value)} aria-label="Accent color" data-field="accent" />
-      </label>
+      </div>
       <label className="field"><span>Welcome message (pinned at the top)</span>
         <textarea rows={3} maxLength={THEME_WELCOME_MAX} value={welcome} onChange={(e) => setWelcome(e.target.value)} data-field="welcome" />
       </label>

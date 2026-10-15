@@ -295,8 +295,10 @@ try {
   const bobMsg = await carol.waitForFunction(() => [...document.querySelectorAll('.msg[data-msg]')].find((m) => m.textContent.includes('video looks great'))?.dataset.msg, { timeout: 5000 }).then((h) => h.jsonValue());
   await carol.hover(`.msg[data-msg="${bobMsg}"]`);
   await carol.click(`.msg[data-msg="${bobMsg}"] [data-action="report-msg"]`);
+  await carol.waitForSelector('[data-testid="report-dialog"]');
+  await carol.$eval('[data-testid="report-dialog"] input[name="report-category"]', (e) => e.click());
   await carol.type('.modal textarea', 'testing the report button');
-  await carol.click('[data-action="dialog-confirm"]');
+  await carol.click('[data-action="report-submit"]');
   ok(await carol.waitForFunction(() => [...document.querySelectorAll('.toast')].some((t) => t.textContent.includes('Report sent')), { timeout: 5000 }).then(() => true, () => false), 'Carol reports a message from the chat');
 
   if (ADMIN) {

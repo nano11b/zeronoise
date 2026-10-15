@@ -206,7 +206,8 @@ do_rollback() {
       if [ -e "$DATA/$f" ]; then mv "$DATA/$f" "$DATA/upgrade-backups/${f/camchat.db/camchat.db.rolledback-$now}"; fi
     done
     cp -a "$dbbak" "$DATA/camchat.db"
-    chown camchat:camchat "$DATA/camchat.db"
+    for f in wal shm; do if [ -f "$dbbak-$f" ]; then cp -a "$dbbak-$f" "$DATA/camchat.db-$f"; fi; done
+    chown camchat:camchat "$DATA"/camchat.db*
   fi
   systemctl start "$UNIT"
   if health_ok; then
@@ -219,7 +220,9 @@ do_rollback() {
   systemctl stop "$UNIT" || true
   mv "$APP" "$target"; mv "$cur" "$APP"
   if [ -n "$dbbak" ]; then
-    mv "$DATA/camchat.db" "$DATA/upgrade-backups/camchat.db.failedrollback-$now"
+    for f in camchat.db camchat.db-wal camchat.db-shm; do
+      if [ -e "$DATA/$f" ]; then mv "$DATA/$f" "$DATA/upgrade-backups/${f/camchat.db/camchat.db.failedrollback-$now}"; fi
+    done
     for f in camchat.db camchat.db-wal camchat.db-shm; do
       if [ -e "$DATA/upgrade-backups/${f/camchat.db/camchat.db.rolledback-$now}" ]; then mv "$DATA/upgrade-backups/${f/camchat.db/camchat.db.rolledback-$now}" "$DATA/$f"; fi
     done
@@ -292,10 +295,11 @@ say "6/7 Swapping in the new version (backup of the old one: $BACKUP)"
 systemctl stop "$UNIT"
 install -d -o camchat -g camchat -m 750 "$DATA/upgrade-backups"
 if [ -f "$DATA/camchat.db" ]; then
-  # service is stopped, so a plain copy is consistent; fold the WAL in first if sqlite3 is around
-  sudo -u camchat node -e 'const {DatabaseSync}=require("node:sqlite");const d=new DatabaseSync(process.argv[1]);d.exec("PRAGMA wal_checkpoint(TRUNCATE)");d.close()' "$DATA/camchat.db" 2>/dev/null || true
+  # the service is stopped; fold the WAL into the main file so the copy is complete (recent writes live in the WAL)
+  sudo -u camchat node -e 'const {DatabaseSync}=require("node:sqlite");const d=new DatabaseSync(process.argv[1]);d.exec("PRAGMA wal_checkpoint(TRUNCATE)");d.close()' "$DATA/camchat.db" 2>/dev/null \
+    || echo "   note: WAL checkpoint failed; copying the -wal/-shm files alongside"
   cp -a "$DATA/camchat.db" "$DATA/upgrade-backups/camchat.db.pre-$TS"
-  for f in camchat.db-wal camchat.db-shm; do if [ -s "$DATA/$f" ]; then cp -a "$DATA/$f" "$DATA/upgrade-backups/${f/camchat.db/camchat.db.pre-$TS}"; fi; done
+  for f in wal shm; do if [ -s "$DATA/camchat.db-$f" ]; then cp -a "$DATA/camchat.db-$f" "$DATA/upgrade-backups/camchat.db.pre-$TS-$f"; fi; done
   echo "   database copied to $DATA/upgrade-backups/camchat.db.pre-$TS"
 fi
 mv "$APP" "$BACKUP"

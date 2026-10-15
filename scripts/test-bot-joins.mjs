@@ -201,7 +201,7 @@ try {
   await startServer();
   const h0 = await fetch(BASE + '/api/health').then((r) => r.json());
   ok('package' in h0 && 'commit' in h0 && h0.release && typeof h0.build === 'string', '/api/health reports package + commit fields (null in a dev checkout)');
-  ok((await dbq('PRAGMA user_version'))[0].user_version === 36, 'fresh database is at user_version 36');
+  ok((await dbq('PRAGMA user_version'))[0].user_version === 37, 'fresh database is at user_version 37');
   const owner = browser(); await owner.boot();
   ok((await register(owner, 'Join_Owner', 'join-owner-password')).json.ok, 'owner registered');
   const so = track(await owner.connect());

@@ -2191,3 +2191,7 @@ html, body { overscroll-behavior: none; }
 @media (max-width: 480px) { .room-banner { aspect-ratio: 3 / 1; } }
 .bot-actions { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 .bot-action-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; overflow-wrap: anywhere; }
+.theme-accent-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+.theme-accent-row label { display: inline-flex; align-items: center; gap: 6px; }
+.theme-accent-row input[type="color"] { width: 3rem; height: 2rem; padding: 2px; border-radius: 6px; flex: none; }
+.theme-accent-row input[type="color"]:disabled { opacity: .4; }
