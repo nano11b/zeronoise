@@ -3,6 +3,7 @@
 // Alice, Bob and Carol each register (email required). Alice and Bob publish cam and mic; Carol watches.
 // Optional: ADMIN_USERNAME=<name listed in the server's ADMIN_USERNAMES> adds a moderator pass
 // (force cam off from the user menu) and screenshots the admin panel.
+import path from 'node:path';
 import puppeteer from 'puppeteer-core';
 
 const URL = process.argv[2] || 'http://localhost:3000';
