@@ -47,6 +47,9 @@ import { previewImage } from './linkPreview';
 import { maskWords } from './moderation';
 import { BIO_MAX, cleanBio } from '../shared/bio';
 import { ROOM_THUMB_ID_RE, ROOM_THUMB_MAX_BYTES, roomThumbUrl } from '../shared/roomThumbs';
+import { ROOM_BANNER_H, ROOM_BANNER_W, roomBannerUrl } from '../shared/theme';
+import * as repo4 from './repo4';
+import { statusHtml, type PublicStatus } from './status';
 import { deleteRoomThumb, newThumbId, processRoomThumb, roomThumbExists, roomThumbPath, writeRoomThumb } from './roomThumbs';
 import { ROOM_ICON_ID_RE, ROOM_ICON_MAX_BYTES, roomIconUrl } from '../shared/roomIcons';
 import { deleteRoomIcon, newIconId, processRoomIcon, roomIconExists, roomIconPath, writeRoomIcon } from './roomIcons';
@@ -210,6 +213,28 @@ export function createApp(roomList: () => unknown) {
       throw new Error('test sync route failure');
     });
   }
+  const publicStatus = (): PublicStatus => {
+    let db = true;
+    try { repo.listActiveBans(); } catch { db = false; }
+    const b = backupHealth();
+    return {
+      ok: db, db, uptimeSec: Math.floor(process.uptime()), startedAt: PROCESS_STARTED_AT,
+      package: live.release.packageSha256, commit: live.release.commit, releasedAt: live.release.releasedAt,
+      lastBackupAt: b.lastBackupAt ?? null, lastBackupOk: b.lastBackupOk ?? null, checkedAt: Date.now(),
+    };
+  };
+  app.get('/api/status', (_req, res) => {
+    const st = publicStatus();
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(st.ok ? 200 : 503).json(st);
+  });
+  app.get('/status', (_req, res) => {
+    const st = publicStatus();
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(st.ok ? 200 : 503).send(statusHtml(st));
+  });
   app.get('/api/rooms', (_req, res) => res.json({ rooms: roomList() }));
 
   /** Session probe + device id bootstrap (random id kept in localStorage AND an httpOnly cookie). */
@@ -552,6 +577,64 @@ export function createApp(roomList: () => unknown) {
     live.roomThumbChanged(g.roomId, null, g.a.username);
     repo.logAction(g.a.username, g.a.id, 'room-thumb', null, g.roomId, 'removed');
     res.json({ ok: true, thumbUrl: null });
+  });
+  // ---- room banner (theme), same rules as the thumbnail; stored next to thumbnails with its own random id ----
+  const bannerGate = (req: Request, res: Response) => {
+    const a = reqAccount(req);
+    if (!a) { fail(res, 401, 'Sign in first'); return null; }
+    const roomId = String(req.params.roomId ?? '');
+    const info = live.roomBannerInfo(roomId);
+    if (!info) { fail(res, 404, 'Room not found'); return null; }
+    if (info.isPrivate) { fail(res, 403, 'Private calls cannot have a banner'); return null; }
+    if (!isStaffRole(a.role) && (info.ownerUserId == null || info.ownerUserId !== a.id)) { fail(res, 403, 'Only the room owner can change the banner'); return null; }
+    if (!thumbLimiter.take(`${clientIp(req)}|${a.id}`)) { fail(res, 429, 'Too many image changes. Try again later.'); return null; }
+    return { a, roomId, info };
+  };
+  app.post('/api/rooms/:roomId/banner', (req, res) => {
+    const g = bannerGate(req, res);
+    if (!g) return;
+    thumbUpload(req, res, async (err) => {
+      if (err) {
+        const msg = err instanceof Error ? err.message : 'Upload failed';
+        if (/File too large|LIMIT_FILE_SIZE/i.test(msg)) return fail(res, 400, 'Image too large (max 5 MB)');
+        return fail(res, 400, msg.startsWith('Use ') ? msg : 'Upload failed');
+      }
+      const file = (req as Request & { file?: Express.Multer.File }).file;
+      if (!file?.buffer?.length) return fail(res, 400, 'Choose an image file');
+      try {
+        const webp = await processRoomThumb(file.buffer, ROOM_BANNER_W, ROOM_BANNER_H);
+        const cur = live.roomBannerInfo(g.roomId);
+        if (!cur) return fail(res, 404, 'Room not found');
+        const id = newThumbId();
+        writeRoomThumb(id, webp);
+        live.roomBannerChanged(g.roomId, id, g.a.username);
+        deleteRoomThumb(cur.bannerId);
+        repo.logAction(g.a.username, g.a.id, 'room-banner', null, g.roomId, 'set');
+        res.json({ ok: true, bannerUrl: roomBannerUrl(id) });
+      } catch (e) {
+        return fail(res, 400, (e as Error).message || 'Could not process image');
+      }
+    });
+  });
+  app.delete('/api/rooms/:roomId/banner', (req, res) => {
+    const g = bannerGate(req, res);
+    if (!g) return;
+    if (!g.info.bannerId) return res.json({ ok: true, bannerUrl: null });
+    live.roomBannerChanged(g.roomId, null, g.a.username);
+    deleteRoomThumb(g.info.bannerId);
+    repo.logAction(g.a.username, g.a.id, 'room-banner', null, g.roomId, 'removed');
+    res.json({ ok: true, bannerUrl: null });
+  });
+  app.get('/api/room-banners/:id.webp', (req, res) => {
+    const id = String(req.params.id);
+    if (!ROOM_THUMB_ID_RE.test(id)) return res.status(404).end();
+    const row = repo4.roomByBannerId(id);
+    if (!row || row.is_private || !roomThumbExists(id)) return res.status(404).end();
+    res.setHeader('Content-Type', 'image/webp');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'");
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.sendFile(roomThumbPath(id)!);
   });
   /** Unguessable id; only rooms listed in the lobby (never private calls) are served. A new id per upload, so cache forever. */
   app.get('/api/room-thumbs/:id.webp', (req, res) => {

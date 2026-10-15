@@ -7,6 +7,8 @@ export type Role = 'admin' | 'moderator' | 'user' | 'guest';
 
 export interface UserInfo {
   id: string; // socket id
+  /** connection dropped; the seat is kept for the reconnect grace period. Treat cam/screen as off. */
+  away?: boolean;
   nick: string;
   cam: boolean;
   mic: boolean;
@@ -166,6 +168,8 @@ export interface RoomState {
   category?: string | null;
   tags?: string[];
   announcement?: RoomAnnouncement | null;
+  /** owner-set banner, accent color and welcome message */
+  theme?: import('./theme').RoomThemeInfo;
   emotes?: RoomEmote[];
   /** room members currently listening to Labs FM */
   radioHere?: number;
@@ -320,12 +324,22 @@ export interface ClientToServer {
   'blocks:get': (ack: Ack<{ usernames: string[] }>) => void;
   'blocks:set': (p: { usernames: string[] }, ack: Ack<{ usernames: string[] }>) => void;
   /** room owners / room mods (and staff): reports about this room's messages; reporter identity only for site staff */
+  /** Recent moderator-bot actions: site staff see all rooms (scope "site"); room owners / room mods see their room. */
+  'modq:botlog': (p: { scope: 'site' | 'room' }, ack: Ack<{ actions: { id: number; ts: number; actor: string; action: string; target: string | null; roomId: string | null; details: string | null }[] }>) => void;
   'modq:room:list': (p: { status?: QueueBucket; sort?: QueueSort }, ack: Ack<{ items: QueueItem[]; counts: QueueCounts }>) => void;
   'modq:room:claim': (p: { reportId: number; release?: boolean }, ack: Ack) => void;
   'modq:room:act': (p: { reportId: number; action: QueueAction; minutes?: number | null; reason?: string; note?: string }, ack: Ack<{ resolution: string }>) => void;
   // ---- batch 2 ----
   /** Search this room's history (registered members of the room only). */
-  'chat:search': (p: { q: string; offset?: number }, ack: Ack<{ hits: SearchHit[]; hasMore: boolean; offset: number }>) => void;
+  /** Room history search. `from` = a nick (exact, case-insensitive); after / before = ms timestamps. */
+  'chat:search': (p: { q: string; offset?: number; from?: string; after?: number; before?: number }, ack: Ack<{ hits: SearchHit[]; hasMore: boolean; offset: number }>) => void;
+  /** Search whisper lines you received or sent in this room (memory only, since the last restart). */
+  /** Your notification level for the room you are in, plus your push quiet hours (registered users). */
+  'notify:get': (ack: Ack<{ level: import('./notify').NotifyLevel; quiet: import('./notify').QuietHours | null }>) => void;
+  'notify:set': (p: { level: import('./notify').NotifyLevel }, ack: Ack<{ level: import('./notify').NotifyLevel }>) => void;
+  /** Quiet hours for push (start === end, or null, turns them off). */
+  'notify:quiet': (p: { start: number; end: number; tz: string } | null, ack: Ack<{ quiet: import('./notify').QuietHours | null }>) => void;
+  'whisper:search': (p: { q: string; from?: string; after?: number; before?: number }, ack: Ack<{ hits: WhisperMessage[] }>) => void;
   /** Top-level lines around one message (jump to a search hit or bookmark). */
   'chat:context': (p: { messageId: string }, ack: Ack<{ messages: ChatMessage[]; anchorId: string; threadId?: string }>) => void;
   'bookmark:toggle': (p: { messageId: string; on?: boolean }, ack: Ack<{ bookmarked: boolean }>) => void;
@@ -345,6 +359,8 @@ export interface ClientToServer {
   'poll:close': (p: { pollId: string }, ack: Ack<{ poll: PollInfo }>) => void;
   // ---- batch 3 ----
   'room:meta': (p: { category?: string | null; tags?: string[] | string }, ack: Ack<{ category: string | null; tags: string[] }>) => void;
+  /** room owner (or site staff): accent color and welcome message. null clears; omitted keeps. */
+  'room:theme:set': (p: { accent?: string | null; welcome?: string | null }, ack: Ack<{ theme: import('./theme').RoomThemeInfo }>) => void;
   'announce:set': (p: { text: string }, ack: Ack<{ announcement: RoomAnnouncement | null }>) => void;
   'schedule:list': (ack: Ack<{ schedules: RoomScheduleInfo[] }>) => void;
   'schedule:create': (p: { text: string; at: number; repeat: string; tz?: string }, ack: Ack<{ schedule: RoomScheduleInfo }>) => void;
@@ -372,6 +388,7 @@ export interface ServerToClient {
   'room:inviteSettings': (p: { modsCanInvite: boolean; by: string }) => void;
   // ---- batch 3 ----
   'room:meta': (p: { category: string | null; tags: string[] }) => void;
+  'room:theme': (p: { theme: import('./theme').RoomThemeInfo }) => void;
   'room:announcement': (p: { announcement: RoomAnnouncement | null }) => void;
   'room:schedules': (p: { schedules: RoomScheduleInfo[] }) => void;
   'room:emotes': (p: { emotes: RoomEmote[] }) => void;

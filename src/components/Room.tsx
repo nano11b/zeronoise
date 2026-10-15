@@ -10,6 +10,9 @@ import { call, getIceServers, socket } from '../socket';
 import { fmtTime, unreadBadge } from '../util';
 import { storedDeviceId } from '../api';
 import { BAN_DURATIONS, Dialog, DialogSpec } from './Dialog';
+import { NotifyDialog } from './NotifyDialog';
+import { RoomThemeHeader, RoomThemeSettings } from './RoomTheme';
+import type { RoomThemeInfo } from '../../shared/theme';
 import type { PmTarget } from './PmDock';
 import { SiteBar } from './SiteBar';
 import { RoleTag } from './RoleTag';
@@ -168,6 +171,10 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const [category, setCategory] = useState<string | null>(initial.category ?? null);
   const [tags, setTags] = useState<string[]>(initial.tags ?? []);
   const [announcement, setAnnouncement] = useState<RoomAnnouncement | null>(initial.announcement ?? null);
+  const [theme, setTheme] = useState<RoomThemeInfo | null>(initial.theme ?? null);
+  const [notifyOpen, setNotifyOpen] = useState(false);
+  const welcomeKey = `zn.welcomeHidden.${initial.id}`;
+  const [welcomeHidden, setWelcomeHidden] = useState<string | null>(() => { try { return localStorage.getItem(welcomeKey); } catch { return null; } });
   const [emotes, setEmotes] = useState<RoomEmote[]>(initial.emotes ?? []);
   const emoteLookup = useMemo(() => emoteMap(emotes), [emotes]);
   const [schedules, setSchedules] = useState<RoomScheduleInfo[]>([]);
@@ -801,6 +808,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
     socket.on('room:inviteSettings', onInviteSettings);
     const onMeta = (p: { category: string | null; tags: string[] }) => { setCategory(p.category); setTags(p.tags); };
     const onAnn = (p: { announcement: RoomAnnouncement | null }) => setAnnouncement(p.announcement);
+    const onTheme = (p: { theme: RoomThemeInfo }) => setTheme(p.theme);
+    socket.on('room:theme', onTheme);
     const onSched = (p: { schedules: RoomScheduleInfo[] }) => setSchedules(p.schedules);
     const onEmotes = (p: { emotes: RoomEmote[] }) => setEmotes(p.emotes);
     const onRadioRoom = (p: { listening: number }) => setRadioHere(p.listening);
@@ -855,7 +864,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
       socket.off('room:thumb', onThumb);
       socket.off('room:icon', onIcon);
       socket.off('room:inviteSettings', onInviteSettings);
-      socket.off('room:meta', onMeta); socket.off('room:announcement', onAnn); socket.off('room:schedules', onSched);
+      socket.off('room:meta', onMeta); socket.off('room:announcement', onAnn); socket.off('room:theme', onTheme); socket.off('room:schedules', onSched);
       socket.off('room:emotes', onEmotes); socket.off('radio:room', onRadioRoom);
       socket.off('user:joined', onJoined);
       socket.off('user:left', onLeft);
@@ -1262,7 +1271,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const listedSelf = users.find((u) => u.id === me.id);
   const selfUser = { ...(listedSelf ?? me), cam, mic, screen };
   const broadcasters = useMemo(
-    () => users.filter((u) => !u.modBot && (u.cam || u.mic || u.screen) && !isIgnored(u.nick)).sort((a, b) => Number(b.id === me.id) - Number(a.id === me.id)),
+    () => users.filter((u) => !u.modBot && !u.away && (u.cam || u.mic || u.screen) && !isIgnored(u.nick)).sort((a, b) => Number(b.id === me.id) - Number(a.id === me.id)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [users, ignored, me.id],
   );
@@ -1580,7 +1589,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const pwRef = useRef<HTMLFormElement>(null);
   useModal(botsRef, () => setBotsOpen(false), botsOpen);
   useModal(pwRef, () => setPwOpen(false), pwOpen);
-  const videoLive = cam || screen || broadcasters.some((u) => u.id !== me.id && !!(u.cam || u.screen));
+  const videoLive = cam || screen || broadcasters.some((u) => u.id !== me.id && !u.away && !!(u.cam || u.screen));
   const stripOpen = boardOpen || watchOpen || (videoLive && !stripCollapsed);
   const audienceLabel = 'Stage mode: only speakers can use camera and mic. Raise your hand to ask.';
   const mediaControls = (
@@ -1739,7 +1748,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
 
   return (
     <EmoteContext.Provider value={emoteLookup}>
-    <div className={`room shell${peopleOpen ? ' people-open' : ''}${railOpen ? ' rail-open' : ''}${panelOpen ? ' panel-open' : ''}${panelCollapsed ? ' panel-collapsed' : ''}`} onClick={() => { if (menuFor) setMenuFor(null); if (blockFor) setBlockFor(null); if (peopleOpen) setPeopleOpen(false); if (moreOpen) setMoreOpen(false); if (plusOpen) setPlusOpen(false); if (railOpen) setRailOpen(false); if (panelOpen) setPanelOpen(false); }}>
+    <div className={`room shell${peopleOpen ? ' people-open' : ''}${railOpen ? ' rail-open' : ''}${panelOpen ? ' panel-open' : ''}${panelCollapsed ? ' panel-collapsed' : ''}`} data-accent={theme?.accent ? '1' : undefined} style={theme?.accent ? ({ ['--room-accent' as string]: theme.accent } as CSSProperties) : undefined} onClick={() => { if (menuFor) setMenuFor(null); if (blockFor) setBlockFor(null); if (peopleOpen) setPeopleOpen(false); if (moreOpen) setMoreOpen(false); if (plusOpen) setPlusOpen(false); if (railOpen) setRailOpen(false); if (panelOpen) setPanelOpen(false); }}>
       <SiteBar me={me} account={account} onAccount={onAccount} toast={toast} signOut={signOut} openAdmin={openAdmin} wantAccount={wantAccount} onAudioVideo={() => setAvOpen(true)}>
         <IconAction label="Rooms" icon="home" className="ghost" data-action="nav-rooms" onClick={onLeave} />
         <RadioPlayer />
@@ -1805,6 +1814,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
             {moreOpen && (
               <div className="more-menu" role="menu" aria-label="More">
                 <GamesButton onOpen={() => { setMoreOpen(false); onGames(); }} />
+                {me.registered && !initial.isPrivate && <MoreItem icon="bell" label="Notifications" title="Notifications" data-action="notify" onClick={() => { setMoreOpen(false); setNotifyOpen(true); }} />}
                 <MoreItem icon="board" label="Board" title="Board" className={boardOpen ? 'on' : ''} aria-pressed={boardOpen} data-action="board" onClick={() => { setMoreOpen(false); setBoardOpen((v) => !v); }} />
                 <MoreItem icon="sounds" label="Sounds" title="Sounds" data-action="sounds" onClick={() => { setMoreOpen(false); setSoundsOpen(true); }} />
                 <MoreItem icon="fx" label="Effects" title="Full-screen effects" data-action="effects" onClick={() => { setMoreOpen(false); setFxOpen(true); }} />
@@ -1865,6 +1875,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
 
           <section className="chat">
             <WhisperStrip convs={whispers} open={openWhisper} setOpen={setOpenWhisper} selfId={me.id} isIgnored={isIgnored} toast={toast} onReport={(m) => setReportTarget({ kind: 'whisper', messageId: m.id, from: m.from, preview: m.text })} />
+            <RoomThemeHeader theme={theme && theme.welcome && welcomeHidden === theme.welcome ? { ...theme, welcome: null } : theme} onDismiss={() => { if (theme?.welcome) { setWelcomeHidden(theme.welcome); try { localStorage.setItem(welcomeKey, theme.welcome); } catch { /* private mode */ } } }} />
             <AnnouncementBanner key={announcement?.at ?? 0} roomId={initial.id} ann={announcement} />
             {nextEvent && <EventBanner ev={nextEvent} onOpen={() => openSide('events')} />}
             {radio.np && (radioHere > 0 || radio.playing) && <div className="np-room"><NowPlayingCard np={radio.np} here={radioHere} compact /></div>}
@@ -2082,7 +2093,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
             </div>
           )}
           {sideTab === 'events' && <Lazy fallback={panelFallback} inline><EventsPanel events={events} canManage={canManageEvents || canRoomManage} registered={me.registered} roomName={initial.name} toast={toast} /></Lazy>}
-          {sideTab === 'search' && <Lazy fallback={panelFallback} inline><SearchPanel registered={me.registered} roomName={initial.name} onJump={onSearchJump} /></Lazy>}
+          {sideTab === 'search' && <Lazy fallback={panelFallback} inline><SearchPanel registered={me.registered} roomName={initial.name} people={users.filter((u) => !u.id.startsWith("bot:")).map((u) => u.nick)} onJump={onSearchJump} /></Lazy>}
           {sideTab === 'saved' && <Lazy fallback={panelFallback} inline><SavedPanel version={savedVersion} currentRoomId={initial.id} onJump={onSavedJump} onRemove={(id) => {
             void call((ack) => socket.emit('bookmark:toggle', { messageId: id, on: false }, ack)).catch(() => {});
             setBookmarkIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
@@ -2090,6 +2101,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
           {sideTab === 'stats' && canRoomManage && !initial.isPrivate && <Lazy fallback={panelFallback} inline><StatsPanel roomName={initial.name} toast={toast} /></Lazy>}
           {sideTab === 'info' && (
             <div className="side-body">
+              {!initial.isPrivate && (isOwner || isStaff) && <RoomThemeSettings key={`${theme?.accent}|${theme?.welcome}`} roomId={initial.id} theme={theme} toast={toast} />}
               {!initial.isPrivate && <RoomThumbEditor roomId={initial.id} thumbUrl={thumbUrl} canEdit={canManageRoom} onChange={setThumbUrl} toast={toast} />}
               {!initial.isPrivate && (canRoomManage || stageOn) && (
                 <section className="stage-settings" data-testid="stage-settings">
@@ -2169,6 +2181,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
       {historyFor && <EditHistory h={historyFor} onClose={() => setHistoryFor(null)} />}
       {avOpen && <Lazy fallback={null} inline><AvSettings open={avOpen} onClose={() => setAvOpen(false)} onApply={applyAvDevices} camOn={cam && !screen} micOn={mic} blocked={ignored} onUnblock={toggleIgnore} quality={vq} onQuality={changeQuality} shareMode={shareMode} onShareMode={changeShareMode} bg={bgPref} onBg={changeBg} bgNote={bgNote} noise={noisePref} onNoise={changeNoise} /></Lazy>}
       {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
+      {notifyOpen && <NotifyDialog roomName={initial.name} onClose={() => setNotifyOpen(false)} />}
       {reportTarget && <ReportDialog target={reportTarget} onClose={() => setReportTarget(null)} toast={toast} registered={me.registered} />}
       {pollDraft && <PollDialog initial={pollDraft} onClose={() => setPollDraft(null)} toast={toast} />}
       {profileFor && (() => {

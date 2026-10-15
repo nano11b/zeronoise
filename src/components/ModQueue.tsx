@@ -212,7 +212,39 @@ export function ModQueue({ mode, roomId, toast }: { mode: 'site' | 'room'; roomI
           );
         })}
       </div>
+      <BotActions scope={site ? 'site' : 'room'} version={items?.length ?? 0} />
       {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
+    </section>
+  );
+}
+
+type BotAction = { id: number; ts: number; actor: string; action: string; target: string | null; roomId: string | null; details: string | null };
+/** The moderator bot's recent kicks / bans / unbans, next to the people's reports, so reviewers see both. */
+function BotActions({ scope, version }: { scope: 'site' | 'room'; version: number }) {
+  const [list, setList] = useState<BotAction[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let alive = true;
+    call<{ actions: BotAction[] }>((ack) => socket.emit('modq:botlog', { scope }, ack))
+      .then((r) => { if (alive) setList(r.actions); })
+      .catch((e) => { if (alive) setError((e as Error).message); });
+    return () => { alive = false; };
+  }, [scope, version]);
+  return (
+    <section className="bot-actions" data-panel="bot-actions" aria-label="Moderator bot actions">
+      <h4>Moderator bot actions</h4>
+      {error && <p className="muted small">{error}</p>}
+      {list && list.length === 0 && <p className="muted small">The moderator bot has not acted{scope === 'room' ? ' in this room' : ''} yet.</p>}
+      <ul className="bot-action-list">
+        {(list ?? []).map((a) => (
+          <li key={a.id} data-bot-action={a.action}>
+            <span className="tag">BOT</span> <strong>{a.actor}</strong> {a.action}{a.target ? <> <strong>{a.target}</strong></> : null}
+            {a.roomId && scope === 'site' ? <span className="muted small"> in #{a.roomId}</span> : null}
+            <span className="muted small"> · {ago(a.ts)}</span>
+            {a.details ? <div className="muted small quoted">{a.details}</div> : null}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

@@ -16,19 +16,34 @@ export function searchTokens(raw: string): string[] {
  * Newest first. Burn messages, deleted rows and voice notes are never returned.
  * FTS5 when available (prefix match on every token), else LIKE on each token (the room_id index narrows the scan).
  */
-export function searchRoomMessages(roomId: string, tokens: string[], offset: number, limit: number): { rows: MsgRow[]; hasMore: boolean } {
-  if (!tokens.length) return { rows: [], hasMore: false };
+export interface SearchFilter { from?: string | null; after?: number | null; before?: number | null }
+/** Extra WHERE terms for a search filter (alias `m`). */
+function filterSql(f: SearchFilter): { sql: string; args: (string | number)[] } {
+  const parts: string[] = []; const args: (string | number)[] = [];
+  if (f.from) { parts.push('lower(m.nick) = ?'); args.push(f.from.toLowerCase()); }
+  if (f.after != null) { parts.push('m.ts >= ?'); args.push(f.after); }
+  if (f.before != null) { parts.push('m.ts < ?'); args.push(f.before); }
+  return { sql: parts.length ? ' AND ' + parts.join(' AND ') : '', args };
+}
+/** Room history search. Tokens may be empty when a filter is set (then newest lines matching the filter). */
+export function searchRoomMessages(roomId: string, tokens: string[], offset: number, limit: number, filter: SearchFilter = {}): { rows: MsgRow[]; hasMore: boolean } {
+  const f = filterSql(filter);
+  if (!tokens.length && !f.sql) return { rows: [], hasMore: false };
+  const base = 'm.room_id = ? AND m.deleted = 0 AND m.burn_ttl IS NULL AND m.voice_id IS NULL';
   let rows: MsgRow[];
-  if (ftsAvailable) {
+  if (!tokens.length) {
+    rows = q(`SELECT m.* FROM messages m WHERE ${base}${f.sql} ORDER BY m.ts DESC, m.rowid DESC LIMIT ? OFFSET ?`)
+      .all(roomId, ...f.args, limit + 1, offset) as unknown as MsgRow[];
+  } else if (ftsAvailable) {
     const match = tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(' AND ');
     rows = q(`SELECT m.* FROM messages_fts f JOIN messages m ON m.rowid = f.rowid
-      WHERE messages_fts MATCH ? AND f.room_id = ? AND m.room_id = ? AND m.deleted = 0 AND m.burn_ttl IS NULL AND m.voice_id IS NULL
-      ORDER BY m.ts DESC, m.rowid DESC LIMIT ? OFFSET ?`).all(match, roomId, roomId, limit + 1, offset) as unknown as MsgRow[];
+      WHERE messages_fts MATCH ? AND f.room_id = ? AND ${base}${f.sql}
+      ORDER BY m.ts DESC, m.rowid DESC LIMIT ? OFFSET ?`).all(match, roomId, roomId, ...f.args, limit + 1, offset) as unknown as MsgRow[];
   } else {
-    const likes = tokens.map(() => "text LIKE ? ESCAPE '\\'").join(' AND ');
+    const likes = tokens.map(() => "m.text LIKE ? ESCAPE '\\'").join(' AND ');
     const args = tokens.map((t) => `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-    rows = q(`SELECT * FROM messages WHERE room_id = ? AND deleted = 0 AND burn_ttl IS NULL AND voice_id IS NULL AND ${likes}
-      ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(roomId, ...args, limit + 1, offset) as unknown as MsgRow[];
+    rows = q(`SELECT m.* FROM messages m WHERE ${base} AND ${likes}${f.sql}
+      ORDER BY m.ts DESC, m.rowid DESC LIMIT ? OFFSET ?`).all(roomId, ...args, ...f.args, limit + 1, offset) as unknown as MsgRow[];
   }
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
 }

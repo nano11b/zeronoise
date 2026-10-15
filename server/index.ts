@@ -3,6 +3,9 @@ import http from 'http';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import fs from 'fs';
 import { readReleaseInfo } from './release';
+import * as repo4 from './repo4';
+import { accentReadable, roomBannerUrl, THEME_ACCENT_RE, THEME_WELCOME_MAX, type RoomThemeInfo } from '../shared/theme';
+import { inQuietHours, isNotifyLevel, validTz } from '../shared/notify';
 import { Server, Socket } from 'socket.io';
 import { BRAND_NAME, DEFAULT_ROOMS, LIMITS } from '../shared/config';
 import { gifMarkdown } from '../shared/gifs';
@@ -385,6 +388,7 @@ function roomState(room: Room, s: Session): RoomState {
     category: room.category,
     tags: room.tags,
     announcement: room.announcement,
+    theme: themeOf(room),
     emotes: room.isPrivate ? [] : emotesOf(room.id),
     radioHere: radioHereCount(room),
   };
@@ -672,8 +676,15 @@ function accountConnected(userId: number): boolean {
   return !!sid && !!io.sockets.sockets.get(sid)?.connected;
 }
 /** Push only when the person has no live socket (they would see it in the app otherwise). */
-function pushIfAway(userId: number, payload: { title: string; body: string; url: string; tag?: string }) {
+function pushIfAway(userId: number, payload: { title: string; body: string; url: string; tag?: string }, roomId?: string, kind: 'mention' | 'message' = 'mention') {
   if (accountConnected(userId)) return;
+  try {
+    if (roomId) {
+      const level = repo4.notifyLevel(userId, roomId);
+      if (level === 'mute' || (kind === 'message' && level !== 'all')) return;
+    }
+    if (inQuietHours(repo4.quietHours(userId), Date.now())) return;
+  } catch (err) { console.error('[push] notify prefs', (err as Error).message); }
   void pushToUser(userId, payload).catch((err) => console.error('[push]', (err as Error).message));
 }
 
@@ -849,6 +860,7 @@ function dropRoom(room: Room) {
   try { invites.forgetRoom(room.id); } catch (err) { console.error('[rooms] invite cleanup failed', (err as Error).message); }
   try { lobby.forgetRoom(room.id); } catch (err) { console.error('[rooms] recent cleanup failed', (err as Error).message); }
   try { repo2.deleteRoomData(room.id); } catch (err) { console.error('[rooms] cleanup failed', (err as Error).message); }
+  try { repo4.forgetRoomNotify(room.id); } catch (err) { console.error('[rooms] notify cleanup failed', (err as Error).message); }
   if (refreshEventCaches()) broadcastRooms();
 }
 function maybeRemoveRoom(room: Room) {
@@ -971,6 +983,11 @@ function parkSession(id: string) {
   const timer = setTimeout(guardTimer('expire park', () => expirePark(id)), RECONNECT_GRACE_MS);
   timer.unref();
   parked.set(key, { oldId: id, timer });
+  // others hide this person's camera tile right away; the seat stays for the grace period
+  if (s.roomId && s.user) {
+    s.user.away = true;
+    io.to(`room:${s.roomId}`).emit('user:updated', s.user);
+  }
 }
 function takePark(key: string): { oldId: string; session: Session } | null {
   const p = parked.get(key);
@@ -1444,6 +1461,22 @@ live.roomThumbChanged = (roomId, thumbId, by) => {
   systemMsg(room, thumbId ? `${by} updated the room thumbnail` : `${by} removed the room thumbnail`);
   broadcastRooms();
 };
+function themeOf(room: Room): RoomThemeInfo {
+  if (room.isPrivate) return { bannerUrl: null, accent: null, welcome: null };
+  const t = repo4.roomTheme(room.id);
+  return { bannerUrl: t.bannerId ? roomBannerUrl(t.bannerId) : null, accent: t.accent, welcome: t.welcome };
+}
+live.roomBannerInfo = (roomId) => {
+  const room = rooms.get(roomId);
+  return room ? { ownerUserId: room.ownerUserId, isPrivate: room.isPrivate, bannerId: repo4.roomTheme(roomId).bannerId } : null;
+};
+live.roomBannerChanged = (roomId, bannerId, by) => {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  repo4.setRoomTheme(roomId, { bannerId });
+  io.to(`room:${room.id}`).emit('room:theme', { theme: themeOf(room) });
+  systemMsg(room, bannerId ? `${by} updated the room banner` : `${by} removed the room banner`);
+};
 live.roomIconInfo = (roomId) => {
   const room = rooms.get(roomId);
   return room ? { ownerUserId: room.ownerUserId, isPrivate: room.isPrivate, iconId: room.iconId } : null;
@@ -1764,6 +1797,13 @@ const ipConnect = new KeyedLimiter(LIMITS.connectPerIpPerMin, 60_000);
 // ---------- moderation queue ----------
 /** auto-hidden message ids (pending review); mirrored in hidden_messages */
 const hiddenMsgs = new Set<string>(modq.hiddenIds().map((h) => h.message_id));
+/** from / after / before from a search request, validated. */
+function searchFilterOf(p: unknown): repo2.SearchFilter {
+  const o = (p && typeof p === 'object' ? p : {}) as Record<string, unknown>;
+  const from = typeof o.from === 'string' ? o.from.trim().replace(/^@/, '').slice(0, LIMITS.nickMax ?? 32) : '';
+  const ms = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 && v < 1e14 ? Math.floor(v) : null);
+  return { from: from || null, after: ms(o.after), before: ms(o.before) };
+}
 /** Recent whisper lines per room, memory only, so a recipient can report what they saw. */
 interface WhisperLogEntry { m: WhisperMessage; members: Set<string>; accountId: number | null; ip: string; device: string | null; roomId: string }
 const whisperLog = new Map<string, WhisperLogEntry>();
@@ -2144,7 +2184,7 @@ function onConnection(socket: AppSocket) {
   const adoptParked = async (oldId: string, old: Session) => {
     const s = session();
     const room = rooms.get(old.roomId!)!;
-    const user: UserInfo = { ...old.user!, id: socket.id };
+    const user: UserInfo = { ...old.user!, id: socket.id, away: false };
     s.user = user;
     s.roomId = room.id;
     room.members.delete(oldId);
@@ -2189,7 +2229,7 @@ function onConnection(socket: AppSocket) {
         }
         if (park) {
           await adoptParked(park.oldId, park.session);
-          s.user = { ...s.user!, id: socket.id, nick: fresh.username, role: fresh.role, registered: true, ...profileOf(fresh) };
+          s.user = { ...s.user!, id: socket.id, nick: fresh.username, role: fresh.role, registered: true, ...profileOf(fresh), away: false };
           if (s.roomId) io.to(`room:${s.roomId}`).emit('user:updated', s.user);
           presencePing(fresh.id);
           ack({ ok: true, user: s.user });
@@ -2651,7 +2691,7 @@ function onConnection(socket: AppSocket) {
     for (const sid of set) {
       if (sid === socket.id) continue;
       const acct = sessions.get(sid)?.account?.id;
-      if (acct) pushIfAway(acct, { title: `Whisper from ${s.user!.nick} in #${room.name}`, body: 'New message', url: `/?room=${encodeURIComponent(room.id)}`, tag: `whisper-${id}` });
+      if (acct) pushIfAway(acct, { title: `Whisper from ${s.user!.nick} in #${room.name}`, body: 'New message', url: `/?room=${encodeURIComponent(room.id)}`, tag: `whisper-${id}` }, room.id);
     }
   });
   socket.on('whisper:leave', (p, ackRaw) => {
@@ -2755,9 +2795,17 @@ function onConnection(socket: AppSocket) {
       queuePreview(room.id, msg.id, text);
       // @mentions for people who are away: content only when the room is open to anyone
       const open = !room.passwordHash && !room.isPrivate;
-      for (const uid of msg.mentions ?? []) {
+      const mentioned = new Set(msg.mentions ?? []);
+      for (const uid of mentioned) {
         if (uid === s.account?.id) continue;
-        pushIfAway(uid, { title: `${s.user.nick} mentioned you in #${room.name}`, body: open ? text.slice(0, 200) : 'New mention', url: `/?room=${encodeURIComponent(room.id)}`, tag: `room-${room.id}` });
+        pushIfAway(uid, { title: `${s.user.nick} mentioned you in #${room.name}`, body: open ? text.slice(0, 200) : 'New mention', url: `/?room=${encodeURIComponent(room.id)}`, tag: `room-${room.id}` }, room.id, 'mention');
+      }
+      // "Everything" for this room: one collapsing push per room (same tag) for every line
+      if (!room.isPrivate) {
+        for (const uid of repo4.notifyAllUsers(room.id)) {
+          if (uid === s.account?.id || mentioned.has(uid)) continue;
+          pushIfAway(uid, { title: `#${room.name}`, body: open ? `${s.user.nick}: ${text.slice(0, 180)}` : 'New message', url: `/?room=${encodeURIComponent(room.id)}`, tag: `room-${room.id}` }, room.id, 'message');
+        }
       }
     }
   });
@@ -3675,14 +3723,81 @@ function onConnection(socket: AppSocket) {
     if (!c.s.account || !c.s.user?.registered) return ack({ ok: false, error: 'Sign in to search chat history.', status: 401 });
     if (!searchRl.take()) return ack({ ok: false, error: 'Too many searches. Wait a moment.', status: 429 });
     const tokens = repo2.searchTokens(String(p?.q ?? ''));
-    if (!tokens.length || tokens.join('').length < 2) return ack({ ok: false, error: 'Type at least 2 letters to search.', status: 400 });
+    const filter = searchFilterOf(p);
+    const hasFilter = !!(filter.from || filter.after != null || filter.before != null);
+    if ((!tokens.length && !hasFilter) || (tokens.length && tokens.join('').length < 2)) return ack({ ok: false, error: 'Type at least 2 letters to search.', status: 400 });
     const offset = Math.max(0, Math.min(1000, Math.floor(Number(p?.offset) || 0)));
     const PAGE = 20;
-    const { rows, hasMore } = repo2.searchRoomMessages(c.room.id, tokens, offset, PAGE);
+    const { rows, hasMore } = repo2.searchRoomMessages(c.room.id, tokens, offset, PAGE, filter);
     const key = repo.userKey(identOf(c.s));
     const rx = repo.reactionsFor(rows.map((m) => m.id), key);
     const hits: SearchHit[] = rows.map((m) => ({ message: chatFromRow(m, rx.get(m.id), 0, c.s), ...(m.parent_id ? { threadId: m.parent_id } : {}) }));
     ack({ ok: true, hits, hasMore, offset: offset + rows.length });
+  });
+  socket.on('modq:botlog', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (!s.user) return ack({ ok: false, error: 'Not allowed', status: 403 });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down', status: 429 });
+    if (p?.scope === 'site') {
+      if (!isStaff(s)) return ack({ ok: false, error: 'Not allowed', status: 403 });
+      return ack({ ok: true, actions: repo4.botActions(null) });
+    }
+    const room = s.roomId ? rooms.get(s.roomId) : undefined;
+    if (!room || !canReview(s, room.id)) return ack({ ok: false, error: 'Not allowed', status: 403 });
+    ack({ ok: true, actions: repo4.botActions(room.id) });
+  });
+  socket.on('notify:get', (ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
+    if (!c.s.account) return ack({ ok: false, error: 'Sign in to change notifications.', status: 401 });
+    ack({ ok: true, level: repo4.notifyLevel(c.s.account.id, c.room.id), quiet: repo4.quietHours(c.s.account.id) });
+  });
+  socket.on('notify:set', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
+    if (!c.s.account) return ack({ ok: false, error: 'Sign in to change notifications.', status: 401 });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down', status: 429 });
+    if (!isNotifyLevel(p?.level)) return ack({ ok: false, error: 'Unknown setting', status: 400 });
+    repo4.setNotifyLevel(c.s.account.id, c.room.id, p.level);
+    ack({ ok: true, level: p.level });
+  });
+  socket.on('notify:quiet', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (!s.account) return ack({ ok: false, error: 'Sign in to change notifications.', status: 401 });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down', status: 429 });
+    if (p == null) { repo4.setQuietHours(s.account.id, null); return ack({ ok: true, quiet: null }); }
+    const mins = (v: unknown) => (Number.isInteger(v) && (v as number) >= 0 && (v as number) < 1440 ? (v as number) : null);
+    const start = mins(p.start), end = mins(p.end), tz = validTz(p.tz);
+    if (start == null || end == null || !tz) return ack({ ok: false, error: 'Pick a start and end time', status: 400 });
+    repo4.setQuietHours(s.account.id, { start, end, tz });
+    ack({ ok: true, quiet: start === end ? null : { start, end, tz } });
+  });
+  socket.on('whisper:search', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
+    if (!searchRl.take()) return ack({ ok: false, error: 'Too many searches. Wait a moment.', status: 429 });
+    const tokens = repo2.searchTokens(String(p?.q ?? '')).map((t) => t.toLowerCase());
+    const filter = searchFilterOf(p);
+    if (!tokens.length && !filter.from && filter.after == null && filter.before == null) return ack({ ok: false, error: 'Type at least 2 letters to search.', status: 400 });
+    const hits: WhisperMessage[] = [];
+    for (const e of [...whisperLog.values()].reverse()) {
+      // only whispers you were part of, in the room you are in
+      if (e.roomId !== c.room.id || !e.members.has(socket.id)) continue;
+      const m = e.m;
+      if (filter.from && m.from.toLowerCase() !== filter.from.toLowerCase()) continue;
+      if (filter.after != null && m.ts < filter.after) continue;
+      if (filter.before != null && m.ts >= filter.before) continue;
+      const text = m.text.toLowerCase();
+      if (!tokens.every((t) => text.includes(t))) continue;
+      hits.push(m);
+      if (hits.length >= 50) break;
+    }
+    ack({ ok: true, hits });
   });
   socket.on('chat:context', (p, ackRaw) => {
     const ack = safeAck(ackRaw);
@@ -3939,6 +4054,33 @@ function onConnection(socket: AppSocket) {
   });
 
   // ---- 3a. announcement banner (owner / staff / room mods) ----
+  socket.on('room:theme:set', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
+    const { s, room } = c;
+    if (room.isPrivate) return ack({ ok: false, error: 'Private calls have no theme', status: 400 });
+    if (!isStaff(s) && !isOwner(s, room)) return ack({ ok: false, error: 'Only the room owner can change the theme', status: 403 });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited', status: 429 });
+    const patch: Partial<repo4.RoomTheme> = {};
+    if (p && 'accent' in p) {
+      if (p.accent == null || p.accent === '') patch.accent = null;
+      else if (typeof p.accent !== 'string' || !THEME_ACCENT_RE.test(p.accent)) return ack({ ok: false, error: 'Pick a color like #39ff14', status: 400 });
+      else if (!accentReadable(p.accent)) return ack({ ok: false, error: 'That color is too dark or too light to read', status: 400 });
+      else patch.accent = p.accent.toLowerCase();
+    }
+    if (p && 'welcome' in p) {
+      const raw = typeof p.welcome === 'string' ? p.welcome : '';
+      if (raw.trim().length > THEME_WELCOME_MAX) return ack({ ok: false, error: `Max ${THEME_WELCOME_MAX} characters`, status: 400 });
+      const text = maskWords(cleanText(raw, THEME_WELCOME_MAX));
+      patch.welcome = text || null;
+    }
+    repo4.setRoomTheme(room.id, patch);
+    repo.logAction(actorLabel(s), s.account?.id ?? null, 'room-theme', null, room.id, JSON.stringify(patch).slice(0, 160));
+    const theme = themeOf(room);
+    io.to(`room:${room.id}`).emit('room:theme', { theme });
+    ack({ ok: true, theme });
+  });
   socket.on('announce:set', (p, ackRaw) => {
     const ack = safeAck(ackRaw);
     const c = roomCtx();
@@ -4097,7 +4239,7 @@ function runPrune() {
     if (n) console.log(`[prune] removed ${n} orphaned voice note(s)`);
     const imgs = sweepChatImages();
     if (imgs) console.log(`[prune] removed ${imgs} orphaned chat image(s)`);
-    const thumbs = sweepRoomThumbs(new Set([...rooms.values()].map((r) => r.thumbId).filter((x): x is string => !!x)));
+    const thumbs = sweepRoomThumbs(new Set([...[...rooms.values()].map((r) => r.thumbId), ...repo4.allBannerIds()].filter((x): x is string => !!x)));
     if (thumbs) console.log(`[prune] removed ${thumbs} orphaned room thumbnail(s)`);
     try { const n = invites.prune(); if (n) console.log(`[prune] removed ${n} dead invite link(s)`); } catch (err) { console.error('[prune] invites', (err as Error).message); }
     const icons = sweepRoomIcons(new Set([...rooms.values()].map((r) => r.iconId).filter((x): x is string => !!x)));

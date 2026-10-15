@@ -65,6 +65,9 @@ export const live = {
   /** is this nick currently used by a guest from a different device? */
   nickHeldByOther: (_nick: string, _deviceIds: string[]) => false as boolean,
   stats: () => ({ rooms: 0, users: 0 }),
+  /** Room banner (theme): who may change it, and the current banner id. */
+  roomBannerInfo: (_roomId: string): { ownerUserId: number | null; isPrivate: boolean; bannerId: string | null } | null => null,
+  roomBannerChanged: (_roomId: string, _bannerId: string | null, _by: string) => {},
   /** Set once at process start from the server entry mtime. */
   buildId: '',
   /** Package sha256 + commit (see release.ts). Set once at process start. */

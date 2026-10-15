@@ -5,9 +5,10 @@ export type IconName =
   | 'games' | 'board' | 'cam' | 'mic' | 'settings' | 'screen' | 'key' | 'stream'
   | 'bot' | 'lock' | 'unlock' | 'slow' | 'purge' | 'trash' | 'people' | 'leave'
   | 'eye' | 'eyeOff' | 'grip' | 'more' | 'sounds' | 'home' | 'plus' | 'panel' | 'user' | 'rail' | 'download' | 'music' | 'watch' | 'fx'
-  | 'search' | 'bookmark' | 'calendar' | 'poll' | 'image' | 'stats' | 'link';
+  | 'search' | 'bookmark' | 'calendar' | 'poll' | 'image' | 'stats' | 'link' | 'bell';
 
 const PATHS: Record<IconName, ReactNode> = {
+  bell: <><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" /><path d="M10 20a2 2 0 0 0 4 0" /></>,
   games: <><rect x="6" y="8" width="12" height="8" rx="2" /><path d="M9 12h2M10 11v2M15 11.5h.01M16.5 13.5h.01" /></>,
   board: <><rect x="4" y="5" width="16" height="12" rx="1.5" /><path d="M8 19h8M12 17v2" /></>,
   cam: <><path d="M4 8h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" /><path d="M15 11l5-2v6l-5-2z" /></>,

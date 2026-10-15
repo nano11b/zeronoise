@@ -636,6 +636,27 @@ const MIGRATIONS: string[] = [
   ) WITHOUT ROWID;
   CREATE INDEX IF NOT EXISTS bot_room_joins_room ON bot_room_joins(room_id)
   `,
+  // 37: per-room notification level + push quiet hours, and room themes (banner, accent color, welcome message).
+  `
+  CREATE TABLE IF NOT EXISTS room_notify (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    room_id TEXT NOT NULL,
+    level TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, room_id)
+  ) WITHOUT ROWID;
+  CREATE INDEX IF NOT EXISTS room_notify_room ON room_notify(room_id, level);
+  CREATE TABLE IF NOT EXISTS push_quiet (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    start_min INTEGER NOT NULL,
+    end_min INTEGER NOT NULL,
+    tz TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  ALTER TABLE rooms ADD COLUMN theme_banner_id TEXT;
+  ALTER TABLE rooms ADD COLUMN theme_accent TEXT;
+  ALTER TABLE rooms ADD COLUMN welcome_text TEXT
+  `,
 ];
 
 /**

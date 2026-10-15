@@ -26,7 +26,7 @@ export function roomThumbExists(id: string) {
  * Validate and re-encode to a 640×360 cover-cropped WebP. Animated GIF/WebP keep only the first
  * frame (static), EXIF is stripped by the re-encode.
  */
-export async function processRoomThumb(buf: Buffer): Promise<Buffer> {
+export async function processRoomThumb(buf: Buffer, w = ROOM_THUMB_W, h = ROOM_THUMB_H): Promise<Buffer> {
   if (buf.length > ROOM_THUMB_MAX_BYTES) throw new Error('Image too large (max 5 MB)');
   if (buf.length < 24) throw new Error('Not a valid image');
   try {
@@ -34,7 +34,7 @@ export async function processRoomThumb(buf: Buffer): Promise<Buffer> {
     const meta = await img.metadata();
     if (!meta.format || !['jpeg', 'png', 'webp', 'gif'].includes(meta.format)) throw new Error('Use PNG, JPEG, WebP or GIF');
     return await img
-      .resize(ROOM_THUMB_W, ROOM_THUMB_H, { fit: 'cover', position: 'attention' })
+      .resize(w, h, { fit: 'cover', position: 'attention' })
       .webp({ quality: 80, effort: 4 })
       .toBuffer();
   } catch (e) {

@@ -293,7 +293,7 @@ try {
       const appJs = fs.readdirSync(path.join(ROOT, 'dist/client/assets')).filter((n) => n.endsWith('.js')).map((n) => fs.readFileSync(path.join(ROOT, 'dist/client/assets', n), 'utf8')).join('\n');
       ok(appJs.includes('beforeinstallprompt') && appJs.includes('setAppBadge') && appJs.includes('install-app'), 'client captures the install prompt, sets the app badge and has the Install app item');
       const serverSrc = fs.readFileSync(path.join(ROOT, 'server/index.ts'), 'utf8');
-      ok((serverSrc.match(/url: `\/\?room=\$\{encodeURIComponent\(room\.id\)\}`/g) || []).length === 2, 'mention and whisper notifications link to their room');
+      ok((serverSrc.match(/url: `\/\?room=\$\{encodeURIComponent\(room\.id\)\}`/g) || []).length === 3, 'mention, whisper and Everything notifications link to their room');
     }
     const docs = await fetch(BASE + '/docs/bots', { redirect: 'manual', headers: crawl });
     const docsHtml = await docs.text();
@@ -5020,6 +5020,163 @@ try {
     ok(!(await emit(O.s, 'chat:pin', { messageId: ids[0], pinned: true })).ok, 'still over 5: re-pinning waits until the room is under the cap');
   }
 
+
+  // ================= nine features: search filters, whisper search, notifications, themes, bot log, status, away =================
+  {
+    const dbFile = path.join(DATA, 'camchat.db');
+    const dbq = (sql, ...params) => JSON.parse(execFileSync(process.execPath, ['-e', `
+      const { DatabaseSync } = require('node:sqlite');
+      const db = new DatabaseSync(process.argv[1]);
+      db.exec('PRAGMA busy_timeout = 3000');
+      const st = db.prepare(process.argv[2]);
+      const params = JSON.parse(process.argv[3]);
+      console.log(JSON.stringify(/^\\s*select/i.test(process.argv[2]) ? st.all(...params) : st.run(...params)));
+    `, dbFile, sql, JSON.stringify(params)], { stdio: ['ignore', 'pipe', 'ignore'] }).toString());
+    ok(dbq("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('room_notify','push_quiet') ORDER BY name").length === 2, 'migration 37: room_notify + push_quiet tables');
+    const rc = dbq("SELECT name FROM pragma_table_info('rooms')").map((r) => r.name);
+    ok(rc.includes('theme_banner_id') && rc.includes('theme_accent') && rc.includes('welcome_text'), 'migration 37: rooms theme columns');
+    let ip9 = 1;
+    const mk9 = async (name) => {
+      const b = browser(`100.64.90.${ip9++}`); await b.boot();
+      await register(b, name, `${name.toLowerCase()}-pass-99`);
+      const s = track(await b.connect());
+      ok((await emit(s, 'login', {})).ok, `${name} logs in`);
+      return { b, s, name };
+    };
+    const O = await mk9('Nf_Owner'); const A = await mk9('Nf_Ann'); const C = await mk9('Nf_Cid');
+    const R = (await emit(O.s, 'room:create', { name: 'Nine Room' })).roomId;
+    const R2 = (await emit(C.s, 'room:create', { name: 'Other Nine' })).roomId;
+    for (const p of [O, A]) ok((await emit(p.s, 'room:join', { roomId: R })).ok, `${p.name} joins`);
+    ok((await emit(C.s, 'room:join', { roomId: R2 })).ok, 'Cid stays in his own room');
+    const say9 = async (p, text) => { for (let i = 0; i < 6; i++) { const r = await emit(p.s, 'chat:send', { text }); if (r.ok) return r; await sleep(1100); } return { ok: false }; };
+    await say9(O, 'zebra crossing from owner');
+    await say9(A, 'zebra crossing from ann');
+    await sleep(1100);
+    await say9(A, 'plain words only');
+    // ---- search ----
+    const all = await emit(O.s, 'chat:search', { q: 'zebra' });
+    ok(all.ok && all.hits.length === 2, 'search finds both zebra lines');
+    const fromAnn = await emit(O.s, 'chat:search', { q: 'zebra', from: 'nf_ann' });
+    ok(fromAnn.ok && fromAnn.hits.length === 1 && fromAnn.hits[0].message.from === 'Nf_Ann', 'filter by person (case-insensitive)');
+    const byPerson = await emit(O.s, 'chat:search', { q: '', from: 'Nf_Ann' });
+    ok(byPerson.ok && byPerson.hits.length === 2, 'person filter alone (no words) lists that person\'s lines');
+    const future = await emit(O.s, 'chat:search', { q: 'zebra', after: Date.now() + 60_000 });
+    ok(future.ok && future.hits.length === 0, 'after a future date: nothing');
+    const before = await emit(O.s, 'chat:search', { q: 'zebra', before: Date.now() - 3600_000 });
+    ok(before.ok && before.hits.length === 0, 'before an hour ago: nothing');
+    const win = await emit(O.s, 'chat:search', { q: 'zebra', after: Date.now() - 3600_000, before: Date.now() + 60_000 });
+    ok(win.ok && win.hits.length === 2, 'date window around now finds them');
+    ok(!(await emit(O.s, 'chat:search', { q: '' })).ok, 'no words and no filter is refused');
+    const other = await emit(C.s, 'chat:search', { q: 'zebra' });
+    ok(other.ok && other.hits.length === 0, 'search only covers the room you are in (no leak to other rooms)');
+    // ---- whisper search ----
+    const ws = await emit(O.s, 'whisper:start', { userIds: [A.s.id] });
+    ok(ws.ok, 'whisper started');
+    if (ws.ok) {
+      await sleep(400);
+      ok((await emit(O.s, 'whisper:send', { whisperId: ws.whisper.id, text: 'secret giraffe plan' })).ok, 'whisper sent');
+      await sleep(400);
+      const wa = await emit(A.s, 'whisper:search', { q: 'giraffe' });
+      ok(wa.ok && wa.hits.length === 1 && wa.hits[0].text === 'secret giraffe plan', 'a whisper member finds the whisper');
+      const wf = await emit(A.s, 'whisper:search', { q: 'giraffe', from: 'Nf_Ann' });
+      ok(wf.ok && wf.hits.length === 0, 'whisper search person filter');
+      ok((await emit(C.s, 'room:join', { roomId: R })).ok, 'Cid joins the room');
+      await sleep(300);
+      const wc = await emit(C.s, 'whisper:search', { q: 'giraffe' });
+      ok(wc.ok && wc.hits.length === 0, 'someone outside the whisper finds nothing');
+      const rs = await emit(C.s, 'chat:search', { q: 'giraffe' });
+      ok(rs.ok && rs.hits.length === 0, 'whispers never show up in room search');
+    }
+    // ---- notifications ----
+    const g0 = await emit(A.s, 'notify:get');
+    ok(g0.ok && g0.level === 'mentions' && g0.quiet === null, 'default: mentions only, no quiet hours');
+    ok(!(await emit(A.s, 'notify:set', { level: 'loud' })).ok, 'unknown level refused');
+    ok((await emit(A.s, 'notify:set', { level: 'mute' })).ok && (await emit(A.s, 'notify:get')).level === 'mute', 'mute saved');
+    ok(!(await emit(A.s, 'notify:quiet', { start: 1440, end: 5, tz: 'UTC' })).ok, 'bad quiet time refused');
+    ok(!(await emit(A.s, 'notify:quiet', { start: 60, end: 120, tz: 'Mars/Base' })).ok, 'bad timezone refused');
+    const q1 = await emit(A.s, 'notify:quiet', { start: 22 * 60, end: 7 * 60, tz: 'America/New_York' });
+    ok(q1.ok && q1.quiet.start === 1320 && q1.quiet.end === 420, 'quiet hours saved (across midnight)');
+    ok((await emit(A.s, 'notify:get')).quiet?.tz === 'America/New_York', 'quiet hours read back');
+    ok((await emit(A.s, 'notify:quiet', null)).ok && (await emit(A.s, 'notify:get')).quiet === null, 'quiet hours cleared');
+    // push behaviour with a parked registered user
+    const ecdh = createECDH('prime256v1'); ecdh.generateKeys();
+    const keys = { p256dh: ecdh.getPublicKey().toString('base64url'), auth: randomBytes(16).toString('base64url') };
+    ok((await A.b.req('/api/push/subscribe', { endpoint: `${FIX}/push/ok?u=nfann`, keys })).json.ok, 'Ann subscribes to push');
+    const hitsFor = () => pushHits.filter((h) => h.path === '/push/ok?u=nfann').length;
+    const awaySeen = once(O.s, 'user:updated', (u) => u.nick === 'Nf_Ann' && u.away === true, 3000).then(() => true, () => false);
+    A.s.close();
+    ok(await awaySeen, 'a parked (disconnected) user is marked away for the room, so their tile goes at once');
+    await sleep(300);
+    let n = hitsFor();
+    await say9(O, '@Nf_Ann muted mention');
+    await sleep(700);
+    ok(hitsFor() === n, 'muted room: even a mention does not push');
+    dbq("UPDATE room_notify SET level = 'all' WHERE room_id = ?", R);
+    await sleep(1100);
+    await say9(O, 'ordinary line for everyone');
+    await sleep(800);
+    ok(hitsFor() === n + 1, 'Everything: an ordinary message pushes');
+    n = hitsFor();
+    dbq('INSERT OR REPLACE INTO push_quiet (user_id, start_min, end_min, tz, updated_at) SELECT id, 0, 1439, ?, ? FROM users WHERE username = ?', 'UTC', Date.now(), 'Nf_Ann');
+    await sleep(1100);
+    await say9(O, '@Nf_Ann in quiet hours');
+    await sleep(700);
+    ok(hitsFor() === n, 'quiet hours: no push');
+    dbq("DELETE FROM push_quiet"); dbq("DELETE FROM room_notify WHERE room_id = ?", R);
+    await sleep(1100);
+    await say9(O, 'plain line, mentions-only now');
+    await say9(O, '@Nf_Ann back to normal');
+    await sleep(800);
+    ok(hitsFor() === n + 1, 'mentions only: the mention pushes, the plain line does not');
+    const A2s = track(await A.b.connect()); ok((await emit(A2s, 'login', {})).ok, 'Ann comes back');
+    // ---- themes ----
+    const th0 = await emit(O.s, 'room:theme:set', { accent: '#000000' });
+    ok(!th0.ok && /too dark/.test(th0.error), 'unreadable accent refused');
+    ok(!(await emit(O.s, 'room:theme:set', { accent: 'red; background:url(x)' })).ok, 'non-hex accent refused');
+    ok(!(await emit(O.s, 'room:theme:set', { welcome: 'x'.repeat(501) })).ok, 'welcome over 500 chars refused');
+    ok(!(await emit(C.s, 'room:theme:set', { accent: '#39ff14' })).ok, 'a member cannot change the theme');
+    const thSeen = once(C.s, 'room:theme', (p) => p.theme.accent === '#39ff14');
+    const th1 = await emit(O.s, 'room:theme:set', { accent: '#39FF14', welcome: '  Welcome to <b>nine</b>  ' });
+    ok(th1.ok && th1.theme.accent === '#39ff14' && th1.theme.welcome === 'Welcome to <b>nine</b>', 'owner sets accent + pinned welcome (plain text, trimmed)');
+    ok(!!(await thSeen.catch(() => null)), 'room members get the new theme live');
+    const rj = await emit(C.s, 'room:join', { roomId: R });
+    ok(rj.ok && rj.room.theme?.accent === '#39ff14' && /Welcome/.test(rj.room.theme.welcome), 'room state carries the theme for joiners');
+    const sharpLib = createRequire(path.join(ROOT, 'package.json'))('sharp');
+    const img = await sharpLib({ create: { width: 1600, height: 500, channels: 3, background: '#3366cc' } }).png().toBuffer();
+    const up = async (who, roomId, method = 'POST') => {
+      const fd = new FormData(); fd.append('thumb', new Blob([img], { type: 'image/png' }), 'b.png');
+      const r = await fetch(BASE + `/api/rooms/${roomId}/banner`, { method, headers: { 'cf-connecting-ip': who.b.ip, 'x-csrf': '1', cookie: who.b.cookieHeader() }, body: method === 'POST' ? fd : undefined });
+      return { status: r.status, json: await r.json().catch(() => ({})) };
+    };
+    ok((await up(C, R)).status === 403, 'a member cannot upload a banner');
+    const bu = await up(O, R);
+    ok(bu.status === 200 && /^\/api\/room-banners\/[a-f0-9]{32}\.webp$/.test(bu.json.bannerUrl || ''), 'owner uploads a banner');
+    const bimg = await fetch(BASE + bu.json.bannerUrl);
+    const meta = await sharpLib(Buffer.from(await bimg.arrayBuffer())).metadata();
+    ok(bimg.status === 200 && meta.format === 'webp' && meta.width === 1200 && meta.height === 300, 'banner served as 1200x300 webp');
+    ok((await emit(C.s, 'room:join', { roomId: R })).room.theme?.bannerUrl === bu.json.bannerUrl, 'banner in room state');
+    ok((await up(O, R, 'DELETE')).status === 200 && (await fetch(BASE + bu.json.bannerUrl)).status === 404, 'owner removes the banner');
+    // ---- bot actions next to reports ----
+    const oid = dbq('SELECT id FROM users WHERE username = ?', 'Nf_Owner')[0].id;
+    dbq('INSERT INTO bots (owner_user_id, name, name_lower, created_at) VALUES (?,?,?,?)', oid, 'Meowington', 'meowington', Date.now());
+    dbq('INSERT INTO mod_log (ts, actor, actor_user_id, action, target, room_id, details) VALUES (?,?,?,?,?,?,?)', Date.now(), 'Meowington', null, 'kick', 'spammer', R, 'flood');
+    dbq('INSERT INTO mod_log (ts, actor, actor_user_id, action, target, room_id, details) VALUES (?,?,?,?,?,?,?)', Date.now(), 'Meowington', oid, 'kick', 'x', R, 'person named like the bot');
+    const bl = await emit(O.s, 'modq:botlog', { scope: 'room' });
+    ok(bl.ok && bl.actions.length === 1 && bl.actions[0].actor === 'Meowington' && bl.actions[0].target === 'spammer', 'room owner sees the moderator bot\'s actions (not people)');
+    ok(!(await emit(C.s, 'modq:botlog', { scope: 'room' })).ok, 'a member cannot read the bot log');
+    ok(!(await emit(O.s, 'modq:botlog', { scope: 'site' })).ok, 'site bot log is staff only');
+    // ---- public status ----
+    const sj = await fetch(BASE + '/api/status');
+    const sb = await sj.json();
+    ok(sj.status === 200 && sb.ok === true && sb.db === true && Number.isInteger(sb.uptimeSec) && 'package' in sb && 'commit' in sb && 'lastBackupAt' in sb, '/api/status: health, uptime, package, commit, last backup');
+    const allowed = ['ok', 'db', 'uptimeSec', 'startedAt', 'package', 'commit', 'releasedAt', 'lastBackupAt', 'lastBackupOk', 'checkedAt'];
+    ok(Object.keys(sb).every((k) => allowed.includes(k)), '/api/status has only public fields (no users, rooms, mail, env)');
+    const sh = await fetch(BASE + '/status');
+    const html = await sh.text();
+    ok(sh.status === 200 && /text\/html/.test(sh.headers.get('content-type') || '') && /Uptime/.test(html) && !/<script/i.test(html) && !sh.headers.get('set-cookie'), '/status page: HTML, no script, no cookie');
+    ok(!/SESSION_SECRET|test-turn-secret|@example\.com|Nf_Owner/.test(html + JSON.stringify(sb)), 'status shows no secrets or user data');
+    for (const p of [O, C]) p.s.close();
+  }
 
 } catch (e) {
   failed++;
