@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { ThemePicker } from './ThemePicker';
 import { LIMITS, TAGLINE } from '../../shared/config';
 import type { CaptchaChallenge } from '../../shared/types';
 import { api } from '../api';
@@ -147,6 +148,7 @@ export function Login({ onAccount, mode, setMode, google, discord, tiktok }: {
         </ul>
         <p className="muted small center legal-links"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>
         <p className="muted small center get-app"><a href="/download">Get the app</a></p>
+        <details className="login-theme"><summary className="muted small center">Theme</summary><ThemePicker /></details>
       </section>
     </main>
   );

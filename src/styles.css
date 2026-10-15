@@ -2225,3 +2225,6 @@ html[data-ui-theme="dark-orange"] {
 .ui-theme-opt:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ui-theme-swatch { width: 18px; height: 18px; border-radius: 50%; flex: none; border: 2px solid var(--sw-accent); background: var(--sw-bg); }
 /* END ui-themes */
+.login-theme { margin-top: 6px; }
+.login-theme summary { cursor: pointer; list-style: none; text-decoration: underline; }
+.login-theme summary::-webkit-details-marker { display: none; }
