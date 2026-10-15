@@ -458,11 +458,11 @@ try {
   await bob.waitForSelector('a[data-action="get-app-menu"]');
   const lobbyMenu390 = await profileOnScreen(bob);
   ok(lobbyMenu390.ok, `lobby 390: profile menu stays on screen (${JSON.stringify(lobbyMenu390)})`);
-  await bob.screenshot({ path: '/opt/cursor/artifacts/profile-lobby-390.png' });
+  await bob.screenshot({ path: path.join(path.dirname(SHOT), 'profile-lobby-390.png') });
   await bob.setViewport({ width: 360, height: 844 });
   const lobbyMenu360 = await profileOnScreen(bob);
   ok(lobbyMenu360.ok, `lobby 360: profile menu stays on screen (${JSON.stringify(lobbyMenu360)})`);
-  await bob.screenshot({ path: '/opt/cursor/artifacts/profile-lobby-360.png' });
+  await bob.screenshot({ path: path.join(path.dirname(SHOT), 'profile-lobby-360.png') });
   await bob.setViewport({ width: 390, height: 844 });
   await bob.click('a[data-action="get-app-menu"]');
   await bob.waitForFunction(() => location.pathname === '/download');
