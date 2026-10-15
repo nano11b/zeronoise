@@ -185,7 +185,7 @@ do_rollback() {
   local keepdb="$1" target stamp now dbbak cur f
   now=$(date +%Y%m%d-%H%M%S)
   if [ -n "${ROLLBACK_TO:-}" ]; then target="$ROLLBACK_TO"
-  else target=$(ls -1d "$APP".bak-* 2>/dev/null | LC_ALL=C sort | tail -1 || true); fi
+  else target=$(ls -1d "$APP".bak-* 2>/dev/null | grep -E "\.bak-[0-9]{8}-[0-9]{6}$" | LC_ALL=C sort | tail -1 || true); fi
   [ -n "$target" ] && [ -d "$target" ] || die "no backup folder $APP.bak-* to roll back to"
   [ -f "$target/package.json" ] || die "$target does not look like a camchat install (no package.json)"
   stamp=${target##*.bak-}

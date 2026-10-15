@@ -29,7 +29,7 @@ install(){ while [ "$1" != "${1#-}" ]; do case $1 in -o|-g|-m) shift 2;; *) shif
 HEALTH=0; health_ok(){ return $HEALTH; }
 eval "$(ext rollback)"
 setup(){ rm -rf opt data log; mkdir -p opt data/upgrade-backups
-  for v in 20261010-234939 20261014-230333; do mkdir -p $APP.bak-$v; echo "{}" > $APP.bak-$v/package.json; echo $v > $APP.bak-$v/ver; done
+  for v in 20261010-234939 20261014-230333 20261014-zzz-named; do mkdir -p $APP.bak-$v; echo "{}" > $APP.bak-$v/package.json; echo $v > $APP.bak-$v/ver; done
   mkdir -p $APP; echo '{}' > $APP/package.json; echo new > $APP/ver
   echo newdb > data/camchat.db; echo wal > data/camchat.db-wal; echo olddb > data/upgrade-backups/camchat.db.pre-20261014-230333; echo oldwal > data/upgrade-backups/camchat.db.pre-20261014-230333-wal; }
 setup; (do_rollback 0) > out 2>&1
