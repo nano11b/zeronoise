@@ -2247,6 +2247,7 @@ html[data-ui-theme="dark-orange"] {
 .profile-menu .profile-actions .badge { margin-left: auto; }
 .menu-divider { border: 0; border-top: 1px solid var(--line); margin: 10px 0 4px; }
 .profile-signout button { color: var(--danger); }
+.profile-signout button:hover, .profile-signout button:focus-visible { background: transparent; text-decoration: underline; text-underline-offset: 3px; }
 .chip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); flex: none; }
 .start-room-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .start-room-btn .icon { width: 15px; height: 15px; }
