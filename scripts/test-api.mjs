@@ -5185,8 +5185,13 @@ try {
     const d = new DatabaseSync(dbFile, { readOnly: true });
     const ucols = d.prepare("SELECT name FROM pragma_table_info('users')").all().map((r) => r.name);
     const uv = d.prepare('PRAGMA user_version').get().user_version;
+    const tabs = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
+    const scols = d.prepare("SELECT name FROM pragma_table_info('room_schedules')").all().map((r) => r.name);
     d.close();
-    ok(ucols.includes('ui_theme') && uv === 38, `migration 38: users.ui_theme (user_version ${uv})`);
+    ok(ucols.includes('ui_theme') && uv >= 38, `migration 38: users.ui_theme (user_version ${uv})`);
+    // batch A (39) and batch B (40) only add tables / columns
+    if (uv >= 39) ok(['room_reads', 'mention_inbox', 'whisper_messages', 'whisper_members'].every((t) => tabs.includes(t)), `migration 39: read markers, mentions inbox, whispers (user_version ${uv})`);
+    if (uv >= 40) ok(tabs.includes('room_filters') && ucols.includes('link_previews') && scols.includes('kind'), `migration 40: room filters, link preview toggle, schedule kind (user_version ${uv})`);
     const th = await import(path.join(ROOT, 'dist/server/shared/uiTheme.js'));
     ok(JSON.stringify(th.UI_THEMES) === JSON.stringify(['dark', 'dark-red', 'dark-green', 'dark-orange']) && th.UI_THEME_DEFAULT === 'dark', 'four themes, Dark is the default');
     for (const t of th.UI_THEMES) {
