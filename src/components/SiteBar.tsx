@@ -9,13 +9,19 @@ import { Lazy, lazyNamed } from '../lazy';
 import { RoleTag } from './RoleTag';
 import { NickLabel, UserAvatar } from './UserAvatar';
 import { useStaffCounts } from '../modq';
+import { Sheet } from './Sheet';
 
 const loadProfile = () => import('./ProfilePanel');
 const ProfilePanel = lazyNamed(loadProfile, 'ProfilePanel');
+const ProfileDialogBody = lazyNamed(loadProfile, 'ProfileDialogBody');
+const BotsDialogBody = lazyNamed(loadProfile, 'BotsDialogBody');
+const NotificationsDialogBody = lazyNamed(loadProfile, 'NotificationsDialogBody');
+type ProfileDialogKind = 'profile' | 'bots' | 'notifications';
+const DIALOG_TITLE: Record<ProfileDialogKind, string> = { profile: 'Profile', bots: 'Bots', notifications: 'Notifications' };
 
 /** Shared top bar: logo, centered section buttons, online status, and the name chip. */
 export function SiteBar({
-  me, account, onAccount, toast, signOut, openAdmin, wantAccount, showGuestActions, onAudioVideo, extras, children,
+  me, account, onAccount, toast, signOut, openAdmin, wantAccount, showGuestActions, onAudioVideo, onFriends, onStartRoom, friendRequests, extras, children,
 }: {
   me: UserInfo;
   account?: Account | null;
@@ -27,6 +33,11 @@ export function SiteBar({
   showGuestActions?: boolean;
   /** Opens the audio and video settings dialog. Shown in the profile menu. */
   onAudioVideo?: () => void;
+  /** Opens the Friends dialog (menu item). */
+  onFriends?: () => void;
+  /** Opens the Start a room dialog (menu item). */
+  onStartRoom?: () => void;
+  friendRequests?: number;
   extras?: ReactNode;
   children?: ReactNode;
 }) {
@@ -38,6 +49,7 @@ export function SiteBar({
   const statusRef = useRef<HTMLDivElement>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [dialog, setDialog] = useState<ProfileDialogKind | null>(null);
   // The profile panel loads the first time it opens, then stays mounted.
   const [profileEver, setProfileEver] = useState(false);
   if (profileOpen && !profileEver) setProfileEver(true);
@@ -115,6 +127,7 @@ export function SiteBar({
               <UserAvatar nick={me.nick} accountId={me.accountId} chatColor={me.chatColor} hasAvatar={me.hasAvatar} size={22} />
               <NickLabel nick={me.nick} chatColor={me.chatColor} chatEffect={me.chatEffect} />
               <RoleTag role={me.role} />
+              {(friendRequests ?? 0) > 0 && <span className="chip-dot" data-testid="friend-request-dot" aria-label={`${friendRequests} friend request${friendRequests === 1 ? '' : 's'}`} />}
             </button>
             <div className="me-pop-panel" ref={profilePanelRef} hidden={!profileOpen} role="dialog" aria-label="Your profile">
               {profileEver && <Lazy fallback={<p className="muted">Loading…</p>}><ProfilePanel
@@ -123,6 +136,10 @@ export function SiteBar({
                 toast={toast}
                 signOut={signOut ? () => { setProfileOpen(false); signOut(); } : undefined}
                 onAudioVideo={onAudioVideo ? () => { setProfileOpen(false); onAudioVideo(); } : undefined}
+                onOpen={(k) => { setProfileOpen(false); setDialog(k); }}
+                onFriends={onFriends ? () => { setProfileOpen(false); onFriends(); } : undefined}
+                onStartRoom={onStartRoom ? () => { setProfileOpen(false); onStartRoom(); } : undefined}
+                friendRequests={friendRequests}
               /></Lazy>}
             </div>
           </div>
@@ -136,6 +153,15 @@ export function SiteBar({
           </>
         )}
       </div>
+      {dialog && account && onAccount && (
+        <Sheet name={dialog} title={DIALOG_TITLE[dialog]} onClose={() => setDialog(null)}>
+          <Lazy fallback={<p className="muted">Loading…</p>}>
+            {dialog === 'profile' && <ProfileDialogBody account={account} onAccount={onAccount} toast={toast} />}
+            {dialog === 'bots' && <BotsDialogBody toast={toast} />}
+            {dialog === 'notifications' && <NotificationsDialogBody toast={toast} />}
+          </Lazy>
+        </Sheet>
+      )}
     </header>
   );
 }

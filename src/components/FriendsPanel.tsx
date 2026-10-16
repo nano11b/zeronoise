@@ -1,11 +1,19 @@
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { Sheet } from './Sheet';
 import type { FriendEntry, RoomState } from '../../shared/types';
 import { call, socket } from '../socket';
 import { NickLabel, UserAvatar } from './UserAvatar';
 
-export function FriendsPanel({ onJoinCall, toast }: {
+/**
+ * Friends. Always mounted while the lobby is open (it listens for friend updates and incoming calls);
+ * the list itself shows in the Friends dialog (open), the call banner shows either way.
+ */
+export function FriendsPanel({ onJoinCall, toast, open = true, onClose, onPending }: {
   onJoinCall: (room: RoomState) => void;
   toast: (t: string, tone?: 'error' | 'info') => void;
+  open?: boolean;
+  onClose?: () => void;
+  onPending?: (n: number) => void;
 }) {
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [pendingIn, setPendingIn] = useState<FriendEntry[]>([]);
@@ -13,11 +21,13 @@ export function FriendsPanel({ onJoinCall, toast }: {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [incoming, setIncoming] = useState<{ from: FriendEntry; roomId: string } | null>(null);
+  const onPendingRef = useRef(onPending);
+  onPendingRef.current = onPending;
 
   const refresh = useCallback(async () => {
     try {
       const r = await call<{ friends: FriendEntry[]; pendingIn: FriendEntry[]; pendingOut: FriendEntry[] }>((ack) => socket.emit('friends:list', ack));
-      setFriends(r.friends); setPendingIn(r.pendingIn); setPendingOut(r.pendingOut);
+      setFriends(r.friends); setPendingIn(r.pendingIn); setPendingOut(r.pendingOut); onPendingRef.current?.(r.pendingIn.length);
     } catch { /* not signed in */ }
   }, []);
 
@@ -68,9 +78,8 @@ export function FriendsPanel({ onJoinCall, toast }: {
     } catch (e) { toast((e as Error).message, 'error'); }
   };
 
-  return (
-    <aside className="panel friends-panel">
-      <h3>Friends</h3>
+  const body = (
+    <div className="friends-panel" data-panel="friends">
       <form onSubmit={request} className="inline-form" style={{ marginBottom: 10 }}>
         <input placeholder="Username" aria-label="Friend username" value={name} onChange={(e) => setName(e.target.value)} maxLength={20} required />
         <button className="btn primary small-btn" disabled={busy}>Add</button>
@@ -108,8 +117,13 @@ export function FriendsPanel({ onJoinCall, toast }: {
         ))}
         {friends.length === 0 && <li className="muted small">No friends yet.</li>}
       </ul>
+    </div>
+  );
+  return (
+    <>
+      {open && (onClose ? <Sheet name="friends" title="Friends" onClose={onClose}>{body}</Sheet> : <aside className="panel"><h3>Friends</h3>{body}</aside>)}
       {incoming && (
-        <div className="call-banner">
+        <div className="call-banner call-banner-float" role="alertdialog" aria-label="Incoming call">
           <strong>{incoming.from.username}</strong> is calling…
           <div className="row-actions">
             <button className="btn primary small-btn" onClick={() => answer(true)}>Accept</button>
@@ -117,6 +131,6 @@ export function FriendsPanel({ onJoinCall, toast }: {
           </div>
         </div>
       )}
-    </aside>
+    </>
   );
 }

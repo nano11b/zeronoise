@@ -4,6 +4,7 @@ import { api } from '../api';
 import { NickLabel, UserAvatar } from './UserAvatar';
 import { BadgesSection } from './Badges';
 import { BioSection, PrivacySection, PushSection } from './ProfileExtras';
+import { Icon } from '../icons';
 import { useInstallOffer } from '../pwa';
 import { ThemePicker } from './ThemePicker';
 import type { UiTheme } from '../../shared/uiTheme';
@@ -28,20 +29,31 @@ function InstallItem() {
   );
 }
 
+export type ProfileDialogKind = 'profile' | 'bots' | 'notifications';
+type Toast = (t: string, tone?: 'error' | 'info') => void;
+
+/** The "Your profile" dropdown: short list of items that open dialogs, the theme picker, then Sign out. */
 export function ProfilePanel({
   account,
   onAccount,
   toast,
   onAudioVideo,
   signOut,
+  onOpen,
+  onFriends,
+  onStartRoom,
+  friendRequests = 0,
 }: {
   account: Account;
   onAccount: (a: Account) => void;
-  toast: (t: string, tone?: 'error' | 'info') => void;
+  toast: Toast;
   onAudioVideo?: () => void;
   signOut?: () => void;
+  onOpen: (k: ProfileDialogKind) => void;
+  onFriends?: () => void;
+  onStartRoom?: () => void;
+  friendRequests?: number;
 }) {
-  const [busy, setBusy] = useState(false);
   const themeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTheme = (t: UiTheme) => {
     onAccount({ ...account, uiTheme: t });
@@ -50,17 +62,36 @@ export function ProfilePanel({
       void api('/api/me/ui-theme', { uiTheme: t }, 'PATCH').catch(() => toast('Theme saved in this browser only', 'error'));
     }, 500);
   };
+  return (
+    <aside className="panel profile-panel profile-menu">
+      <h3>Your profile</h3>
+      <div className="profile-actions" role="group" aria-label="Account actions">
+        <button type="button" data-action="open-profile" onClick={() => onOpen('profile')}><Icon name="user" /> Profile</button>
+        {onFriends && <button type="button" data-action="open-friends" onClick={onFriends}><Icon name="people" /> Friends{friendRequests > 0 && <span className="badge" data-friend-requests={friendRequests} aria-label={`${friendRequests} friend request${friendRequests === 1 ? '' : 's'}`}>{friendRequests}</span>}</button>}
+        {onStartRoom && <button type="button" data-action="open-start-room" onClick={onStartRoom}><Icon name="plus" /> Start a room</button>}
+        <button type="button" data-action="open-bots" onClick={() => onOpen('bots')}><Icon name="bot" /> Bots</button>
+        {onAudioVideo && <button type="button" data-action="profile-av" onClick={onAudioVideo}><Icon name="cam" /> Audio & video</button>}
+        <button type="button" data-action="open-notifications" onClick={() => onOpen('notifications')}><Icon name="bell" /> Notifications</button>
+        <InstallItem />
+        <a href="/download" data-action="get-app-menu"><Icon name="download" /> Get the app</a>
+      </div>
+      <ThemePicker onSaved={saveTheme} />
+      {signOut && (
+        <>
+          <hr className="menu-divider" />
+          <div className="profile-actions profile-signout">
+            <button type="button" data-action="sign-out" onClick={signOut}>Sign out</button>
+          </div>
+        </>
+      )}
+    </aside>
+  );
+}
+
+/** "Profile" dialog: preview, avatar, bio, privacy and badges. */
+export function ProfileDialogBody({ account, onAccount, toast }: { account: Account; onAccount: (a: Account) => void; toast: Toast }) {
+  const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [bots, setBots] = useState<{ id: number; name: string; revoked: boolean }[]>([]);
-  const [botName, setBotName] = useState('');
-  const [tokenOnce, setTokenOnce] = useState<string | null>(null);
-
-  const loadBots = async () => {
-    const data = await api<{ bots: { id: number; name: string; revoked: boolean }[] }>('/api/bots');
-    setBots(data.bots);
-  };
-  useEffect(() => { loadBots().catch((e) => toast((e as Error).message, 'error')); }, []);
-
   const upload = async (file: File | null) => {
     if (!file) return;
     setBusy(true);
@@ -88,19 +119,7 @@ export function ProfilePanel({
   };
 
   return (
-    <aside className="panel profile-panel">
-      <h3>Your profile</h3>
-      <div className="profile-actions" role="group" aria-label="Account actions">
-        {onAudioVideo && (
-          <button type="button" data-action="profile-av" onClick={onAudioVideo}>Audio & video</button>
-        )}
-        <InstallItem />
-        <a href="/download" data-action="get-app-menu">Get the app</a>
-        {signOut && (
-          <button type="button" data-action="sign-out" onClick={signOut}>Sign out</button>
-        )}
-      </div>
-      <ThemePicker onSaved={saveTheme} />
+    <div className="profile-dialog" data-panel="profile">
       <div className="profile-preview">
         <UserAvatar nick={account.username} accountId={account.id} chatColor={account.chatColor} hasAvatar={account.hasAvatar} size={48} />
         <div>
@@ -119,9 +138,30 @@ export function ProfilePanel({
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={(e) => upload(e.target.files?.[0] ?? null)} />
       </div>
       <BioSection username={account.username} toast={toast} />
-      <PushSection toast={toast} />
       <PrivacySection toast={toast} />
       <BadgesSection toast={toast} />
+    </div>
+  );
+}
+
+/** "Notifications" dialog: push notifications for this device. */
+export function NotificationsDialogBody({ toast }: { toast: Toast }) {
+  return <div data-panel="notifications"><PushSection toast={toast} /></div>;
+}
+
+/** "Bots" dialog: create bots, copy / rotate / revoke / delete tokens. */
+export function BotsDialogBody({ toast }: { toast: Toast }) {
+  const [busy, setBusy] = useState(false);
+  const [bots, setBots] = useState<{ id: number; name: string; revoked: boolean }[]>([]);
+  const [botName, setBotName] = useState('');
+  const [tokenOnce, setTokenOnce] = useState<string | null>(null);
+  const loadBots = async () => {
+    const data = await api<{ bots: { id: number; name: string; revoked: boolean }[] }>('/api/bots');
+    setBots(data.bots);
+  };
+  useEffect(() => { loadBots().catch((e) => toast((e as Error).message, 'error')); }, []);
+  return (
+    <div data-panel="bots">
       <div className="profile-section">
         <div className="muted small">Chat bots</div>
         <p className="muted small">A bot speaks as itself. It can chat only in rooms whose creator has allowed it. The token is shown once and only a hash is stored.</p>
@@ -193,6 +233,6 @@ export function ProfilePanel({
           ))}
         </ul>
       </div>
-    </aside>
+    </div>
   );
 }

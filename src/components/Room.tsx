@@ -1749,7 +1749,9 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   return (
     <EmoteContext.Provider value={emoteLookup}>
     <div className={`room shell${peopleOpen ? ' people-open' : ''}${railOpen ? ' rail-open' : ''}${panelOpen ? ' panel-open' : ''}${panelCollapsed ? ' panel-collapsed' : ''}`} data-accent={theme?.accent ? '1' : undefined} style={theme?.accent ? ({ ['--room-accent' as string]: theme.accent } as CSSProperties) : undefined} onClick={() => { if (menuFor) setMenuFor(null); if (blockFor) setBlockFor(null); if (peopleOpen) setPeopleOpen(false); if (moreOpen) setMoreOpen(false); if (plusOpen) setPlusOpen(false); if (railOpen) setRailOpen(false); if (panelOpen) setPanelOpen(false); }}>
-      <SiteBar me={me} account={account} onAccount={onAccount} toast={toast} signOut={signOut} openAdmin={openAdmin} wantAccount={wantAccount} onAudioVideo={() => setAvOpen(true)}>
+      <SiteBar me={me} account={account} onAccount={onAccount} toast={toast} signOut={signOut} openAdmin={openAdmin} wantAccount={wantAccount} onAudioVideo={() => setAvOpen(true)}
+        onFriends={account ? () => { try { sessionStorage.setItem('zn.lobbyOpen', 'friends'); } catch { /* ignore */ } onLeave(); } : undefined}
+        onStartRoom={() => { try { sessionStorage.setItem('zn.lobbyOpen', 'create'); } catch { /* ignore */ } onLeave(); }}>
         <IconAction label="Rooms" icon="home" className="ghost" data-action="nav-rooms" onClick={onLeave} />
         <RadioPlayer />
         <IconAction label="Room list" icon="rail" className="ghost drawer-toggle" data-action="open-rail" onClick={() => { setRailOpen((v) => !v); setPanelOpen(false); }} />

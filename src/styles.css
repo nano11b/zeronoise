@@ -2228,3 +2228,26 @@ html[data-ui-theme="dark-orange"] {
 .login-theme { margin-top: 6px; }
 .login-theme summary { cursor: pointer; list-style: none; text-decoration: underline; }
 .login-theme summary::-webkit-details-marker { display: none; }
+/* ---- popup dialogs (Sheet) + compact profile menu ---- */
+.sheet { width: min(560px, 100%); max-height: min(86vh, 860px); padding: 0; gap: 0; overflow: hidden; }
+.sheet-wide { width: min(720px, 100%); }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); flex: none; }
+.sheet-head h3 { margin: 0; font-size: 17px; }
+.sheet-close { width: 36px; height: 36px; flex: none; }
+.sheet-body { overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; overscroll-behavior: contain; min-height: 0; }
+.sheet-body .create .stack { gap: 10px; }
+@media (max-width: 520px) {
+  .sheet-backdrop { padding: 0; place-items: stretch; }
+  .sheet { width: 100%; max-height: none; height: 100%; border-radius: 0; border: 0; }
+  .sheet-head { padding-top: max(12px, env(safe-area-inset-top)); }
+  .sheet-body { padding-bottom: max(14px, env(safe-area-inset-bottom)); flex: 1; }
+}
+.profile-menu .profile-actions button, .profile-menu .profile-actions a { display: flex; align-items: center; gap: 8px; }
+.profile-menu .profile-actions .icon { width: 16px; height: 16px; flex: none; opacity: .85; }
+.profile-menu .profile-actions .badge { margin-left: auto; }
+.menu-divider { border: 0; border-top: 1px solid var(--line); margin: 10px 0 4px; }
+.profile-signout button { color: var(--danger); }
+.chip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); flex: none; }
+.start-room-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.start-room-btn .icon { width: 15px; height: 15px; }
+.call-banner-float { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 70; width: min(360px, calc(100% - 24px)); background: var(--panel); border: 1px solid var(--accent); border-radius: 12px; padding: 12px; box-shadow: 0 20px 50px #000a; }

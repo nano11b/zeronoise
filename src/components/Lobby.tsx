@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import { Sheet } from './Sheet';
 import { LIMITS } from '../../shared/config';
 import type { RoomState, RoomSummary, UserInfo } from '../../shared/types';
 import type { Account } from '../App';
@@ -15,7 +16,7 @@ import { FriendsPanel } from './FriendsPanel';
 import { RadioPlayer } from './RadioPlayer';
 import { GamesButton, GamesSlot } from './GamesSlot';
 import { SiteBar } from './SiteBar';
-import { IconAction } from '../icons';
+import { Icon, IconAction } from '../icons';
 import { THUMB_ACCEPT, thumbFileError, uploadRoomThumb } from './RoomThumb';
 import { ICON_ACCEPT, RoomIconMini, iconFileError, uploadRoomIcon } from './RoomIcon';
 import { CATEGORY_ICON, CATEGORY_LABEL, ROOM_CATEGORIES, cleanTags, type RoomCategory } from '../../shared/batch3';
@@ -56,6 +57,12 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
   useEffect(() => { if (askRoom) { setAskPw({ id: askRoom.id, name: askRoom.name, passwordRequired: true } as RoomSummary); setJoinPw(''); } }, [askRoom?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const [joinPw, setJoinPw] = useState('');
   const [avOpen, setAvOpen] = useState(false);
+  // Friends and Start a room open as dialogs from the profile menu (and the Start a room button by the room list).
+  // A room page sends people here with zn.lobbyOpen = 'friends' | 'create'.
+  const [sheet, setSheet] = useState<'friends' | 'create' | null>(() => {
+    try { const v = sessionStorage.getItem('zn.lobbyOpen'); sessionStorage.removeItem('zn.lobbyOpen'); return v === 'friends' || v === 'create' ? v : null; } catch { return null; }
+  });
+  const [friendRequests, setFriendRequests] = useState(0);
   const [newThumb, setNewThumb] = useState<File | null>(null);
   const thumbRef = useRef<HTMLInputElement>(null);
   const [newIcon, setNewIcon] = useState<File | null>(null);
@@ -128,6 +135,9 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
       <SiteBar
         me={me} account={account} onAccount={onAccount} toast={toast} signOut={signOut} openAdmin={openAdmin} wantAccount={wantAccount} showGuestActions
         onAudioVideo={() => setAvOpen(true)}
+        onFriends={account ? () => setSheet('friends') : undefined}
+        onStartRoom={() => setSheet('create')}
+        friendRequests={friendRequests}
         extras={<><GamesButton onOpen={onGames} /><span className="muted small top-count">{total} online now</span></>}
       >
         <IconAction label="Rooms" icon="home" className="ghost on" data-action="nav-rooms" aria-current="page" />
@@ -143,6 +153,7 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
           </Lazy>
           <div className="section-head">
             <h2>Rooms</h2>
+            <button type="button" className="btn primary small-btn start-room-btn" data-action="create-room" onClick={() => setSheet('create')}><Icon name="plus" /> Start a room</button>
             <input className="search" placeholder="Search rooms or #tags" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Search rooms or tags" data-field="room-filter" />
           </div>
           <div className="cat-chips" role="group" aria-label="Filter by category">
@@ -194,10 +205,8 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
             {roomsLoaded && shown.length === 0 && <p className="muted">No rooms match.{(catFilter || q) && <> <button type="button" className="link-btn" onClick={() => { setCatFilter(''); setFilter(''); }}>Clear filters</button></>}</p>}
           </div>
         </section>
-        <div className="lobby-side">
-        {account && <FriendsPanel onJoinCall={onJoined} toast={toast} />}
-        <aside className="panel create">
-          <h3>Start a room</h3>
+        {sheet === 'create' && <Sheet name="create" title="Start a room" onClose={() => setSheet(null)}>
+        <div className="create" data-panel="create">
           <p className="muted small">
             {account
               ? `You become its owner: set the topic and remove disruptive users. Your rooms stay until you delete them (max ${LIMITS.maxRoomsPerUser}).`
@@ -239,9 +248,10 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
             )}
             <button className="btn primary" disabled={busy}>Create & join</button>
           </form>
-        </aside>
         </div>
+        </Sheet>}
       </main>
+      {account && <FriendsPanel onJoinCall={onJoined} toast={toast} open={sheet === 'friends'} onClose={() => setSheet(null)} onPending={setFriendRequests} />}
       {askPw && (
         <div className="modal-backdrop" onClick={() => setAskPw(null)}>
           <form ref={askRef} className="modal panel" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); void join(askPw.id, joinPw); }} role="dialog" aria-modal="true" aria-label={`Password for ${askPw.name}`}>
