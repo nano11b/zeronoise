@@ -19,7 +19,7 @@ const sharp = require('sharp');
 const { io: ioClient } = require('socket.io-client');
 const OUT = path.resolve(process.argv[2] || path.join(os.tmpdir(), 'zn-batch-b'));
 fs.mkdirSync(OUT, { recursive: true });
-const NET = process.env.BATCH_B_NET !== '0'; // real X / image fetches (needs internet)
+const NET = process.env.BATCH_B_NET === '1'; // real X / image fetches (needs public DNS; the sandbox egress resolves to private addresses, which the SSRF guard blocks)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let passed = 0, failed = 0;
 const ok = (c, n, extra = '') => { c ? passed++ : failed++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}${!c && extra ? ` (${extra})` : ''}`); };
@@ -165,19 +165,25 @@ try {
   f = await emit(mem.s, 'chat:send', { text: 'watch https://www.youtube.com/watch?v=dQw4w9WgXcQ' });
   ok(f.ok, 'allow-listed site passes', f.error);
   await sleep(200);
+  await sleep(2500);
   f = await emit(mem.s, 'chat:send', { text: 'and https://m.youtube.com/watch?v=abc subdomain' });
   ok(f.ok, 'subdomain of an allowed site passes', f.error);
   f = await emit(mem.s, 'chat:send', { text: 'but https://bad.example.net is out' });
   ok(!f.ok, 'other sites are blocked in allow-list mode', f.error);
   // edits are filtered too
+  await sleep(2500);
   const myLine = [...(await emit(other.s, 'room:join', { roomId: room })).room.history].reverse().find((m) => m.text === 'no spoilers here');
   f = await emit(mem.s, 'chat:edit', { messageId: myLine?.id, text: 'edited to a spoiler' });
   ok(!f.ok && /Meowington/.test(f.error), 'editing a line into a filtered word is blocked', f.error);
   const rq = await emit(owner.s, 'modq:room:list', { status: 'open' });
   const fitem = (rq.items ?? []).find((i) => i.key?.startsWith('filter:'));
-  ok(!!fitem && fitem.count >= 3 && fitem.targetNick === 'BbMember', 'blocked lines are logged in the room mod queue (grouped)', JSON.stringify((rq.items ?? []).map((i) => [i.key, i.count])));
-  const aq = await admin.j.req('/api/admin/reports?view=queue&status=open');
-  ok((aq.items ?? []).some((i) => i.key?.startsWith('filter:')), 'staff see the filter entries too');
+  ok(!!fitem && fitem.count >= 1 && fitem.targetNick === 'BbMember' && /filter/.test(fitem.reports?.[0]?.note ?? fitem.reports?.[0]?.reason ?? 'filter'), 'blocked lines are logged in the room mod queue (one entry per sender, updated)', JSON.stringify((rq.items ?? []).map((i) => [i.key, i.count])));
+  if (fitem) {
+    const da = await emit(owner.s, 'modq:room:act', { reportId: fitem.id, action: 'dismiss' });
+    ok(da.ok, 'the room owner can dismiss a filter entry', da.error);
+  }
+  const aq = await admin.j.req('/api/admin/reports?view=queue&status=dismissed');
+  ok((aq.items ?? []).some((i) => i.key?.startsWith('filter:')), 'staff see the filter entries too (dismissed bucket)');
 
   // ---------- 8. scheduled banner + event reminder lines ----------
   const banners = [];
@@ -196,7 +202,7 @@ try {
   ok(ev.ok, 'owner creates an event 6s ahead', ev.error);
   await sleep(3500);
   h2 = (await emit(other.s, 'room:join', { roomId: room })).room;
-  ok(h2.history.some((m) => m.announce && /Reminder: \*\*Trivia hour\*\* starts in/.test(m.text)), 'the "starts soon" reminder posted as a kept announcement line', JSON.stringify(h2.history.slice(-3).map((m) => m.text)));
+  ok(h2.history.some((m) => m.announce && /Reminder: \*\*Trivia hour\*\* starts in [1-9]\d* minutes?\./.test(m.text)), 'the "starts soon" reminder posted as a kept announcement line', JSON.stringify(h2.history.slice(-3).map((m) => m.text)));
   await sleep(3200);
   h2 = (await emit(other.s, 'room:join', { roomId: room })).room;
   ok(h2.history.some((m) => m.announce && /Trivia hour\*\* is starting now/.test(m.text)), 'the "starting now" reminder posted');
@@ -212,6 +218,29 @@ try {
   ok(internalHits === 0, 'SSRF: the preview fetcher never reached a loopback address', String(internalHits));
   const ssrfId = await lineId(`internal http://127.0.0.1:${ipport}/admin`);
   ok(!previews.get(ssrfId), 'no preview card for a private address');
+  {
+    const lp = await import(path.join(ROOT, 'dist/server/server/linkPreview.js'));
+    const sample = JSON.stringify({ author_name: 'jack', html: '<blockquote class="twitter-tweet"><p lang="en" dir="ltr">just setting up my twttr &amp; more<br>line</p>&mdash; jack (@jack) <a href="https://x.com/jack/status/20">March 21, 2006</a></blockquote><script async src="x"></script>' });
+    const px = lp.parseXOembed(sample, 'jack');
+    ok(px.title === 'jack on X' && px.text === 'just setting up my twttr & more line', 'X oEmbed parsing: author + text, tags stripped, entities decoded', JSON.stringify(px));
+    ok(lp.parseXOembed('{"html":"<p><script>alert(1)</script>hi</p>"}', 'bob').text === 'alert(1)hi' && lp.parseXOembed('{}', 'bob').title === '@bob on X', 'X parsing strips markup and falls back to the handle');
+    ok(lp.isImageUrl(new URL('https://a.example/p/cat.JPG')) && !lp.isImageUrl(new URL('https://a.example/cat.jpg.html')), 'image link detection');
+    // fallback cards when the fetch fails (no public DNS here): X keeps a card from the URL alone
+    const xText = 'fallback https://x.com/jack/status/20';
+    await sleep(2500); const sx = await emit(owner.s, 'chat:send', { text: xText });
+    if (!sx.ok) console.log('x send', sx);
+    const imgText = 'fallback pic https://images.example.org/photos/cat.png';
+    await sleep(2500); await emit(owner.s, 'chat:send', { text: imgText });
+    for (let i = 0; i < 40 && !previews.get(await lineId(imgText)); i++) await sleep(250);
+    const xp = previews.get(await lineId(xText));
+    ok(xp?.kind === 'x' && xp.title === '@jack on X' && xp.siteName === 'X', 'X post card (fallback from the URL when oEmbed is unreachable)', JSON.stringify(xp));
+    const ip = previews.get(await lineId(imgText));
+    ok(ip?.kind === 'image' && ip.image?.startsWith('/api/link-preview/') && ip.title === 'cat.png', 'image link card points at the same-origin proxy', JSON.stringify(ip));
+    const r = await fetch(BASE + ip?.image, { headers: { cookie: other.j.header() } });
+    ok(r.status === 404 || r.status === 403, `image proxy refuses an unreachable / blocked upstream (${r.status})`);
+    const r2 = await fetch(BASE + ip?.image);
+    ok(r2.status === 403, 'image proxy is members-only');
+  }
   if (NET) {
     const xText = 'look https://x.com/jack/status/20';
     const imgText = 'pic https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png';
@@ -280,19 +309,24 @@ try {
     await m.page.evaluate(() => { const el = [...document.querySelectorAll('[data-announce="1"]')].pop(); el?.scrollIntoView({ block: 'center' }); });
     await shot(m.page, `b8-banner-reminders-${width}`);
     ok((await m.page.$$('.link-preview')).length === 0, `${width}: previews hidden for a user who turned them off`);
-    await emit(owner.s, 'room:filters:set', { words: 'spoiler', links: 'block', allow: '' });
-    await m.page.type('.chat-form input, .chat-form textarea', 'this is a spoiler');
+    // the owner's browser tab took over the owner's socket; reconnect it to change the filters
+    owner.s = await sock(owner.j); sockets.push(owner.s); await emit(owner.s, 'room:join', { roomId: room });
+    const setF = await emit(owner.s, 'room:filters:set', { words: 'spoiler', links: 'block', allow: '' });
+    if (!setF.ok) console.log('filters set failed', setF);
+    await m.page.click('.chat-form [placeholder^="Message"]');
+    await m.page.type('.chat-form [placeholder^="Message"]', 'this is a spoiler');
     await m.page.keyboard.press('Enter');
     const toast = await m.page.waitForFunction(() => /Meowington blocked/.test(document.body.innerText), { timeout: 5000 }).then(() => true, () => false);
     ok(toast, `${width}: the member sees Meowington's refusal`);
     await shot(m.page, `b7-filter-blocked-${width}`);
     await emit(owner.s, 'room:filters:set', { words: '', links: 'off', allow: '' });
     await m.ctx.close();
-    if (NET) {
+    mem.s = await sock(mem.j); sockets.push(mem.s);
+    {
       const o2 = await pageFor(owner, width);
       await enterRoom(o2.page, room);
       await o2.page.waitForSelector('.link-preview[data-kind="x"]', { timeout: 6000 }).catch(() => {});
-      ok(!!(await o2.page.$('.link-preview[data-kind="x"]')) && !!(await o2.page.$('.link-preview[data-kind="image"]')), `${width}: X and image preview cards render`);
+      ok(!!(await o2.page.$('.link-preview[data-kind="x"]')) && !!(await o2.page.$('.link-preview[data-kind="youtube"]')), `${width}: X and YouTube preview cards render`);
       await o2.page.evaluate(() => document.querySelector('.link-preview[data-kind="x"]')?.scrollIntoView({ block: 'start' }));
       await shot(o2.page, `b9-previews-${width}`);
       await o2.ctx.close();

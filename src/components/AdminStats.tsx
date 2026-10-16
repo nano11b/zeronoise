@@ -21,6 +21,7 @@ export function AdminStats({ onError }: { onError: (m: string) => void }) {
     api<Stats>(`/api/admin/stats?days=${days}&tz=${tz}`).then(setS, (e: Error) => onError(e.message));
   }, [days, onError]);
   if (!s) return <p className="muted">Loading…</p>;
+  const labelEvery = s.days.length > 21 ? 5 : s.days.length > 10 ? (typeof window !== 'undefined' && window.innerWidth < 600 ? 4 : 2) : 1;
   const maxDay = Math.max(1, ...s.days.map((d) => d.users + d.guests));
   const maxHour = Math.max(1, ...s.hours.map((h) => h.messages));
   const peakHour = s.hours.reduce((a, b) => (b.messages > a.messages ? b : a), s.hours[0]);
@@ -41,13 +42,13 @@ export function AdminStats({ onError }: { onError: (m: string) => void }) {
       </div>
       <h3>Daily active users</h3>
       <div className="bars" role="img" aria-label="Daily active accounts and guests" data-chart="dau">
-        {s.days.map((d) => (
+        {s.days.map((d, i) => (
           <div key={d.day} className="bar-col" title={`${dayLabel(d.day)}: ${d.users} accounts, ${d.guests} guest visits, ${d.messages} messages`}>
             <span className="bar-stack" style={{ height: `${((d.users + d.guests) / maxDay) * 100}%` }}>
               <span className="bar guest" style={{ flex: d.guests }} />
               <span className="bar user" style={{ flex: d.users }} />
             </span>
-            <span className="bar-x">{dayLabel(d.day)}</span>
+            <span className="bar-x">{i % labelEvery === (s.days.length - 1) % labelEvery ? dayLabel(d.day) : ''}</span>
           </div>
         ))}
       </div>

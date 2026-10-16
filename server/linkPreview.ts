@@ -83,6 +83,15 @@ export function parseHtmlMeta(html: string, baseUrl: string): { title: string | 
 let active = 0;
 const inflight = new Map<string, Promise<repo2.PreviewRow | null>>();
 
+/** X oEmbed JSON -> card title ("<author> on X") and the post text (tags stripped, entities decoded, 300 chars). */
+export function parseXOembed(json: string, handle: string): { title: string; text: string | null } {
+  const j = JSON.parse(json) as { author_name?: string; html?: string };
+  const para = /<p[^>]*>([\s\S]*?)<\/p>/i.exec(j.html ?? '')?.[1] ?? '';
+  const text = tidy(para.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, ''), 300);
+  return { title: `${tidy(j.author_name ?? '', 80) || `@${handle}`} on X`, text: text || null };
+}
+/** A direct link to an image file (the card is the proxied image). */
+export const isImageUrl = (u: URL) => /\.(png|jpe?g|gif|webp|avif)$/i.test(u.pathname);
 async function fetchPreview(url: string): Promise<repo2.PreviewRow> {
   const existing = repo2.previewByUrl(url);
   const id = existing?.id ?? randomUUID();
@@ -92,22 +101,20 @@ async function fetchPreview(url: string): Promise<repo2.PreviewRow> {
   let u: URL | null = null;
   try { u = new URL(url); } catch { /* checked by the caller */ }
   // a direct image link: the card is the (proxied, re-encoded) image itself
-  if (u && /\.(png|jpe?g|gif|webp|avif)$/i.test(u.pathname)) {
+  if (u && isImageUrl(u)) {
     const name = decodeURIComponent(u.pathname.split('/').pop() || 'image').slice(0, 120);
     return { ...base, ok: 1, kind: 'image', title: name, description: null, image_url: url, site_name: u.hostname.replace(/^www\./, '') };
   }
   // X / Twitter posts: the public oEmbed endpoint (x.com itself serves no metadata to fetchers)
-  const xm = u && /^(?:www\.|mobile\.)?(?:x|twitter)\.com$/i.test(u.hostname) ? /^\/([A-Za-z0-9_]{1,15})\/status(?:es)?\/(\d{5,25})/.exec(u.pathname) : null;
+  const xm = u && /^(?:www\.|mobile\.)?(?:x|twitter)\.com$/i.test(u.hostname) ? /^\/([A-Za-z0-9_]{1,15})\/status(?:es)?\/(\d{1,25})/.exec(u.pathname) : null;
   if (xm) {
     try {
       const r = await safeFetch(`https://publish.x.com/oembed?omit_script=1&dnt=true&url=${encodeURIComponent(`https://twitter.com/${xm[1]}/status/${xm[2]}`)}`, {
         timeoutMs: TIMEOUT_MS, maxBytes: 64 * 1024, maxRedirects: 2, headers: { accept: 'application/json' },
         accept: (status) => { if (status < 200 || status >= 300) throw new FetchError(`HTTP ${status}`, 'status'); },
       });
-      const j = JSON.parse(r.body.toString('utf8')) as { author_name?: string; html?: string };
-      const para = /<p[^>]*>([\s\S]*?)<\/p>/i.exec(j.html ?? '')?.[1] ?? '';
-      const text = tidy(para.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, ''), 300);
-      return { ...base, ok: 1, kind: 'x', title: `${tidy(j.author_name ?? '', 80) || `@${xm[1]}`} on X`, description: text, image_url: null, site_name: 'X' };
+      const x = parseXOembed(r.body.toString('utf8'), xm[1]);
+      return { ...base, ok: 1, kind: 'x', title: x.title, description: x.text, image_url: null, site_name: 'X' };
     } catch {
       return { ...base, ok: 1, kind: 'x', title: `@${xm[1]} on X`, description: null, image_url: null, site_name: 'X' };
     }

@@ -607,7 +607,7 @@ function sendReminder(row: repo2.EventRow, stage: 'soon' | 'start') {
     const sid = accountSockets.get(uid);
     if (sid) io.to(sid).emit('event:reminder', payload);
   }
-  if (room) postAnnounceLine(room, stage === 'start' ? `📅 **${row.title}** is starting now!` : `📅 Reminder: **${row.title}** starts in ${Math.round(EVENT_LEAD / 60_000)} minutes.`, 'Event reminder');
+  if (room) postAnnounceLine(room, stage === 'start' ? `📅 **${row.title}** is starting now!` : `📅 Reminder: **${row.title}** starts in ${Math.max(1, Math.round((row.starts_at - Date.now()) / 60_000))} minute${Math.max(1, Math.round((row.starts_at - Date.now()) / 60_000)) === 1 ? '' : 's'}.`, 'Event reminder');
 }
 /** Due-reminder check. Each stage is claimed in SQLite first, so a restart never re-sends. */
 function eventTick(at = Date.now()) {
@@ -2061,7 +2061,8 @@ function queueAct(actor: QueueActor, reportId: number, body: { action?: unknown;
   const kind = rep.target_kind ?? (rep.message_id ? 'message' : 'user');
   const room = actor.site ? null : actor.room;
   if (!actor.site) {
-    if (!room || rep.room_id !== room.id || kind !== 'message' || rep.private_kind === 'whisper') return fail(403, 'Not a report about this room');
+    const filterEntry = (rep.target_key ?? '').startsWith(`filter:${room?.id}:`);
+    if (!room || rep.room_id !== room.id || (kind !== 'message' && !filterEntry) || rep.private_kind === 'whisper') return fail(403, 'Not a report about this room');
     if (action === 'warn') return fail(403, 'Warnings are sent by site staff');
   }
   const note = cleanText(body?.note, MODQ.resolutionNoteMax) || null;

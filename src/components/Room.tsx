@@ -1958,7 +1958,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                   <div key={m.id} className="msg announce-line" data-msg={m.id} data-announce="1">
                     <span className="ann-ic" aria-hidden>📢</span>
                     <div className="msg-body">
-                      <span className="msg-meta"><b className="ann-room">#{initial.name}</b> <span className="muted">· scheduled by {m.announce.by}</span> <span className="ts">{fmtTime(m.ts)}</span></span>
+                      <span className="msg-meta"><b className="ann-room">#{initial.name}</b> <span className="muted">· {m.announce.by === 'Event reminder' ? 'event reminder' : `scheduled by ${m.announce.by}`}</span> <span className="ts">{fmtTime(m.ts)}</span></span>
                       <ChatText text={m.text} className="text" />
                       {canRoomManage && <span className="msg-actions"><button className="icon-btn" title="Delete message" aria-label="Delete announcement" onClick={() => (mineMsg(m) || !isStaff ? deleteOwn(m) : deleteMsg(m))} data-action="room-delete-msg">🗑</button></span>}
                     </div>
