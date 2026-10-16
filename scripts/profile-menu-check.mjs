@@ -91,7 +91,7 @@ try {
       const last = [...m.querySelectorAll('button, a, fieldset, hr')].filter((e) => e.getClientRects().length).pop();
       return { items, last: last?.getAttribute('data-action'), hasBio: !!m.querySelector('textarea, [data-action="bot-name"], .profile-preview') };
     });
-    const want = ['open-profile', 'open-friends', 'open-start-room', 'open-bots', 'profile-av', 'open-notifications', 'get-app-menu', 'theme', 'divider', 'sign-out'];
+    const want = ['open-profile', 'open-mentions', 'open-friends', 'open-start-room', 'open-bots', 'profile-av', 'open-notifications', 'get-app-menu', 'theme', 'divider', 'sign-out'];
     ok(JSON.stringify(order.items.filter((x) => x !== 'install-app')) === JSON.stringify(want), `${width}: menu order ${order.items.join(' > ')}`);
     ok(order.last === 'sign-out' && !order.hasBio, `${width}: Sign out is last; no profile/bot content left in the menu`);
     ok((await fitsScreen(page, '.me-pop-panel')) === 'ok', `${width}: menu fits the screen (${await fitsScreen(page, '.me-pop-panel')})`);
@@ -99,7 +99,7 @@ try {
     ok(!!(await page.$('[data-action="open-friends"] [data-friend-requests="1"]')), `${width}: Friends item shows the request count`);
     await snap(page, `${width}-menu`);
     // each dialog
-    for (const [act, name] of [['open-profile', 'profile'], ['open-bots', 'bots'], ['open-notifications', 'notifications'], ['open-friends', 'friends'], ['open-start-room', 'create']]) {
+    for (const [act, name] of [['open-profile', 'profile'], ['open-mentions', 'mentions'], ['open-bots', 'bots'], ['open-notifications', 'notifications'], ['open-friends', 'friends'], ['open-start-room', 'create']]) {
       await openMenu(page);
       await page.$eval(`[data-action="${act}"]`, (b) => b.click());
       await page.waitForSelector(`[data-sheet="${name}"]`, { timeout: 8000 });
