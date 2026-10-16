@@ -84,6 +84,7 @@ const AnnouncementEditor = lazyNamed(loadManage, 'AnnouncementEditor');
 const SchedulePanel = lazyNamed(loadManage, 'SchedulePanel');
 const EmoteManager = lazyNamed(loadManage, 'EmoteManager');
 const StatsPanel = lazyNamed(loadManage, 'StatsPanel');
+const FiltersPanel = lazyNamed(loadManage, 'FiltersPanel');
 const EventsPanel = lazyNamed(() => import('./EventsPanel'), 'EventsPanel');
 const panelFallback = <p className="muted small" aria-busy="true">Loading…</p>;
 
@@ -165,6 +166,20 @@ function dayLabel(ts: number) {
   return d.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
+/** Slow mode picker in the room settings (owner / site staff). */
+function SlowModeRow({ seconds, canSet, toast }: { seconds: number; canSet: boolean; toast: (t: string, tone?: 'error' | 'info') => void }) {
+  const opts = [0, 5, 10, 30, 60, 120, 300];
+  return (
+    <label className="muted small slow-row">Slow mode{' '}
+      <select value={opts.includes(seconds) ? seconds : 0} disabled={!canSet} data-field="slow-mode"
+        onChange={(e) => { const v = Number(e.target.value); call((ack) => socket.emit('room:slowmode', { seconds: v }, ack)).catch((err: Error) => toast(err.message, 'error')); }}>
+        {opts.map((o) => <option key={o} value={o}>{o === 0 ? 'Off' : o < 60 ? `${o} seconds` : `${o / 60} minute${o === 60 ? '' : 's'}`}</option>)}
+      </select>
+      {!canSet && <span> (owner only)</span>}
+    </label>
+  );
+}
+
 export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openPm, gifs, onPasswordChange, account, onAccount, onGames, unread, unreadMap, onJoined, signOut, openAdmin, wantAccount }: Props) {
   const [users, setUsers] = useState<UserInfo[]>(initial.users);
   const [messages, setMessages] = useState<ChatMessage[]>(initial.history);
@@ -200,6 +215,16 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const welcomeKey = `zn.welcomeHidden.${initial.id}`;
   const [welcomeHidden, setWelcomeHidden] = useState<string | null>(() => { try { return localStorage.getItem(welcomeKey); } catch { return null; } });
   const [emotes, setEmotes] = useState<RoomEmote[]>(initial.emotes ?? []);
+  const emoteByName = useMemo(() => new Map(emotes.map((e) => [e.name, e])), [emotes]);
+  const [reactPick, setReactPick] = useState<string | null>(null);
+  useEffect(() => {
+    if (!reactPick) return;
+    const off = () => setReactPick(null);
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') off(); };
+    document.addEventListener('click', off);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('click', off); document.removeEventListener('keydown', esc); };
+  }, [reactPick]);
   const emoteLookup = useMemo(() => emoteMap(emotes), [emotes]);
   const [schedules, setSchedules] = useState<RoomScheduleInfo[]>([]);
   const [radioHere, setRadioHere] = useState(initial.radioHere ?? 0);
@@ -1967,7 +1992,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <VoicePlayer voice={m.voice} /> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <ChatText text={m.text} className="text" />}
                     </>}
                     {m.editedAt ? editedMark(m) : null}
-                    {m.preview && !m.burn && !(m.hidden && !canRoomManage) && <LinkPreviewCard messageId={m.id} preview={m.preview} canRemove={mineMsg(m)} onRemove={() => removePreview(m)} />}
+                    {m.preview && account?.linkPreviews !== false && !m.burn && !(m.hidden && !canRoomManage) && <LinkPreviewCard messageId={m.id} preview={m.preview} canRemove={mineMsg(m)} onRemove={() => removePreview(m)} />}
                     {!m.burn && (m.replyCount ?? 0) > 0 && (
                       <button type="button" className="icon-btn reply-count" data-action="open-thread" onClick={() => openThread(m)}>{m.replyCount} {m.replyCount === 1 ? 'reply' : 'replies'}</button>
                     )}
@@ -1980,6 +2005,29 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                           </button>
                         );
                       })}
+                      {(m.reactions ?? []).filter((r) => r.emoji.startsWith(':')).map((r) => {
+                        const em = emoteByName.get(r.emoji.slice(1, -1));
+                        if (!em) return null;
+                        return (
+                          <button key={r.emoji} type="button" className={`react custom on ${r.mine ? 'mine' : ''}`} onClick={() => reactTo(m.id, r.emoji)} data-action="react" data-react-custom={em.name} title={r.emoji}>
+                            <img src={em.url} alt={r.emoji} width={18} height={18} loading="lazy" /><span className="react-n">{r.count}</span>
+                          </button>
+                        );
+                      })}
+                      {emotes.length > 0 && (
+                        <span className="react-more-wrap">
+                          <button type="button" className="react react-more" data-action="react-more" aria-label="React with a room emoji" aria-expanded={reactPick === m.id} title="Room emoji" onClick={(e) => { e.stopPropagation(); setReactPick((v) => (v === m.id ? null : m.id)); }}>＋</button>
+                          {reactPick === m.id && (
+                            <span className="react-pick" role="menu" aria-label="Room emoji" data-testid="react-pick" onClick={(e) => e.stopPropagation()}>
+                              {emotes.slice(0, 50).map((em) => (
+                                <button key={em.id} type="button" role="menuitem" className="react-pick-item" title={`:${em.name}:`} data-react-pick={em.name} onClick={() => { setReactPick(null); reactTo(m.id, `:${em.name}:`); }}>
+                                  <img src={em.url} alt={`:${em.name}:`} width={24} height={24} loading="lazy" />
+                                </button>
+                              ))}
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </span>}
                     <span className="msg-actions">
                       {!m.burn && <button className="icon-btn" title="Reply in thread" aria-label="Reply in thread" onClick={() => openThread(m)} data-action="reply-thread">↩</button>}
@@ -2175,8 +2223,13 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     <summary>Announcement banner{announcement ? ' · on' : ''}</summary>
                     <Lazy fallback={panelFallback} inline><AnnouncementEditor ann={announcement} toast={toast} /></Lazy>
                   </details>
+                  <details className="manage-sec" data-section="filters">
+                    <summary>Slow mode, word and link filters{slowModeSec ? ` · slow ${slowModeSec}s` : ''}</summary>
+                    <SlowModeRow seconds={slowModeSec} canSet={isStaff || isOwner} toast={toast} />
+                    <Lazy fallback={panelFallback} inline><FiltersPanel toast={toast} /></Lazy>
+                  </details>
                   <details className="manage-sec" data-section="schedules">
-                    <summary>Scheduled messages{schedules.length ? ` · ${schedules.length}` : ''}</summary>
+                    <summary>Scheduled announcements{schedules.length ? ` · ${schedules.length}` : ''}</summary>
                     <Lazy fallback={panelFallback} inline><SchedulePanel schedules={schedules} toast={toast} /></Lazy>
                   </details>
                 </>

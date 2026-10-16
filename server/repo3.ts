@@ -22,6 +22,8 @@ export function setAnnouncement(roomId: string, text: string | null, by: string 
 export interface ScheduleRow {
   id: string; room_id: string; text: string; repeat: 'once' | 'daily' | 'weekly'; next_at: number; tz: string | null;
   created_by_user: number | null; created_by_nick: string; created_at: number; last_posted_at: number | null;
+  /** 'message' posts an announcement line; 'banner' replaces the room banner (migration 40) */
+  kind?: string;
 }
 export function schedulesForRoom(roomId: string): ScheduleRow[] {
   return q('SELECT * FROM room_schedules WHERE room_id = ? ORDER BY next_at').all(roomId) as unknown as ScheduleRow[];
@@ -33,8 +35,8 @@ export function scheduleById(id: string): ScheduleRow | undefined {
   return q('SELECT * FROM room_schedules WHERE id = ?').get(id) as unknown as ScheduleRow | undefined;
 }
 export function insertSchedule(r: Omit<ScheduleRow, 'last_posted_at'>) {
-  q('INSERT INTO room_schedules (id, room_id, text, repeat, next_at, tz, created_by_user, created_by_nick, created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(r.id, r.room_id, r.text, r.repeat, r.next_at, r.tz, r.created_by_user, r.created_by_nick, r.created_at);
+  q('INSERT INTO room_schedules (id, room_id, text, repeat, next_at, tz, created_by_user, created_by_nick, created_at, kind) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(r.id, r.room_id, r.text, r.repeat, r.next_at, r.tz, r.created_by_user, r.created_by_nick, r.created_at, r.kind === 'banner' ? 'banner' : 'message');
 }
 export function deleteSchedule(id: string): boolean {
   return Number(q('DELETE FROM room_schedules WHERE id = ?').run(id).changes) > 0;

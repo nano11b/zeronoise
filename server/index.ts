@@ -5,6 +5,9 @@ import fs from 'fs';
 import { readReleaseInfo } from './release';
 import * as repo4 from './repo4';
 import * as repo5 from './repo5';
+import * as repo6 from './repo6';
+import { blockedLink, cleanDomains, cleanWords, isLinkMode, matchWord } from '../shared/filters';
+import { EMOTE_NAME_RE } from '../shared/batch3';
 import { accentReadable, roomBannerUrl, THEME_ACCENT_RE, THEME_WELCOME_MAX, type RoomThemeInfo } from '../shared/theme';
 import { inQuietHours, isNotifyLevel, validTz } from '../shared/notify';
 import { Server, Socket } from 'socket.io';
@@ -604,7 +607,7 @@ function sendReminder(row: repo2.EventRow, stage: 'soon' | 'start') {
     const sid = accountSockets.get(uid);
     if (sid) io.to(sid).emit('event:reminder', payload);
   }
-  if (room) systemMsg(room, stage === 'start' ? `📅 ${row.title} is starting!` : `📅 ${row.title} starts in 15 minutes`);
+  if (room) postAnnounceLine(room, stage === 'start' ? `📅 **${row.title}** is starting now!` : `📅 Reminder: **${row.title}** starts in ${Math.round(EVENT_LEAD / 60_000)} minutes.`, 'Event reminder');
 }
 /** Due-reminder check. Each stage is claimed in SQLite first, so a restart never re-sends. */
 function eventTick(at = Date.now()) {
@@ -688,6 +691,42 @@ function pushIfAway(userId: number, payload: { title: string; body: string; url:
     if (inQuietHours(repo4.quietHours(userId), Date.now())) return;
   } catch (err) { console.error('[push] notify prefs', (err as Error).message); }
   void pushToUser(userId, payload).catch((err) => console.error('[push]', (err as Error).message));
+}
+
+// ---------- room word / link filters, enforced by the moderator bot (batch B) ----------
+function modBotName(): string {
+  const id = repo.moderatorBotId();
+  return (id != null ? repo.botById(id)?.name : null) ?? 'Meowington';
+}
+const ownHosts = (() => { try { return [new URL(PUBLIC_URL).hostname.toLowerCase().replace(/^www\./, '')]; } catch { return []; } })();
+/** Null when the line may be posted; otherwise the refusal. A blocked line goes to the room's mod queue. */
+function filterVerdict(s: Session, room: Room, text: string): string | null {
+  if (room.isPrivate || isStaff(s) || canRoomManage(s, room)) return null;
+  const f = repo6.filtersFor(room.id);
+  if (!f.words.length && f.links === 'off') return null;
+  const word = matchWord(text, f.words);
+  const host = word ? null : blockedLink(text, f, ownHosts);
+  if (!word && !host) return null;
+  const bot = modBotName();
+  try {
+    const key = `filter:${room.id}:${s.account ? `u${s.account.id}` : `n:${s.user!.nick.toLowerCase()}`}`;
+    const note = word ? `Blocked by the room word filter ("${word}")` : `Blocked by the room link filter (${host})`;
+    const dup = modq.findDuplicate({ reporterUserId: null, reporterIp: 'filter', reporterNick: bot, key });
+    if (dup) modq.updateDuplicate(dup.id, word ? 'other' : 'spam', note, false);
+    else {
+      const id = modq.insertReport({
+        reporterUserId: null, reporterNick: bot, reporterIp: 'filter',
+        targetUserId: s.account?.id ?? null, targetNick: s.user!.nick, targetIp: s.ip, targetDevice: s.deviceIds[0] ?? null,
+        roomId: room.id, messageId: null, messageText: text.slice(0, 2000), kind: 'user', key, category: word ? 'other' : 'spam', note,
+        snapshot: { text: text.slice(0, 2000), attachments: [], senderAccountId: s.account?.id ?? null, senderNick: s.user!.nick, roomId: room.id, roomName: room.name, ts: Date.now() },
+        privateKind: null, context: repo.recentMessages(room.id, MODQ.contextSize, false).map((m) => ({ ts: m.ts, from: m.nick, text: m.burn_ttl != null ? '[burn message]' : m.text })), notify: false,
+      });
+      const row = modq.reportById(id);
+      if (row) afterNewReport(row);
+    }
+    repo.logAction(bot, null, 'filter-block', s.user!.nick, room.id, word ? `word "${word}"` : `link ${host}`);
+  } catch (err) { console.error('[filters] log', (err as Error).message); }
+  return word ? `${bot} blocked that message: it contains a word this room filters.` : `${bot} blocked that message: links to ${host} are not allowed in this room.`;
 }
 
 // ---------- mentions inbox (batch A) ----------
@@ -894,6 +933,7 @@ function dropRoom(room: Room) {
   try { lobby.forgetRoom(room.id); } catch (err) { console.error('[rooms] recent cleanup failed', (err as Error).message); }
   try { repo2.deleteRoomData(room.id); } catch (err) { console.error('[rooms] cleanup failed', (err as Error).message); }
   try { repo4.forgetRoomNotify(room.id); } catch (err) { console.error('[rooms] notify cleanup failed', (err as Error).message); }
+  try { repo6.forgetRoomFilters(room.id); } catch (err) { console.error('[rooms] filter cleanup failed', (err as Error).message); }
   try { repo5.forgetRoomReads(room.id); repo5.forgetRoomMentions(room.id); } catch (err) { console.error('[rooms] unread cleanup failed', (err as Error).message); }
   if (refreshEventCaches()) broadcastRooms();
 }
@@ -1559,6 +1599,22 @@ function roomMetaInput(category: unknown, tags: unknown): { error: string } | { 
 function emotesOf(roomId: string): RoomEmote[] {
   try { return repo3.emotesForRoom(roomId).map((e) => ({ id: e.id, name: e.name, url: emoteUrl(e.id), animated: !!e.animated })); } catch { return []; }
 }
+/** A new custom emoji goes to the site moderation queue (filed by the moderator bot) so staff can review it. */
+live.liveCounts = () => ({ online: [...sessions.values()].filter((x) => x.user).length, rooms: [...rooms.values()].filter((r) => r.members.size > 0).length });
+live.emoteAdded = (roomId, emote, by) => {
+  try {
+    const room = rooms.get(roomId);
+    const bot = modBotName();
+    const id = modq.insertReport({
+      reporterUserId: null, reporterNick: bot, reporterIp: 'emote', targetUserId: by.id, targetNick: by.username, targetIp: null, targetDevice: null,
+      roomId, messageId: null, messageText: `:${emote.name}:`, kind: 'room', key: `emote:${emote.id}`, category: 'other',
+      note: `New custom emoji :${emote.name}: in #${room?.name ?? roomId} by ${by.username}. Review: ${emote.url}`,
+      snapshot: null, privateKind: null, context: [], notify: false,
+    });
+    const row = modq.reportById(id);
+    if (row) afterNewReport(row);
+  } catch (err) { console.error('[emotes] review entry', (err as Error).message); }
+};
 live.roomEmotesChanged = (roomId) => {
   const room = rooms.get(roomId);
   if (room) io.to(`room:${room.id}`).emit('room:emotes', { emotes: emotesOf(room.id) });
@@ -1737,7 +1793,7 @@ function nextSlotAfter(prev: number, repeat: 'daily' | 'weekly', tz: string | nu
   return next;
 }
 function scheduleInfo(r: repo3.ScheduleRow): RoomScheduleInfo {
-  return { id: r.id, text: r.text, repeat: r.repeat, nextAt: r.next_at, by: r.created_by_nick, createdAt: r.created_at };
+  return { id: r.id, text: r.text, repeat: r.repeat, nextAt: r.next_at, by: r.created_by_nick, createdAt: r.created_at, kind: r.kind === 'banner' ? 'banner' : 'message' };
 }
 /** Only people who can manage the room see the schedule list. */
 function emitSchedules(room: Room) {
@@ -1748,7 +1804,22 @@ function emitSchedules(room: Room) {
     if (sess && sock && canRoomManage(sess, room)) sock.emit('room:schedules', { schedules: list });
   }
 }
+/** An announcement line in chat that is kept in history (scheduled posts, event reminders). */
+function postAnnounceLine(room: Room, text: string, by: string) {
+  const msg: ChatMessage = { kind: 'chat', id: randomUUID(), ts: Date.now(), fromId: '', from: by, role: 'user', text, mentions: [], reactions: [], announce: { by } };
+  repo.insertMessage({ id: msg.id, room_id: room.id, ts: msg.ts, user_id: null, nick: by, role: 'user', text, ip: null, device_id: null });
+  repo3.markAnnounce(msg.id, room.id, null, by);
+  io.to(`room:${room.id}`).emit('chat:message', msg);
+  if (!room.isPrivate) io.emit('room:activity', { roomId: room.id, mentions: [] });
+}
 function postScheduled(room: Room, r: repo3.ScheduleRow) {
+  if (r.kind === 'banner') {
+    // scheduled banner: replaces the room's announcement banner at that time
+    room.announcement = { text: r.text, at: Date.now(), by: r.created_by_nick };
+    repo3.setAnnouncement(room.id, r.text, r.created_by_nick);
+    io.to(`room:${room.id}`).emit('room:announcement', { announcement: room.announcement });
+    return;
+  }
   const msg: ChatMessage = {
     kind: 'chat', id: randomUUID(), ts: Date.now(), fromId: '', from: r.created_by_nick, role: 'user', text: r.text,
     accountId: r.created_by_user ?? undefined, mentions: [], reactions: [], announce: { by: r.created_by_nick },
@@ -2791,6 +2862,10 @@ function onConnection(socket: AppSocket) {
     const text = prepared.text;
     const room = rooms.get(s.roomId)!;
     {
+      const verdict = filterVerdict(s, room, text);
+      if (verdict) return ack({ ok: false, error: verdict });
+    }
+    {
       const rm = repo2.activeRoomMuteUntil(room.id, identOf(s));
       if (rm && !isStaff(s)) return ack({ ok: false, error: `You are muted in this room for ${Math.ceil((rm - Date.now()) / 60_000)} more minute(s).` });
     }
@@ -2927,6 +3002,11 @@ function onConnection(socket: AppSocket) {
     const prepared = prepareChatText(s, p?.text);
     if ('error' in prepared) return ack({ ok: false, error: prepared.error });
     if (prepared.text === m.text) return ack({ ok: true });
+    {
+      const room = rooms.get(m.room_id);
+      const verdict = room ? filterVerdict(s, room, prepared.text) : null;
+      if (verdict) return ack({ ok: false, error: verdict });
+    }
     const editedAt = Date.now();
     repo.recordEdit(m, editedAt, s.account?.id ?? null);
     repo.editMessage(m.id, prepared.text, editedAt);
@@ -3113,7 +3193,10 @@ function onConnection(socket: AppSocket) {
     const ack = safeAck(ackRaw);
     const s = session();
     if (!s.user || !s.roomId) return ack({ ok: false, error: 'Not in a room' });
-    if (!isReactionEmoji(p?.emoji)) return ack({ ok: false, error: 'Pick a reaction from the list' });
+    // the built-in set, or one of this room's custom emoji as :name:
+    const custom = typeof p?.emoji === 'string' && /^:[a-z0-9_]{2,24}:$/.test(p.emoji) && EMOTE_NAME_RE.test(p.emoji.slice(1, -1))
+      && repo3.emotesForRoom(s.roomId).some((e) => e.name === p.emoji.slice(1, -1));
+    if (!isReactionEmoji(p?.emoji) && !custom) return ack({ ok: false, error: 'Pick a reaction from the list' });
     if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down' });
     const id = String(p?.messageId ?? '');
     const m = repo.messageById(id);
@@ -3817,6 +3900,30 @@ function onConnection(socket: AppSocket) {
     repo4.setQuietHours(s.account.id, { start, end, tz });
     ack({ ok: true, quiet: start === end ? null : { start, end, tz } });
   });
+  socket.on('room:filters:get', (ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
+    if (!canRoomManage(c.s, c.room)) return ack({ ok: false, error: 'Only the room owner or a room moderator can see filters', status: 403 });
+    ack({ ok: true, filters: repo6.filtersFor(c.room.id), bot: modBotName() });
+  });
+  socket.on('room:filters:set', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
+    const { s, room } = c;
+    if (room.isPrivate) return ack({ ok: false, error: 'Private calls have no filters', status: 400 });
+    if (!canRoomManage(s, room)) return ack({ ok: false, error: 'Only the room owner or a room moderator can change filters', status: 403 });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited', status: 429 });
+    const w = cleanWords(p?.words);
+    if ('error' in w) return ack({ ok: false, error: w.error, status: 400 });
+    const d = cleanDomains(p?.allow);
+    if ('error' in d) return ack({ ok: false, error: d.error, status: 400 });
+    if (!isLinkMode(p?.links)) return ack({ ok: false, error: 'Links: off, block or allowlist', status: 400 });
+    repo6.setFilters(room.id, w.words, p.links, d.domains, s.user!.nick);
+    repo.logAction(actorLabel(s), s.account?.id ?? null, 'room-filters', null, room.id, `${w.words.length} words, links ${p.links}${d.domains.length ? ` (${d.domains.length} allowed)` : ''}`);
+    ack({ ok: true, filters: repo6.filtersFor(room.id) });
+  });
   const unreadRl = new RateLimiter(20, 10_000);
   socket.on('unread:get', (ackRaw) => {
     const ack = safeAck(ackRaw);
@@ -4233,6 +4340,7 @@ function onConnection(socket: AppSocket) {
     if (!scheduleRl.take()) return ack({ ok: false, error: 'Too many scheduled messages. Try again later.', status: 429 });
     const tz = isValidTimeZone(p?.tz) ? p!.tz! : null;
     const row = {
+      kind: p?.kind === 'banner' ? 'banner' : 'message',
       id: randomUUID(), room_id: room.id, text, repeat: p!.repeat as 'once' | 'daily' | 'weekly', next_at: Math.round(at), tz,
       created_by_user: s.account?.id ?? null, created_by_nick: s.user!.nick, created_at: now,
     };

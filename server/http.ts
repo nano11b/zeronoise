@@ -1,5 +1,6 @@
 import { isVideoQuality } from '../shared/videoQuality';
 import { isUiTheme } from '../shared/uiTheme';
+import * as repo6 from './repo6';
 import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -245,7 +246,7 @@ export function createApp(roomList: () => unknown) {
     let deviceId = c && DEVICE_RE.test(c) ? c : typeof hdr === 'string' && DEVICE_RE.test(hdr) ? hdr : randomBytes(18).toString('base64url');
     if (deviceId !== c) setCookie(req, res, COOKIE_DID, deviceId, 2 * 365 * 86400);
     const acct = reqAccount(req);
-    const account = acct ? { ...acct, videoQuality: repo.videoQualityOf(acct.id), uiTheme: repo.uiThemeOf(acct.id) } : null;
+    const account = acct ? { ...acct, videoQuality: repo.videoQualityOf(acct.id), uiTheme: repo.uiThemeOf(acct.id), linkPreviews: repo6.linkPreviewsOn(acct.id) } : null;
     const body: MeResponse = {
       account, deviceId, google: googleEnabled, discord: discordEnabled, tiktok: tiktokEnabled, gifs: gifsEnabled, guestCamAfterMinutes: GUEST_CAM_AFTER_MINUTES,
       captchaMode, captchaSiteKey: captchaMode === 'turnstile' ? TURNSTILE_SITE_KEY : captchaMode === 'hcaptcha' ? HCAPTCHA_SITE_KEY : null,
@@ -460,6 +461,17 @@ export function createApp(roomList: () => unknown) {
     }
     live.badgesChanged(a.id);
     res.json(badgesBody(a.id));
+  });
+
+  /** body { linkPreviews: boolean } - show link preview cards under chat lines */
+  app.patch('/api/me/link-previews', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const v = (req.body as { linkPreviews?: unknown })?.linkPreviews;
+    if (typeof v !== 'boolean') return fail(res, 400, 'linkPreviews must be true or false');
+    repo6.setLinkPreviews(a.id, v);
+    res.json({ ok: true, linkPreviews: v });
   });
 
   /** body { uiTheme: 'dark' | 'dark-red' | 'dark-green' | 'dark-orange' } */
@@ -936,6 +948,7 @@ export function createApp(roomList: () => unknown) {
         try { repo3.insertEmote(row); } catch { deleteEmoteFile(row.id); return fail(res, 409, `:${name}: already exists in this room`); }
         repo.logAction(g.a.username, g.a.id, 'emote-add', name, g.roomId);
         live.roomEmotesChanged(g.roomId);
+        live.emoteAdded(g.roomId, emoteJson(row), { id: g.a.id, username: g.a.username });
         res.json({ ok: true, emote: emoteJson(row) });
       } catch (e) {
         return fail(res, 400, (e as Error).message || 'Could not process image');
@@ -1526,6 +1539,12 @@ export function createApp(roomList: () => unknown) {
   const minutesOf = (v: unknown): number | null | undefined => (v === null || v === undefined || v === '' || v === 0 ? null : Number.isFinite(Number(v)) && Number(v) > 0 && Number(v) <= 60 * 24 * 3650 ? Math.round(Number(v)) : undefined);
 
   admin.get('/me', (req, res) => res.json({ ok: true, account: actor(req) }));
+  // Site stats: daily active accounts / guests, busiest rooms, peak hours (?days=7|14|30, ?tz=<minutes east of UTC>)
+  admin.get('/stats', (req, res) => {
+    const days = [7, 14, 30].includes(Number(req.query.days)) ? Number(req.query.days) : 14;
+    const tz = Math.max(-840, Math.min(840, Math.round(Number(req.query.tz) || 0)));
+    res.json({ ok: true, windowDays: days, ...repo6.adminStats(days, tz), live: live.liveCounts() });
+  });
   // Moderation queue: ?view=queue groups reports by target (open / review / resolved / dismissed); without it, the flat list.
   admin.get('/reports', (req, res) => {
     if (req.query.view === 'queue') {

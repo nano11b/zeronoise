@@ -698,6 +698,19 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS whisper_members_user ON whisper_members(user_id)
   `,
+  // 40: batch B - per-room word / link filters (Meowington), scheduled banner posts, per-account link preview toggle.
+  `
+  CREATE TABLE IF NOT EXISTS room_filters (
+    room_id TEXT PRIMARY KEY,
+    words TEXT NOT NULL DEFAULT '',
+    links TEXT NOT NULL DEFAULT 'off',
+    allow_domains TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER,
+    updated_by TEXT
+  );
+  ALTER TABLE room_schedules ADD COLUMN kind TEXT NOT NULL DEFAULT 'message';
+  ALTER TABLE users ADD COLUMN link_previews INTEGER NOT NULL DEFAULT 1
+  `,
 ];
 
 /**

@@ -7,6 +7,7 @@ import {
 import type { RoomAnnouncement, RoomEmote, RoomScheduleInfo, RoomStats, RoomStatsWindow } from '../../shared/types';
 import { api, storedDeviceId } from '../api';
 import { call, socket } from '../socket';
+import { FILTER_DOMAINS_MAX, FILTER_WORDS_MAX, type LinkMode, type RoomFilters } from '../../shared/filters';
 
 type Toast = (t: string, tone?: 'error' | 'info') => void;
 
@@ -72,6 +73,7 @@ export function SchedulePanel({ schedules, toast }: { schedules: RoomScheduleInf
   const [text, setText] = useState('');
   const [when, setWhen] = useState(() => toLocalInput(Math.ceil((Date.now() + 3_600_000) / 900_000) * 900_000));
   const [repeat, setRepeat] = useState<'once' | 'daily' | 'weekly'>('once');
+  const [kind, setKind] = useState<'message' | 'banner'>('message');
   const [busy, setBusy] = useState(false);
   const add = async (e: FormEvent) => {
     e.preventDefault();
@@ -79,9 +81,9 @@ export function SchedulePanel({ schedules, toast }: { schedules: RoomScheduleInf
     if (!Number.isFinite(at)) return toast('Pick a date and time', 'error');
     setBusy(true);
     try {
-      await call((ack) => socket.emit('schedule:create', { text: text.trim(), at, repeat, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }, ack));
+      await call((ack) => socket.emit('schedule:create', { text: text.trim(), at, repeat, kind, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }, ack));
       setText('');
-      toast(repeat === 'once' ? 'Message scheduled' : `Repeats ${repeat}`);
+      toast(`${kind === 'banner' ? 'Banner' : 'Announcement'} ${repeat === 'once' ? 'scheduled' : `repeats ${repeat}`}`);
     } catch (err) { toast((err as Error).message, 'error'); } finally { setBusy(false); }
   };
   const remove = async (id: string) => {
@@ -94,7 +96,7 @@ export function SchedulePanel({ schedules, toast }: { schedules: RoomScheduleInf
           {schedules.map((s) => (
             <li key={s.id} className="sched-row" data-schedule={s.id}>
               <span className="sched-main">
-                <span className="sched-when">{s.repeat === 'once' ? '⏰' : '🔁'} {fmtWhen(s.nextAt)}{s.repeat !== 'once' ? ` · ${s.repeat}` : ''}</span>
+                <span className="sched-when">{s.repeat === 'once' ? '⏰' : '🔁'} {fmtWhen(s.nextAt)}{s.repeat !== 'once' ? ` · ${s.repeat}` : ''} · <span data-schedule-kind={s.kind ?? 'message'}>{s.kind === 'banner' ? 'banner' : 'chat'}</span></span>
                 <span className="sched-text" title={s.text}>{s.text}</span>
                 <span className="muted small">by {s.by}</span>
               </span>
@@ -110,6 +112,9 @@ export function SchedulePanel({ schedules, toast }: { schedules: RoomScheduleInf
             <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} required aria-label="When" data-field="schedule-when" />
             <select value={repeat} onChange={(e) => setRepeat(e.target.value as 'once' | 'daily' | 'weekly')} aria-label="Repeat" data-field="schedule-repeat">
               <option value="once">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option>
+            </select>
+            <select value={kind} onChange={(e) => setKind(e.target.value as 'message' | 'banner')} aria-label="Post as" data-field="schedule-kind">
+              <option value="message">Post in chat</option><option value="banner">Set the banner</option>
             </select>
           </div>
           <button className="btn small-btn" disabled={busy || !text.trim()} data-action="add-schedule">Schedule</button>
@@ -278,5 +283,47 @@ export function StatsPanel({ roomName, toast }: { roomName: string; toast: Toast
         </>
       )}
     </div>
+  );
+}
+
+// ---------------- word / link filters (enforced by the moderator bot) ----------------
+export function FiltersPanel({ toast }: { toast: Toast }) {
+  const [f, setF] = useState<RoomFilters | null>(null);
+  const [bot, setBot] = useState('Meowington');
+  const [words, setWords] = useState('');
+  const [links, setLinks] = useState<LinkMode>('off');
+  const [allow, setAllow] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    call<{ filters: RoomFilters; bot: string }>((ack) => socket.emit('room:filters:get', ack)).then((r) => {
+      setF(r.filters); setBot(r.bot); setWords(r.filters.words.join(', ')); setLinks(r.filters.links); setAllow(r.filters.allow.join(', '));
+    }, (e: Error) => toast(e.message, 'error'));
+  }, [toast]);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const r = await call<{ filters: RoomFilters }>((ack) => socket.emit('room:filters:set', { words, links, allow }, ack));
+      setF(r.filters); setWords(r.filters.words.join(', ')); setAllow(r.filters.allow.join(', '));
+      toast('Filters saved');
+    } catch (err) { toast((err as Error).message, 'error'); } finally { setBusy(false); }
+  };
+  if (!f) return <p className="muted small">Loading…</p>;
+  return (
+    <form className="stack manage-form" onSubmit={save} data-form="room-filters">
+      <p className="muted small">{bot} blocks matching lines before they post and files them in this room&apos;s reports. You and room mods are not filtered.</p>
+      <label className="muted small" htmlFor="flt-words">Blocked words or phrases (comma separated, up to {FILTER_WORDS_MAX})</label>
+      <textarea id="flt-words" value={words} onChange={(e) => setWords(e.target.value)} rows={2} maxLength={4200} placeholder="e.g. spoiler, buy followers" data-field="filter-words" />
+      <label className="muted small" htmlFor="flt-links">Links</label>
+      <select id="flt-links" value={links} onChange={(e) => setLinks(e.target.value as LinkMode)} data-field="filter-links">
+        <option value="off">Allow all links</option>
+        <option value="block">Block all links</option>
+        <option value="allowlist">Only allow these sites</option>
+      </select>
+      {links === 'allowlist' && (
+        <input value={allow} onChange={(e) => setAllow(e.target.value)} placeholder={`youtube.com, x.com (up to ${FILTER_DOMAINS_MAX})`} aria-label="Allowed sites" data-field="filter-allow" />
+      )}
+      <button className="btn small-btn" disabled={busy} data-action="save-filters">Save filters</button>
+    </form>
   );
 }

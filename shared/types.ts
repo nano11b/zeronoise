@@ -1,3 +1,4 @@
+import type { RoomFilters } from './filters';
 import type { StageState } from './stage';
 import type { QueueAction, QueueBucket, QueueCounts, QueueItem, QueueSort, ReportCategory } from './modq';
 import type { ReactionCount } from './reactions';
@@ -55,6 +56,8 @@ export interface MeResponse {
     /** saved camera quality preset (null = never set; the client then uses its local / default value) */
     videoQuality?: string | null;
     uiTheme?: string | null;
+    /** show link preview cards under chat lines (default on) */
+    linkPreviews?: boolean;
   } | null;
   deviceId: string;
   google: boolean;
@@ -101,7 +104,7 @@ export interface RoomSummary {
 
 /** batch 3 */
 export interface RoomAnnouncement { text: string; at: number; by: string }
-export interface RoomScheduleInfo { id: string; text: string; repeat: 'once' | 'daily' | 'weekly'; nextAt: number; by: string; createdAt: number }
+export interface RoomScheduleInfo { id: string; text: string; repeat: 'once' | 'daily' | 'weekly'; nextAt: number; by: string; createdAt: number; kind?: 'message' | 'banner' }
 export interface RoomEmote { id: string; name: string; url: string; animated: boolean }
 export interface RadioNowPlaying {
   station: string; title: string; artist: string; album: string;
@@ -371,7 +374,10 @@ export interface ClientToServer {
   'room:theme:set': (p: { accent?: string | null; welcome?: string | null }, ack: Ack<{ theme: import('./theme').RoomThemeInfo }>) => void;
   'announce:set': (p: { text: string }, ack: Ack<{ announcement: RoomAnnouncement | null }>) => void;
   'schedule:list': (ack: Ack<{ schedules: RoomScheduleInfo[] }>) => void;
-  'schedule:create': (p: { text: string; at: number; repeat: string; tz?: string }, ack: Ack<{ schedule: RoomScheduleInfo }>) => void;
+  'schedule:create': (p: { text: string; at: number; repeat: string; tz?: string; kind?: 'message' | 'banner' }, ack: Ack<{ schedule: RoomScheduleInfo }>) => void;
+  /** batch B: room word / link filters enforced by the moderator bot */
+  'room:filters:get': (ack: Ack<{ filters: RoomFilters; bot: string }>) => void;
+  'room:filters:set': (p: { words: string[] | string; links: string; allow: string[] | string }, ack: Ack<{ filters: RoomFilters }>) => void;
   'schedule:delete': (p: { id: string }, ack: Ack) => void;
   'radio:listen': (p: { on: boolean }, ack: Ack<{ np: RadioNowPlaying | null }>) => void;
   'radio:get': (ack: Ack<{ np: RadioNowPlaying | null }>) => void;
@@ -620,7 +626,7 @@ export interface BookmarkEntry { message: ChatMessage; roomId: string; roomName:
 export interface LinkPreviewInfo {
   id: string;
   url: string;
-  kind: 'page' | 'youtube' | 'twitch';
+  kind: 'page' | 'youtube' | 'twitch' | 'x' | 'image';
   title: string | null;
   description: string | null;
   siteName: string | null;

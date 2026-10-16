@@ -88,7 +88,30 @@ async function fetchPreview(url: string): Promise<repo2.PreviewRow> {
   const id = existing?.id ?? randomUUID();
   const base = { url, id, fetched_at: Date.now() };
   const watch = parseWatchUrl(url);
-  let kind: 'page' | 'youtube' | 'twitch' = 'page';
+  let kind: 'page' | 'youtube' | 'twitch' | 'x' | 'image' = 'page';
+  let u: URL | null = null;
+  try { u = new URL(url); } catch { /* checked by the caller */ }
+  // a direct image link: the card is the (proxied, re-encoded) image itself
+  if (u && /\.(png|jpe?g|gif|webp|avif)$/i.test(u.pathname)) {
+    const name = decodeURIComponent(u.pathname.split('/').pop() || 'image').slice(0, 120);
+    return { ...base, ok: 1, kind: 'image', title: name, description: null, image_url: url, site_name: u.hostname.replace(/^www\./, '') };
+  }
+  // X / Twitter posts: the public oEmbed endpoint (x.com itself serves no metadata to fetchers)
+  const xm = u && /^(?:www\.|mobile\.)?(?:x|twitter)\.com$/i.test(u.hostname) ? /^\/([A-Za-z0-9_]{1,15})\/status(?:es)?\/(\d{5,25})/.exec(u.pathname) : null;
+  if (xm) {
+    try {
+      const r = await safeFetch(`https://publish.x.com/oembed?omit_script=1&dnt=true&url=${encodeURIComponent(`https://twitter.com/${xm[1]}/status/${xm[2]}`)}`, {
+        timeoutMs: TIMEOUT_MS, maxBytes: 64 * 1024, maxRedirects: 2, headers: { accept: 'application/json' },
+        accept: (status) => { if (status < 200 || status >= 300) throw new FetchError(`HTTP ${status}`, 'status'); },
+      });
+      const j = JSON.parse(r.body.toString('utf8')) as { author_name?: string; html?: string };
+      const para = /<p[^>]*>([\s\S]*?)<\/p>/i.exec(j.html ?? '')?.[1] ?? '';
+      const text = tidy(para.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, ''), 300);
+      return { ...base, ok: 1, kind: 'x', title: `${tidy(j.author_name ?? '', 80) || `@${xm[1]}`} on X`, description: text, image_url: null, site_name: 'X' };
+    } catch {
+      return { ...base, ok: 1, kind: 'x', title: `@${xm[1]} on X`, description: null, image_url: null, site_name: 'X' };
+    }
+  }
   let fallback: { title: string | null; image: string | null; siteName: string | null } = { title: null, image: null, siteName: null };
   if (watch?.provider === 'youtube') {
     kind = 'youtube';
@@ -141,7 +164,7 @@ export async function getPreview(url: string): Promise<repo2.PreviewRow | null> 
 
 export function previewInfo(r: repo2.PreviewRow): LinkPreviewInfo {
   return {
-    id: r.id, url: r.url, kind: (r.kind === 'youtube' || r.kind === 'twitch' ? r.kind : 'page'),
+    id: r.id, url: r.url, kind: (r.kind === 'youtube' || r.kind === 'twitch' || r.kind === 'x' || r.kind === 'image' ? r.kind : 'page'),
     title: r.title, description: r.description, siteName: r.site_name,
     image: r.image_url ? `/api/link-preview/${r.id}/image` : null,
   };

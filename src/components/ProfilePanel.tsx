@@ -142,6 +142,18 @@ export function ProfileDialogBody({ account, onAccount, toast }: { account: Acco
       </div>
       <BioSection username={account.username} toast={toast} />
       <PrivacySection toast={toast} />
+      <div className="profile-section previews-section">
+        <div className="muted small">Chat</div>
+        <label className="push-toggle">
+          <input type="checkbox" checked={account.linkPreviews !== false} data-action="link-previews-toggle"
+            onChange={(e) => {
+              const on = e.currentTarget.checked;
+              onAccount({ ...account, linkPreviews: on });
+              void api('/api/me/link-previews', { linkPreviews: on }, 'PATCH').then(() => toast(on ? 'Link previews on' : 'Link previews off'), (err: Error) => { onAccount({ ...account, linkPreviews: !on }); toast(err.message, 'error'); });
+            }} />
+          <span>Show link previews (YouTube, X, images, pages)</span>
+        </label>
+      </div>
       <BadgesSection toast={toast} />
     </div>
   );

@@ -119,6 +119,8 @@ export const live = {
   inviteSettingsChanged: (_roomId: string, _modsCanInvite: boolean, _by: string) => {},
   /** batch 3: emote list changed (HTTP upload/rename/delete) -> tell the room */
   roomEmotesChanged: (_roomId: string) => {},
+  liveCounts: (): { online: number; rooms: number } => ({ online: 0, rooms: 0 }),
+  emoteAdded: (_roomId: string, _emote: { id: string; name: string; url: string }, _by: { id: number; username: string }) => {},
   /** moderation queue: how items look to staff (reporter identity, private content) or room managers */
   modqView: (_staff: boolean): ItemView => ({ staff: false, messageExists: () => false, hidden: () => false, roomName: () => null, targetOnline: () => false, targetRole: () => null }),
   /** one-click action on a queue item (site powers) */

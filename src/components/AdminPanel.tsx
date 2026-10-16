@@ -11,8 +11,9 @@ import { RoleTag } from './RoleTag';
 import { UserAvatar } from './UserAvatar';
 import { GamesButton, GamesSlot } from './GamesSlot';
 import { AdminBackups } from './AdminBackups';
+import { AdminStats } from './AdminStats';
 
-type Tab = 'reports' | 'bans' | 'users' | 'log' | 'backups';
+type Tab = 'reports' | 'stats' | 'bans' | 'users' | 'log' | 'backups';
 const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '-');
 
 export function AdminPanel({ account, onBack, onGames }: { account: Account | null; onBack: () => void; onGames: () => void }) {
@@ -99,9 +100,9 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
       <header className="topbar">
         <div className="brand"><Logo /> <img className="wordmark" src="/logo-wordmark.png" alt="zeronoise" width={512} height={80} /> <span className="muted">· Mod panel</span></div>
         <nav className="tabs admin-tabs">
-          {(['reports', 'bans', 'users', 'log', ...(isAdmin ? ['backups'] : [])] as Tab[]).map((t) => (
+          {(['reports', 'stats', 'bans', 'users', 'log', ...(isAdmin ? ['backups'] : [])] as Tab[]).map((t) => (
             <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)} data-tab={t}>
-              {t === 'reports' ? <>Reports{waiting > 0 && <span className="admin-badge inline" data-testid="modq-tab-badge"> {waiting}</span>}</> : t === 'bans' ? 'Active bans' : t === 'users' ? 'Users' : t === 'log' ? 'Action log' : 'Backups'}
+              {t === 'reports' ? <>Reports{waiting > 0 && <span className="admin-badge inline" data-testid="modq-tab-badge"> {waiting}</span>}</> : t === 'stats' ? 'Stats' : t === 'bans' ? 'Active bans' : t === 'users' ? 'Users' : t === 'log' ? 'Action log' : 'Backups'}
             </button>
           ))}
         </nav>
@@ -227,6 +228,7 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
           </section>
         )}
 
+        {tab === 'stats' && <AdminStats onError={setError} />}
         {tab === 'backups' && isAdmin && <AdminBackups onError={setError} onNotice={(m) => { setNotice(m); setTimeout(() => setNotice(''), 3000); }} />}
 
         {tab === 'log' && (

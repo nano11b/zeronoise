@@ -2269,3 +2269,33 @@ html[data-ui-theme="dark-orange"] {
 .rail-badge.mention { background: var(--danger, #e5484d); }
 .new-divider { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--danger, #e5484d); font-size: 12px; font-weight: 600; }
 .new-divider::before, .new-divider::after { content: ''; flex: 1; height: 1px; background: currentColor; opacity: .6; }
+
+/* ---- batch B: custom emoji reactions, image / X previews, admin stats ---- */
+.react.custom img { width: 18px; height: 18px; vertical-align: -4px; object-fit: contain; }
+.react-more-wrap { position: relative; display: inline-flex; }
+.react-pick { position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 30; display: grid; grid-template-columns: repeat(6, 32px); gap: 4px; padding: 6px; border-radius: 10px; background: var(--panel, #161b24); border: 1px solid var(--border, #2a2f3a); box-shadow: 0 8px 24px rgba(0,0,0,.4); max-width: min(240px, 80vw); }
+.react-pick-item { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; cursor: pointer; }
+.react-pick-item:hover, .react-pick-item:focus-visible { background: color-mix(in srgb, var(--accent, #6cf) 18%, transparent); }
+.react-pick-item img { width: 24px; height: 24px; object-fit: contain; }
+.link-preview.image .lp-body { display: block; }
+.link-preview.image .lp-thumb { display: block; width: auto; max-width: min(360px, 100%); height: auto; }
+.link-preview.image .lp-thumb img { width: auto; max-width: 100%; max-height: 300px; height: auto; object-fit: contain; border-radius: 8px; }
+.link-preview.xpost .lp-desc { -webkit-line-clamp: 5; white-space: normal; }
+.slow-row { display: flex; align-items: center; gap: 6px; margin: 4px 0 8px; flex-wrap: wrap; }
+.admin-stats { display: flex; flex-direction: column; gap: 10px; max-width: 980px; }
+.stat-cards { display: flex; flex-wrap: wrap; gap: 8px; }
+.stat-card { display: flex; flex-direction: column; padding: 8px 12px; border: 1px solid var(--border, #2a2f3a); border-radius: 10px; min-width: 110px; }
+.stat-card b { font-size: 22px; }
+.stat-card span { font-size: 12px; opacity: .8; }
+.bars { display: flex; align-items: flex-end; gap: 4px; height: 160px; padding: 4px 0 22px; border-bottom: 1px solid var(--border, #2a2f3a); overflow-x: auto; }
+.bar-col { position: relative; flex: 1 0 18px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.bar-stack { width: 70%; min-height: 2px; display: flex; flex-direction: column; border-radius: 4px 4px 0 0; overflow: hidden; }
+.bar.user { background: var(--accent, #4ade80); }
+.bar.guest { background: color-mix(in srgb, var(--accent, #4ade80) 40%, #888); }
+.bar-col.peak .bar.user { background: var(--danger, #e5484d); }
+.bar-x { position: absolute; bottom: -20px; font-size: 10px; white-space: nowrap; opacity: .75; }
+.key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 8px; vertical-align: -1px; }
+.key.user { background: var(--accent, #4ade80); }
+.key.guest { background: color-mix(in srgb, var(--accent, #4ade80) 40%, #888); }
+.stats-rooms td, .stats-rooms th { padding: 4px 8px; text-align: left; }
+@media (max-width: 520px) { .bars.hours .bar-col { flex-basis: 10px; } }

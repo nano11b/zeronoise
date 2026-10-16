@@ -23,8 +23,9 @@ export function LinkPreviewCard({ messageId, preview, canRemove, onRemove }: { m
   let host = '';
   try { host = new URL(preview.url).hostname.replace(/^www\./, ''); } catch { /* keep blank */ }
   const video = preview.kind === 'youtube' || preview.kind === 'twitch';
+  const image = preview.kind === 'image';
   return (
-    <div className={`link-preview${collapsed ? ' collapsed' : ''}${video ? ' video' : ''}`} data-preview={preview.id} data-kind={preview.kind}>
+    <div className={`link-preview${collapsed ? ' collapsed' : ''}${video ? ' video' : ''}${image ? ' image' : ''}${preview.kind === 'x' ? ' xpost' : ''}`} data-preview={preview.id} data-kind={preview.kind}>
       <div className="lp-bar">
         <span className="lp-site">{preview.siteName || host}</span>
         <button type="button" className="icon-btn" data-action="preview-collapse" aria-expanded={!collapsed} title={collapsed ? 'Show preview' : 'Hide preview'} aria-label={collapsed ? 'Show preview' : 'Hide preview'} onClick={toggle}>{collapsed ? '▸' : '▾'}</button>
@@ -34,14 +35,14 @@ export function LinkPreviewCard({ messageId, preview, canRemove, onRemove }: { m
         <a className="lp-body" href={preview.url} target="_blank" rel="noopener noreferrer nofollow ugc">
           {preview.image && imgOk && (
             <span className="lp-thumb">
-              <img src={preview.image} alt="" loading="lazy" onError={() => setImgOk(false)} />
+              <img src={preview.image} alt={image ? preview.title ?? 'image' : ''} loading="lazy" onError={() => setImgOk(false)} />
               {video && <span className="lp-play" aria-hidden="true">▶</span>}
             </span>
           )}
-          <span className="lp-text">
+          {!image && <span className="lp-text">
             {preview.title && <span className="lp-title">{preview.title}</span>}
             {preview.description && <span className="lp-desc">{preview.description}</span>}
-          </span>
+          </span>}
         </a>
       )}
     </div>
