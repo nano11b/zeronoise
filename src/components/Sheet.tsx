@@ -17,11 +17,24 @@ export function Sheet({ title, name, onClose, children, wide }: { title: string;
     onClose();
   };
   useModal(ref, close);
+  const alive = useRef(false);
   useEffect(() => {
+    alive.current = true;
     try { history.pushState({ ...(history.state ?? {}), znSheet: name }, ''); } catch { /* ignore */ }
     const onPop = () => { if (!closing.current) { closing.current = true; onClose(); } };
     window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
+    return () => {
+      alive.current = false;
+      window.removeEventListener('popstate', onPop);
+      // Unmounted without closing (e.g. "Create" moved into the new room and took the lobby with it):
+      // drop our history entry too, so the next Back press is not wasted on a sheet that is gone.
+      if (!closing.current) {
+        window.setTimeout(() => {
+          if (alive.current) return;
+          if ((history.state as { znSheet?: string } | null)?.znSheet === name) history.back();
+        }, 0);
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (

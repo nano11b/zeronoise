@@ -8,6 +8,7 @@ import { Icon } from '../icons';
 import { useInstallOffer } from '../pwa';
 import { ThemePicker } from './ThemePicker';
 import type { UiTheme } from '../../shared/uiTheme';
+import { useMentions } from '../mentions';
 
 /** Quiet, dismissible install entry: the browser prompt, or the Share -> Add to Home Screen hint on iOS. Hidden when installed. */
 function InstallItem() {
@@ -29,7 +30,7 @@ function InstallItem() {
   );
 }
 
-export type ProfileDialogKind = 'profile' | 'bots' | 'notifications';
+export type ProfileDialogKind = 'profile' | 'bots' | 'notifications' | 'mentions';
 type Toast = (t: string, tone?: 'error' | 'info') => void;
 
 /** The "Your profile" dropdown: short list of items that open dialogs, the theme picker, then Sign out. */
@@ -55,6 +56,7 @@ export function ProfilePanel({
   friendRequests?: number;
 }) {
   const themeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { unread: mentionsUnread } = useMentions();
   const saveTheme = (t: UiTheme) => {
     onAccount({ ...account, uiTheme: t });
     if (themeTimer.current) clearTimeout(themeTimer.current);
@@ -67,6 +69,7 @@ export function ProfilePanel({
       <h3>Your profile</h3>
       <div className="profile-actions" role="group" aria-label="Account actions">
         <button type="button" data-action="open-profile" onClick={() => onOpen('profile')}><Icon name="user" /> Profile</button>
+        <button type="button" data-action="open-mentions" onClick={() => onOpen('mentions')}><Icon name="bell" /> Mentions{mentionsUnread > 0 && <span className="badge mention" data-menu-mentions={mentionsUnread} aria-label={`${mentionsUnread} unread`}>{mentionsUnread > 99 ? '99+' : mentionsUnread}</span>}</button>
         {onFriends && <button type="button" data-action="open-friends" onClick={onFriends}><Icon name="people" /> Friends{friendRequests > 0 && <span className="badge" data-friend-requests={friendRequests} aria-label={`${friendRequests} friend request${friendRequests === 1 ? '' : 's'}`}>{friendRequests}</span>}</button>}
         {onStartRoom && <button type="button" data-action="open-start-room" onClick={onStartRoom}><Icon name="plus" /> Start a room</button>}
         <button type="button" data-action="open-bots" onClick={() => onOpen('bots')}><Icon name="bot" /> Bots</button>

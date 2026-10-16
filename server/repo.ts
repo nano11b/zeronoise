@@ -490,6 +490,10 @@ export function deleteUsersMatching(pattern: string): { deleted: number; usernam
       q('DELETE FROM user_blocks WHERE user_id = ? OR blocked_id = ?').run(u.id, u.id);
       q('DELETE FROM recent_rooms WHERE user_id = ?').run(u.id);
       q('DELETE FROM room_invite_uses WHERE user_id = ?').run(u.id);
+      q('DELETE FROM mention_inbox WHERE user_id = ?').run(u.id);
+      q('DELETE FROM room_reads WHERE user_id = ?').run(u.id);
+      q('DELETE FROM whisper_members WHERE user_id = ?').run(u.id);
+      q('DELETE FROM whisper_messages WHERE id NOT IN (SELECT message_id FROM whisper_members)').run();
       q('DELETE FROM users WHERE id = ?').run(u.id);
     }
     return { deleted: list.length, usernames: list.map((u) => u.username) };

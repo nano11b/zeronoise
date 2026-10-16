@@ -76,10 +76,24 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
       setRoomsLoaded(true);
       try { localStorage.setItem(SKELETON_KEY, String(r.length)); } catch { /* ignore */ }
     };
-    const onRooms = (r: RoomSummary[]) => got(r);
+    let alive = true;
+    let have = false;
+    let retry: number | undefined;
+    const onRooms = (r: RoomSummary[]) => { have = true; got(r); };
+    // Ask for the list now and again after every (re)connect. An ask sent just before a reconnect loses its
+    // answer, and the server only pushes 'rooms' on changes, so without this the lobby could stay empty.
+    const ask = (attempt = 0) => {
+      call<{ rooms: RoomSummary[] }>((ack) => socket.emit('rooms:list', ack), 6000).then((r) => { if (alive) { have = true; got(r.rooms); } }).catch(() => {
+        if (!alive || have) return;
+        setRoomsLoaded(true);
+        if (attempt < 5) retry = window.setTimeout(() => ask(attempt + 1), 1000);
+      });
+    };
+    const onConnect = () => ask();
     socket.on('rooms', onRooms);
-    call<{ rooms: RoomSummary[] }>((ack) => socket.emit('rooms:list', ack)).then((r) => got(r.rooms)).catch(() => setRoomsLoaded(true));
-    return () => { socket.off('rooms', onRooms); };
+    socket.on('connect', onConnect);
+    ask();
+    return () => { alive = false; window.clearTimeout(retry); socket.off('rooms', onRooms); socket.off('connect', onConnect); };
   }, []);
 
   const join = async (roomId: string, password?: string) => {

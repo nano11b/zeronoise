@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID } from 'crypto';
 import fs from 'fs';
 import { readReleaseInfo } from './release';
 import * as repo4 from './repo4';
+import * as repo5 from './repo5';
 import { accentReadable, roomBannerUrl, THEME_ACCENT_RE, THEME_WELCOME_MAX, type RoomThemeInfo } from '../shared/theme';
 import { inQuietHours, isNotifyLevel, validTz } from '../shared/notify';
 import { Server, Socket } from 'socket.io';
@@ -44,7 +45,7 @@ import { EVENT_KEEP_PAST_MS, EVENT_MAX_UPCOMING, EVENT_REMIND_LEAD_MS, EVENT_SOO
 import { pollFallbackText, validatePoll } from '../shared/polls';
 import { firstPreviewUrl, getPreview, previewInfo } from './linkPreview';
 import { pushToUser } from './push';
-import type { EventReminder, LinkPreviewInfo, PollInfo, RoomEventInfo, RoomModInfo, SearchHit } from '../shared/types';
+import type { EventReminder, MentionItem, LinkPreviewInfo, PollInfo, RoomEventInfo, RoomModInfo, SearchHit } from '../shared/types';
 import { deleteRoomThumb, sweepRoomThumbs } from './roomThumbs';
 import { roomThumbUrl } from '../shared/roomThumbs';
 import { deleteRoomIcon, sweepRoomIcons } from './roomIcons';
@@ -371,6 +372,7 @@ function roomModsOf(room: Room): RoomModInfo[] {
 function roomState(room: Room, s: Session): RoomState {
   return {
     id: room.id, name: room.name, topic: room.topic, ownerNick: room.ownerNick, permanent: room.permanent, persistent: room.persistent,
+    lastReadTs: s.account ? repo5.readTs(s.account.id, room.id) : null,
     users: roomUsersWithGhost(room), history: history(room, repo.userKey(identOf(s)), s), canModerate: isStaff(s), isOwner: isOwner(s, room), camAllowedAt: camAllowedAt(s),
     locked: room.locked, slowModeSec: room.slowModeSec, isPrivate: room.isPrivate, passwordRequired: !!room.passwordHash,
     pins: pinsOf(room.id, repo.userKey(identOf(s))),
@@ -688,6 +690,37 @@ function pushIfAway(userId: number, payload: { title: string; body: string; url:
   void pushToUser(userId, payload).catch((err) => console.error('[push]', (err as Error).message));
 }
 
+// ---------- mentions inbox (batch A) ----------
+function mentionItemOf(r: repo5.MentionRow): MentionItem {
+  return {
+    id: r.id, kind: r.kind === 'reply' ? 'reply' : 'mention', roomId: r.room_id,
+    roomName: rooms.get(r.room_id)?.name ?? repo.roomRowById(r.room_id)?.name ?? r.room_id,
+    messageId: r.message_id, from: r.from_nick, ts: r.ts, text: r.deleted || r.text == null ? '' : r.text.slice(0, 300), read: r.read_at != null,
+  };
+}
+/** @mentions and replies to an account's message go to that account's inbox (public rooms, or rooms they are in). */
+function recordMentions(room: Room, msg: { id: string; ts: number; from: string; mentions?: number[] }, s: Session, parentId: string | null) {
+  try {
+    const targets = new Map<number, 'mention' | 'reply'>();
+    if (parentId) {
+      const parent = repo.messageById(parentId);
+      if (parent?.user_id) targets.set(parent.user_id, 'reply');
+    }
+    for (const uid of msg.mentions ?? []) targets.set(uid, 'mention');
+    for (const [uid, kind] of targets) {
+      if (uid === s.account?.id) continue;
+      if (s.account && lobby.blockedEitherWay(uid, s.account.id)) continue;
+      const live = liveAccount(uid);
+      if ((room.isPrivate || room.passwordHash) && !(live && live.ts.roomId === room.id)) continue;
+      if (!repo5.addMention(uid, msg.id, room.id, kind, msg.from, msg.ts)) continue;
+      if (live) {
+        const row = repo5.listMentions(uid, 1)[0];
+        if (row) live.sock.emit('mentions:new', { item: mentionItemOf(row), unread: repo5.unreadMentionCount(uid) });
+      }
+    }
+  } catch (err) { console.error('[mentions] record', (err as Error).message); }
+}
+
 // ---------- whispers ----------
 function whisperInfo(room: Room, id: string): WhisperInfo | null {
   const set = room.whispers.get(id);
@@ -861,6 +894,7 @@ function dropRoom(room: Room) {
   try { lobby.forgetRoom(room.id); } catch (err) { console.error('[rooms] recent cleanup failed', (err as Error).message); }
   try { repo2.deleteRoomData(room.id); } catch (err) { console.error('[rooms] cleanup failed', (err as Error).message); }
   try { repo4.forgetRoomNotify(room.id); } catch (err) { console.error('[rooms] notify cleanup failed', (err as Error).message); }
+  try { repo5.forgetRoomReads(room.id); repo5.forgetRoomMentions(room.id); } catch (err) { console.error('[rooms] unread cleanup failed', (err as Error).message); }
   if (refreshEventCaches()) broadcastRooms();
 }
 function maybeRemoveRoom(room: Room) {
@@ -1626,6 +1660,7 @@ function lobbyJoined(room: Room, s: Session) {
   friendRoomPing(s.account.id);
 }
 function lobbyLeft(room: Room, accountId: number) {
+  try { repo5.markRead(accountId, room.id); repo5.readMentionsInRoom(accountId, room.id); } catch (err) { console.error('[unread] mark', (err as Error).message); }
   // the visit ends now: unread counts start from here
   try { if (!room.isPrivate && !room.callPeers && rooms.get(room.id) === room) lobby.touchRecent(accountId, room.id); } catch (err) { console.error('[lobby] recent', (err as Error).message); }
   friendRoomPing(accountId);
@@ -2687,6 +2722,11 @@ function onConnection(socket: AppSocket) {
     const message: WhisperMessage = { id: randomUUID(), whisperId: id, ts: Date.now(), fromId: socket.id, from: s.user!.nick, text: prepared.text };
     for (const sid of set) io.to(sid).emit('whisper:message', message);
     logWhisper({ m: message, members: new Set(set), accountId: s.account?.id ?? null, ip: s.ip, device: s.deviceIds[0] ?? null, roomId: room.id });
+    try {
+      // kept for the member accounts only (guests have nothing to come back to); pruned after 30 days
+      const accts = [...set].map((sid) => sessions.get(sid)?.account?.id).filter((x): x is number => typeof x === 'number');
+      repo5.saveWhisper({ id: message.id, whisper_id: id, room_id: room.id, ts: message.ts, from_user_id: s.account?.id ?? null, from_nick: message.from, text: message.text }, accts);
+    } catch (err) { console.error('[whisper] save', (err as Error).message); }
     ack({ ok: true, message });
     for (const sid of set) {
       if (sid === socket.id) continue;
@@ -2796,6 +2836,7 @@ function onConnection(socket: AppSocket) {
       // @mentions for people who are away: content only when the room is open to anyone
       const open = !room.passwordHash && !room.isPrivate;
       const mentioned = new Set(msg.mentions ?? []);
+      recordMentions(room, msg, s, parentId);
       for (const uid of mentioned) {
         if (uid === s.account?.id) continue;
         pushIfAway(uid, { title: `${s.user.nick} mentioned you in #${room.name}`, body: open ? text.slice(0, 200) : 'New mention', url: `/?room=${encodeURIComponent(room.id)}`, tag: `room-${room.id}` }, room.id, 'mention');
@@ -3776,6 +3817,53 @@ function onConnection(socket: AppSocket) {
     repo4.setQuietHours(s.account.id, { start, end, tz });
     ack({ ok: true, quiet: start === end ? null : { start, end, tz } });
   });
+  const unreadRl = new RateLimiter(20, 10_000);
+  socket.on('unread:get', (ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (!s.account) return ack({ ok: true, rooms: {}, mentions: 0 });
+    if (!unreadRl.take()) return ack({ ok: false, error: 'Slow down', status: 429 });
+    const out: Record<string, { n: number; mention: boolean }> = {};
+    const ident = identOf(s);
+    for (const r of repo5.readRows(s.account.id)) {
+      const room = rooms.get(r.room_id);
+      if (!room || room.callPeers || r.room_id === s.roomId) continue;
+      if (room.isPrivate && !room.members.has(socket.id)) continue;
+      if (repo.activeRoomBan(room.id, ident)) continue;
+      const u = lobby.unreadSince(room.id, r.read_ts, s.account.id, s.account.username);
+      if (u.unread > 0) out[room.id] = { n: u.unread, mention: u.mentions > 0 };
+    }
+    ack({ ok: true, rooms: out, mentions: repo5.unreadMentionCount(s.account.id) });
+  });
+  socket.on('room:read', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    const roomId = String(p?.roomId ?? '');
+    if (!s.account || !roomId || s.roomId !== roomId || !rooms.has(roomId)) return ack({ ok: false, error: 'Not in that room' });
+    if (!unreadRl.take()) return ack({ ok: false, error: 'Slow down', status: 429 });
+    const t = Date.now();
+    const ts = typeof p?.ts === 'number' && Number.isFinite(p.ts) && p.ts > 0 ? Math.min(p.ts, t) : t;
+    repo5.markRead(s.account.id, roomId, ts);
+    repo5.readMentionsInRoom(s.account.id, roomId, ts);
+    ack({ ok: true });
+  });
+  socket.on('mentions:list', (ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (!s.account) return ack({ ok: false, error: 'Sign in to see mentions', status: 401 });
+    if (!unreadRl.take()) return ack({ ok: false, error: 'Slow down', status: 429 });
+    const items = repo5.listMentions(s.account.id).filter((r) => r.text != null && !r.deleted).map(mentionItemOf);
+    ack({ ok: true, items, unread: repo5.unreadMentionCount(s.account.id) });
+  });
+  socket.on('mentions:read', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (!s.account) return ack({ ok: false, error: 'Sign in to see mentions', status: 401 });
+    if (!unreadRl.take()) return ack({ ok: false, error: 'Slow down', status: 429 });
+    const ids = p?.ids === 'all' ? 'all' : Array.isArray(p?.ids) ? p.ids.filter((x): x is number => Number.isInteger(x)) : [];
+    repo5.setMentionRead(s.account.id, ids, p?.read !== false);
+    ack({ ok: true, unread: repo5.unreadMentionCount(s.account.id) });
+  });
   socket.on('whisper:search', (p, ackRaw) => {
     const ack = safeAck(ackRaw);
     const c = roomCtx();
@@ -3796,6 +3884,20 @@ function onConnection(socket: AppSocket) {
       if (!tokens.every((t) => text.includes(t))) continue;
       hits.push(m);
       if (hits.length >= 50) break;
+    }
+    // saved lines from earlier sessions (this account was a member), so search works after reconnects and restarts
+    if (hits.length < 50 && c.s.account) {
+      const seen = new Set(hits.map((h) => h.id));
+      const meId = c.s.account.id;
+      for (const r of repo5.whispersFor(meId, c.room.id, filter.after != null ? filter.after - 1 : null, filter.before ?? null)) {
+        if (seen.has(r.id)) continue;
+        if (filter.from && r.from_nick.toLowerCase() !== filter.from.toLowerCase()) continue;
+        const text = r.text.toLowerCase();
+        if (!tokens.every((t) => text.includes(t))) continue;
+        hits.push({ id: r.id, whisperId: r.whisper_id, ts: r.ts, fromId: r.from_user_id === meId ? socket.id : `acct:${r.from_user_id ?? 0}`, from: r.from_nick, text: r.text });
+        if (hits.length >= 50) break;
+      }
+      hits.sort((a, b) => b.ts - a.ts);
     }
     ack({ ok: true, hits });
   });
@@ -4230,6 +4332,7 @@ function runPrune() {
   try {
     const r = repo.prune();
     try { repo.pruneEdits(); } catch (err) { console.error('[prune] edit history failed', (err as Error).message); }
+    try { const n = repo5.pruneWhispers(); if (n) console.log(`[prune] removed ${n} old whisper line(s)`); } catch (err) { console.error('[prune] whispers', (err as Error).message); }
     if (r.messages || r.sessions) console.log(`[prune] removed ${r.messages} old messages, ${r.sessions} expired sessions`);
   } catch (err) { console.error('[prune] failed', err); }
   const t = Date.now();

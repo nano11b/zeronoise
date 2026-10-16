@@ -10,14 +10,16 @@ import { RoleTag } from './RoleTag';
 import { NickLabel, UserAvatar } from './UserAvatar';
 import { useStaffCounts } from '../modq';
 import { Sheet } from './Sheet';
+import { useMentions } from '../mentions';
 
 const loadProfile = () => import('./ProfilePanel');
 const ProfilePanel = lazyNamed(loadProfile, 'ProfilePanel');
 const ProfileDialogBody = lazyNamed(loadProfile, 'ProfileDialogBody');
 const BotsDialogBody = lazyNamed(loadProfile, 'BotsDialogBody');
 const NotificationsDialogBody = lazyNamed(loadProfile, 'NotificationsDialogBody');
-type ProfileDialogKind = 'profile' | 'bots' | 'notifications';
-const DIALOG_TITLE: Record<ProfileDialogKind, string> = { profile: 'Profile', bots: 'Bots', notifications: 'Notifications' };
+const MentionsDialogBody = lazyNamed(() => import('./MentionsPanel'), 'MentionsDialogBody');
+type ProfileDialogKind = 'profile' | 'bots' | 'notifications' | 'mentions';
+const DIALOG_TITLE: Record<ProfileDialogKind, string> = { profile: 'Profile', bots: 'Bots', notifications: 'Notifications', mentions: 'Mentions' };
 
 /** Shared top bar: logo, centered section buttons, online status, and the name chip. */
 export function SiteBar({
@@ -50,6 +52,7 @@ export function SiteBar({
   const [profileOpen, setProfileOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [dialog, setDialog] = useState<ProfileDialogKind | null>(null);
+  const { unread: mentionsUnread } = useMentions();
   // The profile panel loads the first time it opens, then stays mounted.
   const [profileEver, setProfileEver] = useState(false);
   if (profileOpen && !profileEver) setProfileEver(true);
@@ -113,6 +116,13 @@ export function SiteBar({
           )}
         </div>
         )}
+        {account && onAccount && (
+          <button type="button" className="btn ghost small-btn bell-btn" data-action="mentions-bell" onClick={() => { setProfileOpen(false); setDialog('mentions'); }}
+            title="Mentions" aria-label={mentionsUnread ? `Mentions, ${mentionsUnread} unread` : 'Mentions'}>
+            <Icon name="bell" />
+            {mentionsUnread > 0 && <span className="admin-badge" data-testid="mentions-badge" aria-hidden="true">{mentionsUnread > 99 ? '99+' : mentionsUnread}</span>}
+          </button>
+        )}
         {account && onAccount ? (
           <div className="me-pop" ref={profileRef}>
             <button
@@ -159,6 +169,7 @@ export function SiteBar({
             {dialog === 'profile' && <ProfileDialogBody account={account} onAccount={onAccount} toast={toast} />}
             {dialog === 'bots' && <BotsDialogBody toast={toast} />}
             {dialog === 'notifications' && <NotificationsDialogBody toast={toast} />}
+            {dialog === 'mentions' && <MentionsDialogBody toast={toast} onJump={() => setDialog(null)} />}
           </Lazy>
         </Sheet>
       )}

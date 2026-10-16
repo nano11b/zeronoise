@@ -2253,3 +2253,19 @@ html[data-ui-theme="dark-orange"] {
 .call-banner-float { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 70; width: min(360px, calc(100% - 24px)); background: var(--panel); border: 1px solid var(--accent); border-radius: 12px; padding: 12px; box-shadow: 0 20px 50px #000a; }
 .lobby-main { grid-template-columns: minmax(0, 1fr); }
 .profile-menu .profile-signout { border: 0; padding-bottom: 0; margin-bottom: 0; }
+
+/* ---- batch A: mentions bell / inbox, rail unread badges, new-messages divider ---- */
+.bell-btn { position: relative; display: inline-flex; align-items: center; }
+.mentions-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.mentions-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mention-item { display: flex; align-items: flex-start; gap: 6px; border: 1px solid var(--border, #2a2f3a); border-radius: 10px; padding: 6px; }
+.mention-item.unread { border-color: var(--accent, #6cf); background: color-mix(in srgb, var(--accent, #6cf) 8%, transparent); }
+.mention-open { flex: 1 1 auto; min-width: 0; text-align: left; background: none; border: 0; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 2px 4px; }
+.mention-meta { font-size: 12px; opacity: .85; }
+.mention-text { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.mention-toggle { flex: 0 0 auto; }
+.rail-btn { position: relative; }
+.rail-badge { position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; font-size: 11px; line-height: 18px; text-align: center; background: var(--muted-badge, #556); color: #fff; pointer-events: none; }
+.rail-badge.mention { background: var(--danger, #e5484d); }
+.new-divider { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--danger, #e5484d); font-size: 12px; font-weight: 600; }
+.new-divider::before, .new-divider::after { content: ''; flex: 1; height: 1px; background: currentColor; opacity: .6; }

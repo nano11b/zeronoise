@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatMessage, EventReminder, MeResponse, PrivateMessage, Role, RoomState, UserInfo } from '../shared/types';
 import { BRAND_NAME } from '../shared/config';
 import { api, fetchMe } from './api';
+import { setMentionUnread } from './mentions';
 import { call, reconnect, socket } from './socket';
 import { Login } from './components/Login';
 import { ConfirmEmail, VerifyFromLink } from './components/ConfirmEmail';
@@ -303,7 +304,20 @@ export default function App() {
       const wantResume = resumeMedia.current && !!session.current.roomId;
       resumeMedia.current = false;
       try {
-        const r = await call<{ user: UserInfo }>((ack) => socket.emit('login', { resume: wantResume, tz: clientTimeZone() }, ack));
+        // A busy moment (rate limit, slow answer) is not a reason to strand the account on "Signing in…":
+        // retry a few times with a growing pause before giving up.
+        let r: { user: UserInfo } | null = null;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            r = await call<{ user: UserInfo }>((ack) => socket.emit('login', { resume: wantResume && attempt === 0, tz: clientTimeZone() }, ack));
+            break;
+          } catch (err) {
+            const msg = (err as Error).message || '';
+            if (attempt >= 5 || !socket.connected || !/rate limit|did not respond|slow down/i.test(msg)) throw err;
+            await new Promise((res) => window.setTimeout(res, 700 * (attempt + 1)));
+            if (!socket.connected || session.current.account?.id !== acct.id) return;
+          }
+        }
         session.current.nick = r.user.nick;
         setMe(r.user);
       } catch (e) {
@@ -553,6 +567,47 @@ export default function App() {
     });
     return () => onOpenRoom(null);
   });
+  // Jump to a room from the mentions inbox.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const roomId = (e as CustomEvent<{ roomId: string }>).detail?.roomId;
+      if (!roomId || session.current.roomId === roomId || !session.current.account) return;
+      if (!socket.connected || !session.current.nick) { session.current.roomId = roomId; return; }
+      call<{ room: RoomState }>((ack) => socket.emit('room:join', { roomId }, ack)).then((j) => {
+        setRoomEpoch((n) => n + 1);
+        onJoined(j.room);
+      }, (err: Error) => toast(err.message, 'error'));
+    };
+    window.addEventListener('zn:open-room', on);
+    return () => window.removeEventListener('zn:open-room', on);
+  });
+  // Server-side unread counts and the mentions badge for this account (after sign-in and every reconnect).
+  const meNick = me?.nick;
+  useEffect(() => {
+    if (!meNick || !account) return;
+    let stop = false;
+    const pull = () => {
+      call<{ rooms: Record<string, { n: number; mention: boolean }>; mentions: number }>((ack) => socket.emit('unread:get', ack)).then((r) => {
+        if (stop) return;
+        setMentionUnread(r.mentions);
+        setRoomUnread((prev) => {
+          const next = { ...prev };
+          for (const [id, v] of Object.entries(r.rooms)) {
+            if (id === session.current.roomId) continue;
+            const cur = next[id];
+            next[id] = { n: Math.max(cur?.n ?? 0, v.n), mention: (cur?.mention ?? false) || v.mention };
+          }
+          return next;
+        });
+      }, () => {});
+    };
+    pull();
+    // the socket logs in a moment after it reconnects; ask once that has happened
+    let t: number | undefined;
+    const later = () => { window.clearTimeout(t); t = window.setTimeout(pull, 1500); };
+    socket.on('connect', later);
+    return () => { stop = true; window.clearTimeout(t); socket.off('connect', later); };
+  }, [meNick, account?.id]);
   const onRoomPassword = (password: string) => { session.current.roomPassword = password.trim() || null; };
   const onLeave = () => { socket.emit('room:leave'); session.current.roomId = null; session.current.roomPassword = null; pendingPmNick.current = null; clearReturn(); setRoom(null); };
 
@@ -650,7 +705,7 @@ export default function App() {
           </>
         )
       ) : room ? (
-        <Lazy fallback={roomFallback}><Room key={`${room.id}:${roomEpoch}`} me={me} initial={room} onLeave={onLeave} toast={toast} ignored={ignored} toggleIgnore={toggleIgnore} openPm={openPm} gifs={!!boot?.gifs} onPasswordChange={onRoomPassword} account={account} onAccount={patchAccount} onGames={openGames} unread={roomUnread[room.id]} onJoined={onJoined} signOut={signOut} openAdmin={() => navigate('/admin')} wantAccount={wantAccount} /></Lazy>
+        <Lazy fallback={roomFallback}><Room key={`${room.id}:${roomEpoch}`} me={me} initial={room} onLeave={onLeave} toast={toast} ignored={ignored} toggleIgnore={toggleIgnore} openPm={openPm} gifs={!!boot?.gifs} onPasswordChange={onRoomPassword} account={account} onAccount={patchAccount} onGames={openGames} unread={roomUnread[room.id]} unreadMap={roomUnread} onJoined={onJoined} signOut={signOut} openAdmin={() => navigate('/admin')} wantAccount={wantAccount} /></Lazy>
       ) : (
         <Lobby me={me} account={account} onJoined={onJoined} toast={toast} signOut={signOut} wantAccount={wantAccount} openAdmin={() => navigate('/admin')} onAccount={patchAccount} onGames={openGames} roomUnread={roomUnread} openPm={openPm} ignored={ignored} toggleIgnore={toggleIgnore} askRoom={inviteAskPw} />
       )}

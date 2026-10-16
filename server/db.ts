@@ -661,6 +661,43 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE users ADD COLUMN ui_theme TEXT
   `,
+  // 39: batch A - per-account read markers, mentions inbox, persistent whispers (members-only, pruned by age).
+  `
+  CREATE TABLE IF NOT EXISTS room_reads (
+    user_id INTEGER NOT NULL,
+    room_id TEXT NOT NULL,
+    read_ts INTEGER NOT NULL,
+    PRIMARY KEY (user_id, room_id)
+  );
+  CREATE TABLE IF NOT EXISTS mention_inbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    message_id TEXT NOT NULL,
+    room_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    from_nick TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    read_at INTEGER,
+    UNIQUE (user_id, message_id)
+  );
+  CREATE INDEX IF NOT EXISTS mention_inbox_user ON mention_inbox(user_id, ts);
+  CREATE TABLE IF NOT EXISTS whisper_messages (
+    id TEXT PRIMARY KEY,
+    whisper_id TEXT NOT NULL,
+    room_id TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    from_user_id INTEGER,
+    from_nick TEXT NOT NULL,
+    text TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS whisper_messages_ts ON whisper_messages(ts);
+  CREATE TABLE IF NOT EXISTS whisper_members (
+    message_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS whisper_members_user ON whisper_members(user_id)
+  `,
 ];
 
 /**

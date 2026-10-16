@@ -8,6 +8,7 @@ import { applyAudioOutputToDocument, audioConstraints, loadStoredDevices } from 
 import { LocalSpeakingMonitor, RemoteSpeakingMonitor } from '../speaking';
 import { call, getIceServers, socket } from '../socket';
 import { fmtTime, unreadBadge } from '../util';
+import { readRoomLocally } from '../mentions';
 import { storedDeviceId } from '../api';
 import { BAN_DURATIONS, Dialog, DialogSpec } from './Dialog';
 import { NotifyDialog } from './NotifyDialog';
@@ -129,6 +130,8 @@ interface Props {
   onAccount?: (a: Account) => void;
   onGames: () => void;
   unread?: { n: number; mention: boolean };
+  /** unread counts for other rooms (room rail badges) */
+  unreadMap?: Record<string, { n: number; mention: boolean }>;
   onJoined: (r: RoomState, password?: string) => void;
   signOut: () => void;
   openAdmin: () => void;
@@ -162,9 +165,30 @@ function dayLabel(ts: number) {
   return d.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openPm, gifs, onPasswordChange, account, onAccount, onGames, unread, onJoined, signOut, openAdmin, wantAccount }: Props) {
+export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openPm, gifs, onPasswordChange, account, onAccount, onGames, unread, unreadMap, onJoined, signOut, openAdmin, wantAccount }: Props) {
   const [users, setUsers] = useState<UserInfo[]>(initial.users);
   const [messages, setMessages] = useState<ChatMessage[]>(initial.history);
+  // "New messages" divider: first line from someone else after this account's read marker (set when the room opened)
+  const [firstUnreadId] = useState<string | null>(() => {
+    const since = initial.lastReadTs;
+    if (since == null) return null;
+    const m = initial.history.find((x) => x.kind === 'chat' && !x.parentId && x.ts > since && x.fromId !== me.id && !(me.accountId != null && x.accountId === me.accountId));
+    return m?.id ?? null;
+  });
+  // move the server read marker forward while this room is in view
+  useEffect(() => {
+    if (!me.accountId) return;
+    let t: number | undefined;
+    const mark = () => {
+      if (document.visibilityState !== 'visible') return;
+      window.clearTimeout(t);
+      t = window.setTimeout(() => { socket.emit('room:read', { roomId: initial.id }); readRoomLocally(initial.id); }, 600);
+    };
+    mark();
+    window.addEventListener('focus', mark);
+    document.addEventListener('visibilitychange', mark);
+    return () => { window.clearTimeout(t); window.removeEventListener('focus', mark); document.removeEventListener('visibilitychange', mark); };
+  }, [initial.id, me.accountId, messages.length]);
   const [topic, setTopic] = useState(initial.topic);
   const [thumbUrl, setThumbUrl] = useState<string | null>(initial.thumbUrl ?? null);
   const [iconUrl, setIconUrl] = useState<string | null>(initial.iconUrl ?? null);
@@ -1765,12 +1789,13 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
               type="button"
               className={`rail-btn${r.id === initial.id ? ' on' : ''}${icon ? ' has-icon' : ''}`}
               title={`${r.name} · ${r.users} online`}
-              aria-label={r.name}
+              aria-label={(unreadMap?.[r.id]?.n ?? 0) > 0 && r.id !== initial.id ? `${r.name}, ${unreadMap![r.id].n} unread${unreadMap![r.id].mention ? ', mentioned' : ''}` : r.name}
               aria-current={r.id === initial.id ? 'true' : undefined}
               data-rail-room={r.id}
               onClick={() => { void switchRoom(r); }}
             >
               {icon ? <img className="rail-icon" src={icon} alt={r.name} width={46} height={46} decoding="async" data-rail-icon={r.id} /> : (r.name || '?').slice(0, 1).toUpperCase()}
+              {r.id !== initial.id && (unreadMap?.[r.id]?.n ?? 0) > 0 && <span className={`rail-badge${unreadMap![r.id].mention ? ' mention' : ''}`} data-rail-unread={r.id} aria-hidden="true">{unreadMap![r.id].mention ? '@' : unreadBadge(unreadMap![r.id].n)}</span>}
             </button>
           ); })}
         </nav>
@@ -1972,6 +1997,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                 return (
                   <div key={sep ? `d-${m.id}` : m.id} className="msg-wrap">
                     {sep && <div className="day-sep" role="separator">{dayLabel(m.ts)}</div>}
+                    {m.id === firstUnreadId && <div className="new-divider" role="separator" data-testid="new-messages-divider">New messages</div>}
                     {line}
                   </div>
                 );

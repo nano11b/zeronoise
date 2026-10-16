@@ -131,6 +131,8 @@ export interface RoomState {
   permanent: boolean;
   persistent: boolean;
   users: UserInfo[];
+  /** batch A: this account's read marker for the room when it joined (null = never read / guest) */
+  lastReadTs?: number | null;
   history: ChatMessage[];
   /** what the joining user may do here */
   canModerate: boolean; // site moderator/admin
@@ -341,6 +343,11 @@ export interface ClientToServer {
   /** Quiet hours for push (start === end, or null, turns them off). */
   'notify:quiet': (p: { start: number; end: number; tz: string } | null, ack: Ack<{ quiet: import('./notify').QuietHours | null }>) => void;
   'whisper:search': (p: { q: string; from?: string; after?: number; before?: number }, ack: Ack<{ hits: WhisperMessage[] }>) => void;
+  /** batch A: server-side read markers and the mentions inbox (accounts only) */
+  'unread:get': (ack: Ack<{ rooms: Record<string, { n: number; mention: boolean }>; mentions: number }>) => void;
+  'room:read': (p: { roomId: string; ts?: number }, ack?: Ack) => void;
+  'mentions:list': (ack: Ack<{ items: MentionItem[]; unread: number }>) => void;
+  'mentions:read': (p: { ids: number[] | 'all'; read?: boolean }, ack: Ack<{ unread: number }>) => void;
   /** Top-level lines around one message (jump to a search hit or bookmark). */
   'chat:context': (p: { messageId: string }, ack: Ack<{ messages: ChatMessage[]; anchorId: string; threadId?: string }>) => void;
   'bookmark:toggle': (p: { messageId: string; on?: boolean }, ack: Ack<{ bookmarked: boolean }>) => void;
@@ -401,6 +408,7 @@ export interface ServerToClient {
   'board:clear': () => void;
   /** Lightweight ping so other clients can badge a room. Not stored. */
   'room:activity': (p: { roomId: string; mentions?: number[] }) => void;
+  'mentions:new': (p: { item: MentionItem; unread: number }) => void;
   'chat:edited': (p: { id: string; text: string; editedAt: number; mentions?: number[] }) => void;
   'chat:deleted': (p: { id: string }) => void;
   'chat:replies': (p: { messageId: string; replyCount: number }) => void;
@@ -526,7 +534,20 @@ export type WatchUpdate =
   | { action: 'play' | 'pause' | 'seek'; positionSec: number }
   | { action: 'clear' };
 
-// ---- whispers (in-room side chats, memory only) ----
+// ---- batch A: mentions inbox ----
+export interface MentionItem {
+  id: number;
+  kind: 'mention' | 'reply';
+  roomId: string;
+  roomName: string;
+  messageId: string;
+  from: string;
+  ts: number;
+  text: string;
+  read: boolean;
+}
+
+// ---- whispers (in-room side chats; lines are also kept for member accounts, 30 days) ----
 export interface WhisperInfo {
   id: string;
   roomId: string;
