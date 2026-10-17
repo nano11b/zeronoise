@@ -4529,6 +4529,22 @@ function onConnection(socket: AppSocket) {
       tags: [...tags].map(([t, count]) => ({ tag: t, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)).slice(0, 30),
     });
   });
+  const capTimes: number[] = [];
+  socket.on('caption:send', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error });
+    const { s, room } = c;
+    if (!room.voice) return ack({ ok: false, error: 'Live captions are for voice rooms' });
+    const now = Date.now();
+    while (capTimes.length && now - capTimes[0] > 1000) capTimes.shift();
+    if (capTimes.length >= 8) return ack({ ok: false, error: 'Slow down' });
+    capTimes.push(now);
+    const text = typeof p?.text === 'string' ? p.text.replace(/\s+/g, ' ').trim().slice(-300) : '';
+    if (!text) return ack({ ok: true });
+    socket.to(`room:${room.id}`).emit('caption', { roomId: room.id, id: socket.id, nick: s.user!.nick, text, final: !!p?.final, ts: now });
+    ack({ ok: true });
+  });
   socket.on('rec:start', (_p, ackRaw) => {
     const ack = safeAck(ackRaw);
     const c = roomCtx();
@@ -4542,7 +4558,7 @@ function onConnection(socket: AppSocket) {
     const rec = recStateOf(room.id)!;
     repo.logAction(actorLabel(s), s.account.id, 'recording-start', null, room.id, r.id);
     io.to(`room:${room.id}`).emit('rec:state', { roomId: room.id, rec });
-    systemMsg(room, `🔴 ${s.user!.nick} started recording this room. Everyone here is told; leave now if you don't want to be recorded.`);
+    systemMsg(room, `🔴 ${s.user!.nick} started recording this room (leave if you don't want to be recorded)`);
     ack({ ok: true, rec, maxBytes: recs.REC_MAX_BYTES });
   });
   socket.on('rec:stop', (_p, ackRaw) => {

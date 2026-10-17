@@ -146,6 +146,21 @@ try {
   const idleE = await new Promise((res) => { const t = setTimeout(() => res(null), 15000); mem.s.once('rec:state', (p) => { clearTimeout(t); res(p); }); });
   void idleP;
   ok(st2.ok && idleE?.rec === null && idleE.reason === 'idle', 'F6: a recorder that goes quiet is stopped automatically', JSON.stringify(idleE));
+  // ---------- 7. captions relay ----------
+  {
+    const capP = ev(mem.s, 'caption');
+    const r = await emit(owner.s, 'caption:send', { text: '  hello   everyone  ', final: true });
+    const c = await capP;
+    ok(r.ok && c?.text === 'hello everyone' && c.nick === 'FfOwner' && c.final === true, 'F7: a shared caption line reaches the room as text', JSON.stringify(c));
+    const long = await new Promise((res) => { mem.s.once('caption', res); emit(owner.s, 'caption:send', { text: 'x'.repeat(900), final: false }); });
+    ok(long.text.length === 300 && long.final === false, 'F7: caption lines are capped at 300 characters');
+    const plain = await emit(other.s, 'room:create', { name: 'ff-plain', category: 'talk' });
+    await emit(other.s, 'room:join', { roomId: plain.roomId });
+    ok(!(await emit(other.s, 'caption:send', { text: 'hi', final: true })).ok, 'F7: captions are only for voice rooms');
+    let burst = 0; for (let i = 0; i < 12; i++) if ((await emit(owner.s, 'caption:send', { text: `b${i}`, final: false })).ok) burst++;
+    ok(burst <= 8, 'F7: caption flood is limited', String(burst));
+    await emit(other.s, 'room:join', { roomId: room });
+  }
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
@@ -184,6 +199,37 @@ try {
       ok(await noSideScroll(o.page), `${width}: no sideways scroll`);
       await shot(o.page, `f6-rec-list-${width}`);
       await o.ctx.close(); await m.ctx.close();
+      await fresh(owner); await emit(owner.s, 'room:join', { roomId: room }); await fresh(other);
+    }
+    // F7 UI: a speaker shares captions (speech recognition mocked: headless Chrome has no speech service); a listener reads them
+    {
+      await sleep(1100);
+      const sp = await pageFor(owner, 1366);
+      await sp.page.evaluateOnNewDocument(() => {
+        class FakeSR { constructor() { this.continuous = false; this.interimResults = false; this.lang = 'en'; this.onresult = null; this.onend = null; this.onerror = null; }
+          start() { const mk = (t, f) => { const alt = [{ transcript: t }]; alt.isFinal = f; return alt; };
+            setTimeout(() => this.onresult?.({ resultIndex: 0, results: [mk('testing live', false)] }), 300);
+            setTimeout(() => this.onresult?.({ resultIndex: 0, results: [mk('testing live captions in the voice room', true)] }), 900); }
+          stop() { this.onend = null; } abort() {} }
+        window.SpeechRecognition = FakeSR;
+      });
+      await enterRoom(sp.page, room);
+      const li = await pageFor(other, width);
+      await li.page.evaluateOnNewDocument(() => { delete window.SpeechRecognition; delete window.webkitSpeechRecognition; });
+      await enterRoom(li.page, room);
+      await li.page.evaluate(() => document.querySelector('[data-action="rec-ok"]')?.click());
+      const un = await li.page.waitForSelector('[data-testid="captions-unsupported"]', { timeout: 6000 }).catch(() => null);
+      ok(!!un, `${width}: browsers without speech recognition get a clear note (and can still read)`);
+      await sp.page.$eval('[data-action="captions-share"]', (b) => b.click());
+      const got = await li.page.waitForFunction(() => /testing live captions in the voice room/.test(document.querySelector('[data-testid="captions"]')?.textContent || ''), { timeout: 8000 }).catch(() => null);
+      ok(!!got, `${width}: listener sees the speaker's captions live`);
+      await shot(li.page, `f7-captions-listener-${width}`);
+      const spk = await pageFor(owner, width);
+      void spk; await spk.ctx.close();
+      if (width === 390) { await sp.page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }); await sleep(600); }
+      await shot(sp.page, `f7-captions-speaker-${width}`);
+      ok(await noSideScroll(li.page), `${width}: captions: no sideways scroll`);
+      await sp.ctx.close(); await li.ctx.close();
       await fresh(owner); await emit(owner.s, 'room:join', { roomId: room }); await fresh(other);
     }
     // @@UI-END

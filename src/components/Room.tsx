@@ -10,6 +10,7 @@ import { LevelBadge } from './Level';
 import { call, getIceServers, socket } from '../socket';
 import { useDraftSync } from '../drafts';
 import { RecorderControls, RecordingBanner } from './RoomRecording';
+import { LiveCaptions } from './LiveCaptions';
 import { enqueue, newClientId, useOutbox } from '../outbox';
 import { fmtTime, unreadBadge } from '../util';
 import { readRoomLocally } from '../mentions';
@@ -1993,6 +1994,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
             <WhisperStrip convs={whispers} open={openWhisper} setOpen={setOpenWhisper} selfId={me.id} isIgnored={isIgnored} toast={toast} onReport={(m) => setReportTarget({ kind: 'whisper', messageId: m.id, from: m.from, preview: m.text })} />
             <RoomThemeHeader theme={theme && theme.welcome && welcomeHidden === theme.welcome ? { ...theme, welcome: null } : theme} onDismiss={() => { if (theme?.welcome) { setWelcomeHidden(theme.welcome); try { localStorage.setItem(welcomeKey, theme.welcome); } catch { /* private mode */ } } }} />
             <RecordingBanner rec={rec} onLeave={onLeave} joinNotice={!!initial.recording && !initial.isOwner} />
+            {voiceRoom && <LiveCaptions roomId={initial.id} myNick={me.nick} />}
             {voiceRoom && isOwner && !!account && <RecorderControls roomId={initial.id} rec={rec} tracks={recTracks} toast={toast} />}
             <AnnouncementBanner key={announcement?.at ?? 0} roomId={initial.id} ann={announcement} />
             {nextEvent && <EventBanner ev={nextEvent} onOpen={() => openSide('events')} />}

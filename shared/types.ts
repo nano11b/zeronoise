@@ -289,6 +289,8 @@ export interface ClientToServer {
   /** batch F6: room owner starts/stops recording a voice room */
   'rec:start': (p: Record<string, never>, ack: Ack<{ rec: RecState; maxBytes: number }>) => void;
   'rec:stop': (p: Record<string, never>, ack: Ack) => void;
+  /** batch F7: a speaker shares live captions (browser speech recognition) as text */
+  'caption:send': (p: { text: string; final: boolean }, ack?: Ack) => void;
   'roomappeal:decide': (p: { appealId: number; decision: 'approve' | 'deny'; note?: string }, ack: Ack<{ decision: 'approved' | 'denied' }>) => void;
   'modq:history': (p: { messageId: string }, ack: Ack<{ versions: { text: string; at: number }[]; current: { text: string; at: number } }>) => void;
   'chat:history': (p: { messageId: string }, ack: Ack<{ versions: { text: string; at: number }[]; current: { text: string; at: number } }>) => void;
@@ -417,6 +419,8 @@ export interface ServerToClient {
   rooms: (rooms: RoomSummary[]) => void;
   /** batch E4: a draft changed on another device of this account */
   /** batch F6: recording started (rec) or stopped (null, with why) */
+  /** batch F7: someone's live caption line (interim lines are replaced by the next one from the same speaker) */
+  caption: (p: { roomId: string; id: string; nick: string; text: string; final: boolean; ts: number }) => void;
   'rec:state': (p: { roomId: string; rec: RecState | null; reason?: string }) => void;
   'draft:sync': (p: { roomId: string; threadId: string; text: string; updatedAt: number }) => void;
   // ---- moderation queue ----
