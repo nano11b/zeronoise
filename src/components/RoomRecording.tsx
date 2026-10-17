@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { RecState } from '../../shared/types';
 import { call, socket } from '../socket';
 import { api, storedDeviceId } from '../api';
+import { ClipMaker } from './ClipMaker';
 
 /**
  * Batch F6: voice-room recording. Owner-started only; everyone sees a red notice while it runs and gets a
@@ -116,6 +117,7 @@ export function RecorderControls({ roomId, rec, tracks, toast }: { roomId: strin
 interface RecItem { id: string; startedAt: number; endedAt: number | null; by: string; bytes: number; status: string; endReason: string | null }
 export function RecordingList({ roomId, toast }: { roomId: string; toast: Toast }) {
   const [d, setD] = useState<{ recordings: RecItem[]; retentionDays: number; choices: number[]; maxBytes: number; maxMs: number } | null>(null);
+  const [clipFor, setClipFor] = useState<RecItem | null>(null);
   const load = () => api<typeof d>(`/api/rooms/${encodeURIComponent(roomId)}/recordings`).then(setD).catch((e) => toast((e as Error).message, 'error'));
   useEffect(() => { void load(); }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!d) return null;
@@ -133,6 +135,8 @@ export function RecordingList({ roomId, toast }: { roomId: string; toast: Toast 
             <li key={r.id} data-testid="rec-item" data-status={r.status}>
               <span>{new Date(r.startedAt).toLocaleString()} · {r.endedAt ? fmt(r.endedAt - r.startedAt) : 'recording…'} · {(r.bytes / 1048576).toFixed(1)} MB{r.endReason === 'size' || r.endReason === 'time' ? ' · hit the limit' : ''}</span>
               {r.status === 'expired' ? <span className="small muted"> (removed)</span> : r.status !== 'recording' && <a className="btn ghost small-btn" data-action="rec-download" href={`/api/rooms/${encodeURIComponent(roomId)}/recordings/${r.id}/file`} download>Download</a>}
+              {(r.status === 'done' || r.status === 'capped') && <button type="button" className="btn ghost small-btn" data-action="clip-open" onClick={() => setClipFor(clipFor?.id === r.id ? null : r)}>✂ Clip</button>}
+              {clipFor?.id === r.id && <ClipMaker roomId={roomId} rec={r} toast={toast} onClose={() => setClipFor(null)} />}
             </li>
           ))}
         </ul>

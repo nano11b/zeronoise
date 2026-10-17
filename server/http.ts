@@ -426,6 +426,32 @@ export function createApp(roomList: () => unknown) {
     if (out !== 'ok') { live.recordingEnded(r.room_id, out); return res.json({ ok: true, stop: true, reason: out }); }
     res.json({ ok: true });
   });
+  // batch G2: owner uploads a trimmed clip (cut + encoded in their browser); posted via chat:voice like a voice note
+  app.post('/api/rooms/:roomId/clips', (req, res) => {
+    if (!uploadLimiter.take(clientIp(req))) return fail(res, 429, 'Too many uploads. Try again later.');
+    const roomId = String(req.params.roomId);
+    const a = reqAccount(req);
+    if (!a || !(live.roomOwnerId(roomId) === a.id || a.role === 'admin')) return fail(res, 403, 'Only the room owner can make clips');
+    const actor = soundActor(req);
+    if (!live.isRoomMember(roomId, actor.accountId, actor.devices)) return fail(res, 403, 'Join the room first');
+    voiceUpload(req, res, (err) => {
+      if (err) return fail(res, /File too large|LIMIT_FILE_SIZE/i.test(String((err as Error).message)) ? 413 : 400, 'Clip too large (max 1 MB)');
+      const r = recs.recById(String(req.body?.recordingId ?? ''));
+      if (!r || r.room_id !== roomId || (r.status !== 'done' && r.status !== 'capped')) return fail(res, 404, 'No such recording');
+      if (recs.clipExpiry(r) <= Date.now()) return fail(res, 410, 'That recording is past its retention');
+      const startMs = Math.round(Number(req.body?.startMs)); const durationMs = Math.round(Number(req.body?.durationMs));
+      if (!Number.isFinite(startMs) || startMs < 0 || !Number.isFinite(durationMs) || durationMs < 1000 || durationMs > recs.CLIP_MAX_MS) return fail(res, 400, 'Clips are 1 to 60 seconds');
+      const file = (req as Request & { file?: Express.Multer.File }).file;
+      if (!file?.buffer?.length) return fail(res, 400, 'No clip');
+      try {
+        const row = storeVoiceNote(roomId, file.buffer, { userId: a.id, devices: actor.devices });
+        const id = randomBytes(12).toString('hex');
+        recs.insertClip({ id, room_id: roomId, recording_id: r.id, created_by: a.id, created_at: Date.now(), start_ms: startMs, duration_ms: durationMs, bytes: row.bytes, mime: row.mime, voice_id: row.id, expires_at: recs.clipExpiry(r) });
+        repo.logAction(a.username, a.id, 'clip', r.id, roomId, `${Math.round(startMs / 1000)}s +${Math.round(durationMs / 1000)}s`);
+        res.json({ ok: true, id, voiceId: row.id, durationMs, expiresAt: recs.clipExpiry(r) });
+      } catch (e) { return fail(res, 400, (e as Error).message || 'Could not store clip'); }
+    });
+  });
   const recOwner = (req: Request, roomId: string) => { const a = reqAccount(req); return a && (live.roomOwnerId(roomId) === a.id || a.role === 'admin') ? a : null; };
   app.get('/api/rooms/:roomId/recordings', (req, res) => {
     const roomId = String(req.params.roomId);

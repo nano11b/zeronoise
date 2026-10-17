@@ -850,11 +850,12 @@ const MIGRATIONS: string[] = [
     duration_ms INTEGER NOT NULL,
     bytes INTEGER NOT NULL,
     mime TEXT NOT NULL,
-    message_id TEXT,
+    voice_id TEXT NOT NULL,
     expires_at INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'live'
   );
   CREATE INDEX IF NOT EXISTS room_clips_rec ON room_clips(recording_id);
+  CREATE INDEX IF NOT EXISTS room_clips_voice ON room_clips(voice_id);
   ALTER TABLE rooms ADD COLUMN template TEXT;
   CREATE TABLE IF NOT EXISTS room_roles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -2451,3 +2451,8 @@ html[data-ui-theme="dark-orange"] {
 .msg-translation { margin-top: 4px; padding: 4px 8px; border-left: 3px solid var(--accent, #6aa1ff); background: rgba(127,127,127,.08); border-radius: 4px; font-size: .95em; overflow-wrap: anywhere; }
 .msg-translation.err { border-left-color: #d98b2b; }
 .msg-translation .linklike { background: none; border: 0; color: var(--accent, #6aa1ff); text-decoration: underline; cursor: pointer; padding: 0 6px; min-height: 40px; }
+/* batch G2 clips */
+.clip-maker { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; padding: 8px; border: 1px solid rgba(127,127,127,.3); border-radius: 8px; width: 100%; box-sizing: border-box; }
+.clip-maker input[type=range] { width: 100%; min-height: 40px; }
+.clip-maker .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.clip-label { display: block; margin-bottom: 2px; }

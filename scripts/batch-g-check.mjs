@@ -29,7 +29,7 @@ const port = await freePort();
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'zn-batch-g-'));
 const BASE = `http://127.0.0.1:${port}`;
 const server = spawn(process.execPath, ['dist/server/server/index.js'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, NODE_ENV: 'production', PORT: String(port), HOST: '127.0.0.1', DATA_DIR: DATA, TRUST_PROXY: 'loopback', EMAIL_VERIFY_REQUIRED: '0', MAIL_CAPTURE_PATH: path.join(DATA, 'mail.log'), BACKUP_DISABLED: '1', REGISTRATIONS_PER_IP_PER_HOUR: '500', CONTACT_EMAIL: '', ADMIN_USERNAMES: 'GgAdmin', RECORDING_MAX_BYTES: '65536', RECORDING_IDLE_MS: '6000', RECONNECT_GRACE_MS: '800',
+  env: { ...process.env, NODE_ENV: 'production', PORT: String(port), HOST: '127.0.0.1', DATA_DIR: DATA, TRUST_PROXY: 'loopback', EMAIL_VERIFY_REQUIRED: '0', MAIL_CAPTURE_PATH: path.join(DATA, 'mail.log'), BACKUP_DISABLED: '1', REGISTRATIONS_PER_IP_PER_HOUR: '500', CONTACT_EMAIL: '', ADMIN_USERNAMES: 'GgAdmin', RECORDING_MAX_BYTES: '400000', RECORDING_SWEEP_MS: '1500', RECORDING_IDLE_MS: '6000', RECONNECT_GRACE_MS: '800',
     SCHEDULE_TICK_MS: '300', EVENT_TICK_MS: '300', STATS_SAMPLE_MS: '500', XP_COOLDOWN_MS: '1200' } });
 let log = ''; server.stdout.on('data', (d) => { log += d; }); server.stderr.on('data', (d) => { log += d; });
 for (let i = 0; i < 200 && !log.includes('listening'); i++) await sleep(100);
@@ -111,6 +111,8 @@ async function openSettings(page, phone, section) {
 const noSideScroll = (page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1);
 
 const ev = (s, name) => new Promise((res) => { const t = setTimeout(() => res(null), 4000); s.once(name, (p) => { clearTimeout(t); res(p); }); });
+import { execFileSync } from 'node:child_process';
+const webm = (secs, freq = 440) => { try { return execFileSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', `sine=frequency=${freq}:duration=${secs}`, '-c:a', 'libopus', '-b:a', '32k', '-f', 'webm', 'pipe:1'], { maxBuffer: 8 << 20 }); } catch { return null; } };
 const libreHits = [];
 const libre = http.createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { const j = JSON.parse(b || '{}'); libreHits.push(j); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ translatedText: `[${j.target}] ${j.q}`, detectedLanguage: { language: 'es', confidence: 90 } })); }); });
 await new Promise((r) => libre.listen(0, '127.0.0.1', r));
@@ -139,6 +141,37 @@ try {
     ok(tr.ok && tr.text === '[en] hola amigos' && tr.from === 'es' && libreHits.at(-1)?.source === 'auto', 'G1: server translation goes through LibreTranslate', JSON.stringify(tr));
     ok((await mem.j.req('/api/translate', { text: '', target: 'en' })).status === 400, 'G1: empty text refused');
     await emit(owner.s, 'chat:send', { text: 'hola amigos' });
+  }
+  // ---------- G2 clips API ----------
+  {
+    const full = webm(8);
+    const st = await emit(owner.s, 'rec:start', {});
+    const fd0 = new FormData(); fd0.append('chunk', new Blob([full]), 'c.webm');
+    await owner.j.form(`/api/rooms/${encodeURIComponent(room)}/recordings/${st.rec.id}/chunk`, fd0);
+    await emit(owner.s, 'rec:stop', {});
+    await sleep(300);
+    const recRow = (await owner.j.req(`/api/rooms/${encodeURIComponent(room)}/recordings`)).recordings.find((r) => r.id === st.rec.id);
+    ok(!!full && recRow?.status === 'done', 'G2: a finished recording to cut from', JSON.stringify(recRow));
+    const clipUp = (u, fields, buf = webm(3, 660)) => { const fd = new FormData(); for (const [k, v] of Object.entries(fields)) fd.append(k, String(v)); fd.append('voice', new Blob([buf]), 'clip.webm'); return u.j.form(`/api/rooms/${encodeURIComponent(room)}/clips`, fd); };
+    ok((await clipUp(mem, { recordingId: st.rec.id, startMs: 0, durationMs: 3000 })).status === 403, 'G2: only the owner can make clips');
+    ok((await clipUp(owner, { recordingId: st.rec.id, startMs: 0, durationMs: 61000 })).status === 400, 'G2: clips are at most 60 s');
+    ok((await clipUp(owner, { recordingId: 'f'.repeat(24), startMs: 0, durationMs: 3000 })).status === 404, 'G2: must come from one of this room\'s recordings');
+    ok((await clipUp(owner, { recordingId: st.rec.id, startMs: 0, durationMs: 3000 }, Buffer.from('not audio at all'))).status === 400, 'G2: must be real audio');
+    const c = await clipUp(owner, { recordingId: st.rec.id, startMs: 2000, durationMs: 3000 });
+    ok(c.ok && !!c.voiceId && Math.abs(c.expiresAt - (recRow.startedAt + 30 * 86400000)) < 5000, 'G2: clip stored, expiring with the recording', JSON.stringify(c));
+    const msgP = ev(mem.s, 'chat:message');
+    const posted = await emit(owner.s, 'chat:voice', { voiceId: c.voiceId, durationMs: 3000 });
+    const m = await msgP;
+    ok(posted.ok && /🎬 Clip from the room recording \(0:03\)/.test(m?.text || '') && m.voice?.url, 'G2: posted to the room as an audio message', JSON.stringify(m));
+    ok((await fetch(BASE + m.voice.url, { headers: { cookie: mem.j.header() } })).status === 200, 'G2: members can play it');
+    // retention: age the recording past 30 days; the sweep removes the clip audio and says so
+    const db = new DatabaseSync(path.join(DATA, 'camchat.db'));
+    db.prepare('UPDATE room_recordings SET started_at = started_at - ? WHERE id = ?').run(91 * 86400000, st.rec.id);
+    let row; for (let i = 0; i < 20; i++) { await sleep(400); row = db.prepare('SELECT status FROM room_clips WHERE id = ?').get(c.id); if (row?.status === 'expired') break; }
+    const txt = db.prepare('SELECT text FROM messages WHERE id = ?').get(m.id)?.text;
+    db.close();
+    ok(row?.status === 'expired' && /expired/.test(txt || '') && (await fetch(BASE + m.voice.url, { headers: { cookie: mem.j.header() } })).status === 404, 'G2: clips are removed with the recording (retention)', JSON.stringify({ row, txt }));
+    ok([404, 410].includes((await clipUp(owner, { recordingId: st.rec.id, startMs: 0, durationMs: 3000 })).status), 'G2: no new clips from an expired recording');
   }
   // @@API-END
 
@@ -188,6 +221,37 @@ try {
       ok(await noSideScroll(ad.page), `${width}: G1: admin panel: no sideways scroll`);
       await shot(ad.page, `g1-admin-translate-${width}`);
       await ad.ctx.close();
+    }
+    // G2 UI: owner trims a clip from a recording in the browser and shares it
+    {
+      const full = webm(8, 330);
+      const st = await emit(owner.s, 'rec:start', {});
+      const fd0 = new FormData(); fd0.append('chunk', new Blob([full]), 'c.webm');
+      await owner.j.form(`/api/rooms/${encodeURIComponent(room)}/recordings/${st.rec.id}/chunk`, fd0);
+      await emit(owner.s, 'rec:stop', {});
+      await fresh(owner);
+      const o = await pageFor(owner, width);
+      await enterRoom(o.page, room);
+      await o.page.$eval('[data-action="rec-list"]', (b) => b.click());
+      await o.page.waitForSelector('[data-action="clip-open"]', { timeout: 8000 });
+      await o.page.$eval('[data-action="clip-open"]', (b) => b.click());
+      const cm = await o.page.waitForSelector('[data-testid="clip-len"]', { timeout: 10000 }).catch(() => null);
+      ok(!!cm, `${width}: G2: the recording decodes in the browser with start/length controls`);
+      if (cm) {
+        await o.page.$eval('[data-testid="clip-start"]', (e) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(e, '2'); e.dispatchEvent(new Event('input', { bubbles: true })); });
+        await o.page.$eval('[data-testid="clip-len"]', (e) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(e, '3'); e.dispatchEvent(new Event('input', { bubbles: true })); });
+        await sleep(200);
+        ok(/0:02 – 0:05 of 0:0[78]/.test(await o.page.$eval('[data-testid="clip-range"]', (e) => e.textContent)), `${width}: G2: trim range shows`, await o.page.$eval('[data-testid="clip-range"]', (e) => e.textContent));
+        await o.page.$eval('[data-testid="clip-maker"]', (e) => e.scrollIntoView({ block: 'center' }));
+        ok(await noSideScroll(o.page), `${width}: G2: no sideways scroll`);
+        await shot(o.page, `g2-clip-trim-${width}`);
+        await o.page.$eval('[data-action="clip-share"]', (b) => b.click());
+        const posted = await o.page.waitForFunction(() => [...document.querySelectorAll('.chat-log .msg')].some((e) => e.querySelector('[data-clip]') && /0:03/.test(e.textContent)), { timeout: 15000 }).catch(() => null);
+        ok(!!posted, `${width}: G2: clip is shared to the room as an audio post`, await o.page.evaluate(() => [...document.querySelectorAll('.toast, [role=alert], .toasts *')].map((e) => e.textContent).join(' | ') + ' // ' + [...document.querySelectorAll('.chat-log .msg')].slice(-2).map((e) => e.textContent + (e.querySelector('audio') ? '[audio]' : '') + e.innerHTML.slice(0, 300)).join(' || ')));
+        await o.page.evaluate(() => [...document.querySelectorAll('.chat-log .msg')].reverse().find((e) => /🎬/.test(e.textContent))?.scrollIntoView({ block: 'center' }));
+        await shot(o.page, `g2-clip-posted-${width}`);
+      }
+      await o.ctx.close(); await fresh(owner); await emit(owner.s, 'room:join', { roomId: room });
     }
     // @@UI-END
   }

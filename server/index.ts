@@ -1000,7 +1000,18 @@ live.roomOwnerId = (roomId) => rooms.get(roomId)?.ownerUserId ?? null;
 setInterval(guardTimer('recordings', () => {
   for (const r of recs.idleRecs()) { recs.endRec(r.id, 'done', 'idle'); recEnded(r.room_id, r.started_nick, 'idle'); }
 }), 5_000).unref();
-setInterval(guardTimer('recording retention', () => { const n = recs.sweepRecordings(); if (n) console.log(`[rec] removed ${n} recording(s) past retention`); }), 3_600_000).unref();
+function sweepClips() {
+  // batch G2: clips go when their recording's retention runs out; the chat line stays, saying so
+  for (const c of recs.dueClips()) {
+    const v = repo.voiceNoteById(c.voice_id);
+    if (v?.message_id) {
+      deleteVoiceForMessages([v.message_id]);
+      recs.setMessageText(v.message_id, '🎬 Clip expired with its recording');
+    }
+    recs.markClipExpired(c.id);
+  }
+}
+setInterval(guardTimer('recording retention', () => { const n = recs.sweepRecordings(); sweepClips(); if (n) console.log(`[rec] removed ${n} recording(s) past retention`); }), Number(process.env.RECORDING_SWEEP_MS) || 3_600_000).unref();
 setTimeout(() => { try { recs.sweepRecordings(); } catch (e) { console.error('[rec] sweep', e); } }, 30_000).unref();
 
 function systemMsg(room: Room, text: string) {
@@ -2838,7 +2849,8 @@ function onConnection(socket: AppSocket) {
       if (!parent || parent.deleted || parent.room_id !== room.id || parent.parent_id || parent.burn_ttl != null) return ack({ ok: false, error: 'Thread not found' });
       parentId = parent.id;
     }
-    const text = `🎤 Voice note (${fmtVoiceDuration(durationMs)})`;
+    const clip = recs.clipByVoice(v.id);
+    const text = clip ? `🎬 Clip from the room recording (${fmtVoiceDuration(durationMs)})` : `🎤 Voice note (${fmtVoiceDuration(durationMs)})`;
     const msg: ChatMessage = {
       kind: 'chat', id: randomUUID(), ts: Date.now(), fromId: socket.id, from: s.user.nick, role: s.user.role, text,
       ...profileOf(s.account), mentions: [], parentId: parentId ?? undefined,
