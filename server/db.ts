@@ -727,7 +727,22 @@ const MIGRATIONS: string[] = [
   ALTER TABLE users ADD COLUMN xp_day INTEGER;
   ALTER TABLE users ADD COLUMN xp_today INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE users ADD COLUMN xp_last_at INTEGER;
-  ALTER TABLE users ADD COLUMN xp_last_key TEXT
+  ALTER TABLE users ADD COLUMN xp_last_key TEXT;
+  CREATE TABLE IF NOT EXISTS ban_appeals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ban_id INTEGER NOT NULL UNIQUE,
+    user_id INTEGER,
+    username TEXT,
+    ip TEXT NOT NULL,
+    device_id TEXT,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    decided_by TEXT,
+    decided_at INTEGER,
+    decision_note TEXT
+  );
+  CREATE INDEX IF NOT EXISTS ban_appeals_status ON ban_appeals(status, created_at)
   `,
 ];
 

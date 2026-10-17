@@ -148,6 +148,44 @@ try {
   ok(hist2.history.filter((m) => m.from === 'DdMember').every((m) => m.level === undefined), 'hidden level not on chat lines');
   await mem.j.req('/api/me/xp', { hidden: false }, 'PATCH');
   ok(!(await mem.j.req('/api/me/xp', { hidden: 'yes' }, 'PATCH')).ok, 'opt-out takes a boolean');
+
+  // ---------- 7. ban appeals ----------
+  const banU = await nodeUser('DdBanned'); sockets.push(banU.s);
+  ok((await banU.j.req('/api/appeal')).banned === false, 'not banned: appeal status says so');
+  ok((await banU.j.req('/api/appeal', { text: 'please let me back in, I did nothing wrong' })).status === 400, 'cannot appeal without a ban');
+  const bn = await admin.j.req('/api/admin/bans', { kind: 'account', value: 'DdBanned', reason: 'spam test', minutes: 60 });
+  ok(bn.ok, 'admin bans DdBanned', JSON.stringify(bn));
+  await sleep(300);
+  const bst = await banU.j.req('/api/appeal');
+  ok(bst.banned && bst.ban.id === bn.id && bst.appeal === null && bst.ban.reason === 'spam test', 'banned user sees their ban and no appeal yet', JSON.stringify(bst));
+  ok((await banU.j.req('/api/appeal', { text: 'too short' })).status === 400, 'appeal text needs a minimum length');
+  const ap = await banU.j.req('/api/appeal', { text: 'I was testing a bot by mistake, sorry, it will not happen again.' });
+  ok(ap.ok && ap.appeal.status === 'open', 'banned user submits an appeal', JSON.stringify(ap));
+  ok((await banU.j.req('/api/appeal', { text: 'second try at an appeal for the same ban here' })).status === 409, 'only one appeal per ban');
+  ok((await banU.j.req('/api/appeal')).appeal?.id === ap.appeal.id, 'status shows the pending appeal');
+  ok((await mem.j.req('/api/admin/appeals')).status === 403, 'non-staff cannot list appeals');
+  const q1 = await admin.j.req('/api/admin/reports?view=queue&status=open');
+  ok(q1.items?.some((i) => i.key === `appeal:${ap.appeal.id}`), 'appeal shows up in the site mod queue');
+  const al = await admin.j.req('/api/admin/appeals');
+  ok(al.appeals?.some((a) => a.id === ap.appeal.id && a.reason === 'spam test'), 'staff appeal list includes the ban reason');
+  ok((await admin.j.req(`/api/admin/appeals/${ap.appeal.id}`, { decision: 'maybe' })).status === 400, 'decision must be approve or deny');
+  const dec = await admin.j.req(`/api/admin/appeals/${ap.appeal.id}`, { decision: 'deny', note: 'repeat offender' });
+  ok(dec.ok && dec.decision === 'denied', 'admin denies the appeal');
+  ok((await admin.j.req(`/api/admin/appeals/${ap.appeal.id}`, { decision: 'approve' })).status === 409, 'a decided appeal cannot be decided again');
+  const st2 = await banU.j.req('/api/appeal');
+  ok(st2.banned && st2.appeal.status === 'denied' && st2.appeal.note === 'repeat offender', 'denied: ban stays, user sees the decision');
+  const lg = await admin.j.req('/api/admin/log');
+  ok(lg.log?.some((l) => l.action === 'appeal-deny') && lg.log?.some((l) => l.action === 'appeal'), 'appeal and denial are in the action log');
+  const q2 = await admin.j.req('/api/admin/reports?view=queue&status=open');
+  ok(!q2.items?.some((i) => i.key === `appeal:${ap.appeal.id}`), 'decided appeal leaves the open queue');
+  // second ban -> new appeal allowed -> approve lifts it
+  await admin.j.req(`/api/admin/bans/${bn.id}/lift`, {});
+  const bn2 = await admin.j.req('/api/admin/bans', { kind: 'account', value: 'DdBanned', reason: 'second ban', minutes: 60 });
+  const ap2 = await banU.j.req('/api/appeal', { text: 'This second ban was a mix-up, please review my history.' });
+  ok(ap2.ok && ap2.appeal.banId === bn2.id, 'a new ban gets its own appeal');
+  const dec2 = await admin.j.req(`/api/admin/appeals/${ap2.appeal.id}`, { decision: 'approve' });
+  ok(dec2.ok && (await banU.j.req('/api/appeal')).banned === false, 'approving lifts the ban');
+  ok((await admin.j.req('/api/admin/log')).log?.some((l) => l.action === 'appeal-approve'), 'approval is logged');
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -173,6 +211,33 @@ try {
       await m.ctx.close();
       await fresh(other); await fresh(mem);
       await emit(other.s, 'room:join', { roomId: room }); await emit(mem.s, 'room:join', { roomId: room });
+    }
+    // 7. appeal form on the blocked screen + queue entry
+    {
+      const bu = await nodeUser(`DdBan${width}`); try { bu.s.disconnect(); } catch { /* */ }
+      const b = await admin.j.req('/api/admin/bans', { kind: 'account', value: `DdBan${width}`, reason: 'ui test ban', minutes: 30 });
+      const p = await pageFor(bu, width);
+      await p.page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+      const form = await p.page.waitForSelector('[data-testid="appeal-form"]', { timeout: 15000 }).catch(() => null);
+      ok(!!form, `${width}: blocked screen offers the appeal form`);
+      if (form) {
+        await p.page.type('[data-testid="appeal-text"]', 'I think this was a mistake; I only shared a game link once.');
+        await shot(p.page, `d7-appeal-form-${width}`);
+        await p.page.$eval('[data-action="appeal-submit"]', (x) => x.click());
+        const sent = await p.page.waitForSelector('[data-testid="appeal-status"][data-status="open"]', { timeout: 6000 }).catch(() => null);
+        const nss = await noSideScroll(p.page); ok(!!sent && nss, `${width}: appeal sent, status shown, no sideways scroll`, JSON.stringify({ sent: !!sent, nss, w: await p.page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]) }));
+        await shot(p.page, `d7-appeal-sent-${width}`);
+      }
+      await p.ctx.close();
+      const a = await pageFor(admin, width);
+      await a.page.goto(BASE + '/admin', { waitUntil: 'domcontentloaded' });
+      await a.page.waitForSelector('.admin-tabs [data-tab="reports"]', { timeout: 15000 });
+      const act = await a.page.waitForSelector('[data-testid="appeal-actions"]', { timeout: 8000 }).catch(() => null);
+      ok(!!act, `${width}: appeal appears in the site queue with approve/deny`);
+      if (act) { await act.evaluate((e) => e.scrollIntoView({ block: 'center' })); await shot(a.page, `d7-appeal-queue-${width}`); }
+      await a.ctx.close();
+      await fresh(admin);
+      void b;
     }
     // @@UI-END
   }

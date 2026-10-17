@@ -22,6 +22,7 @@ import { brandedHtml, sendMail } from './mail';
 import { emailVerifyRequiredEffective, roomEntryError } from './gate';
 import { clientIp, DEVICE_RE, isHttps, originAllowed, parseCookies, trustSetting } from './net';
 import { KeyedLimiter } from './rateLimit';
+import { APPEAL_MIN, APPEAL_MAX, type AppealInfo } from '../shared/appeals';
 import * as repo from './repo';
 import { backupHealth, backupPath, backupRunning, backupStatus, listBackups, runBackup } from './backup';
 import { live, type BotIdentity, type BotModAction, type BotModBody } from './live';
@@ -1641,6 +1642,26 @@ export function createApp(roomList: () => unknown) {
     repo.logAction(actor(req).username, actor(req).id, 'unban', `#${req.params.id}`, null);
     res.json({ ok: true });
   });
+  admin.get('/appeals', (req, res) => {
+    const st = String(req.query.status ?? 'open');
+    const status = (['open', 'approved', 'denied', 'all'].includes(st) ? st : 'open') as 'open';
+    res.json({ ok: true, appeals: repo8.listAppeals(status).map((a) => appealView(a, a)) });
+  });
+  admin.post('/appeals/:id', (req, res) => {
+    const a = repo8.appealById(Number(req.params.id));
+    if (!a) return fail(res, 404, 'No such appeal');
+    if (a.status !== 'open') return fail(res, 409, `Already ${a.status}`);
+    const decision = req.body?.decision;
+    if (decision !== 'approve' && decision !== 'deny') return fail(res, 400, 'decision must be approve or deny');
+    const note = req.body?.note ? String(req.body.note).trim().slice(0, 300) || null : null;
+    const by = actor(req);
+    const status = decision === 'approve' ? 'approved' : 'denied';
+    if (!repo8.decideAppeal(a.id, status, by.username, note)) return fail(res, 409, 'Already decided');
+    if (status === 'approved') repo.liftBan(a.ban_id, by.username);
+    repo.logAction(by.username, by.id, status === 'approved' ? 'appeal-approve' : 'appeal-deny', `appeal #${a.id} (ban #${a.ban_id})`, null, note);
+    live.appealDecided(a.id, status, by.username, note);
+    res.json({ ok: true, decision: status });
+  });
   admin.get('/users', (req, res) => res.json({ ok: true, users: repo.searchUsers(String(req.query.q ?? '').slice(0, 40)) }));
   admin.post('/users/:id/role', (req, res) => {
     const me = actor(req);
@@ -1878,6 +1899,38 @@ export function createApp(roomList: () => unknown) {
     res.json({ ok: true, nowPlaying: text ? maskWords(text) : null });
   });
   // ---- XP and levels (batch D) ----
+  // ---------- ban appeals (batch D) ----------
+  // A banned client never gets a socket, so these work over plain HTTP from the blocked screen.
+  const appealLimiter = new KeyedLimiter(30, 60 * 60_000); // per IP (shared NATs)
+  const appealBanLimiter = new KeyedLimiter(5, 60 * 60_000); // per ban
+  const appealView = (a: repo8.AppealRow, extra?: { reason?: string | null; expires_at?: number | null }): AppealInfo => ({
+    id: a.id, banId: a.ban_id, username: a.username, text: a.text, createdAt: a.created_at, status: a.status,
+    decidedBy: a.decided_by, decidedAt: a.decided_at, note: a.decision_note,
+    ...(extra ? { reason: extra.reason ?? null, expiresAt: extra.expires_at ?? null } : {}),
+  });
+  const myBan = (req: Request) => { const a = reqAccount(req); return banCheck(req, a?.id ?? null, a ? isStaffRole(a.role) : false); };
+  app.get('/api/appeal', (req, res) => {
+    const ban = myBan(req);
+    if (!ban) return res.json({ ok: true, banned: false });
+    const a = repo8.appealForBan(ban.id);
+    res.json({ ok: true, banned: true, ban: { id: ban.id, reason: ban.reason, expiresAt: ban.expiresAt }, appeal: a ? appealView(a) : null });
+  });
+  app.post('/api/appeal', (req, res) => {
+    if (!appealLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const ban = myBan(req);
+    if (!ban) return fail(res, 400, 'You are not banned.');
+    if (!appealBanLimiter.take(`b:${ban.id}`)) return fail(res, 429, 'Too many attempts. Try again later.');
+    const text = String(req.body?.text ?? '').replace(/\s+/g, ' ').trim();
+    if (text.length < APPEAL_MIN) return fail(res, 400, `Please write at least ${APPEAL_MIN} characters.`);
+    if (text.length > APPEAL_MAX) return fail(res, 400, `Keep it under ${APPEAL_MAX} characters.`);
+    const acct = reqAccount(req);
+    const a = repo8.insertAppeal({ banId: ban.id, userId: acct?.id ?? null, username: acct?.username ?? null, ip: clientIp(req), deviceId: reqDevices(req)[0] ?? null, text });
+    if (!a) return fail(res, 409, 'You already appealed this ban.');
+    repo.logAction(acct?.username ?? 'banned visitor', acct?.id ?? null, 'appeal', `ban #${ban.id}`, null, text.slice(0, 200));
+    live.appealFiled({ id: a.id, username: a.username, userId: a.user_id, text, reason: ban.reason });
+    res.json({ ok: true, appeal: appealView(a) });
+  });
+
   app.get('/api/me/xp', (req, res) => {
     const a = reqAccount(req);
     if (!a) return fail(res, 401, 'Sign in first');

@@ -1949,6 +1949,22 @@ live.profileChanged = (userId) => {
 };
 live.badgesChanged = (userId) => { refreshBadges(userId); };
 live.levelChanged = (userId) => { refreshLevel(userId); };
+live.appealFiled = (a) => {
+  try {
+    const id = modq.insertReport({
+      reporterUserId: a.userId, reporterNick: a.username ?? 'banned visitor', reporterIp: 'appeal', targetUserId: a.userId, targetNick: a.username, targetIp: null, targetDevice: null,
+      roomId: null, messageId: null, messageText: a.text.slice(0, 2000), kind: 'user', key: `appeal:${a.id}`, category: 'other',
+      note: `Ban appeal #${a.id}${a.username ? ` from ${a.username}` : ''} (ban reason: ${a.reason}): ${a.text}`.slice(0, 1200),
+      snapshot: null, privateKind: null, context: [], notify: false,
+    });
+    const row = modq.reportById(id);
+    if (row) afterNewReport(row);
+  } catch (err) { console.error('[appeals] queue entry', (err as Error).message); }
+};
+live.appealDecided = (id, status, by, note) => {
+  try { modq.closeGroup(`appeal:${id}`, status === 'approved' ? 'resolved' : 'dismissed', by, note, status === 'approved' ? 'appeal approved: ban lifted' : 'appeal denied'); } catch (err) { console.error('[appeals] close', (err as Error).message); }
+  emitStaffCounts(true);
+};
 live.roleChanged = (userId, role) => {
   for (const [id, s] of sessions) {
     if (s.account?.id !== userId) continue;

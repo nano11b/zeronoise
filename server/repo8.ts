@@ -38,3 +38,28 @@ export function tryAwardXp(userId: number, amount: number, key: string, cooldown
 }
 export function setXpHidden(userId: number, hidden: boolean) { q('UPDATE users SET xp_hidden = ? WHERE id = ?').run(hidden ? 1 : 0, userId); }
 export const hashKey = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 24);
+
+// ---------------- ban appeals (migration 42) ----------------
+export interface AppealRow {
+  id: number; ban_id: number; user_id: number | null; username: string | null; ip: string; device_id: string | null; text: string;
+  created_at: number; status: 'open' | 'approved' | 'denied'; decided_by: string | null; decided_at: number | null; decision_note: string | null;
+}
+export function appealForBan(banId: number): AppealRow | undefined {
+  return q('SELECT * FROM ban_appeals WHERE ban_id = ?').get(banId) as AppealRow | undefined;
+}
+export function appealById(id: number): AppealRow | undefined {
+  return q('SELECT * FROM ban_appeals WHERE id = ?').get(id) as AppealRow | undefined;
+}
+/** one appeal per ban: returns null when this ban already has one */
+export function insertAppeal(a: { banId: number; userId: number | null; username: string | null; ip: string; deviceId: string | null; text: string }): AppealRow | null {
+  const r = q(`INSERT INTO ban_appeals (ban_id, user_id, username, ip, device_id, text, created_at, status) VALUES (?,?,?,?,?,?,?, 'open')
+    ON CONFLICT(ban_id) DO NOTHING RETURNING id`).get(a.banId, a.userId, a.username, a.ip, a.deviceId, a.text, now()) as { id: number } | undefined;
+  return r ? appealById(r.id)! : null;
+}
+export function decideAppeal(id: number, status: 'approved' | 'denied', by: string, note: string | null): boolean {
+  return Number(q(`UPDATE ban_appeals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'open'`).run(status, by, now(), note, id).changes) > 0;
+}
+export function listAppeals(status: 'open' | 'approved' | 'denied' | 'all' = 'open', limit = 200): (AppealRow & { reason: string | null; expires_at: number | null; ban_kind: string | null })[] {
+  return q(`SELECT a.*, b.reason, b.expires_at, b.kind AS ban_kind FROM ban_appeals a LEFT JOIN bans b ON b.id = a.ban_id
+    ${status === 'all' ? '' : 'WHERE a.status = ?'} ORDER BY a.created_at DESC LIMIT ?`).all(...(status === 'all' ? [limit] : [status, limit])) as never;
+}

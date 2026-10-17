@@ -2358,3 +2358,11 @@ html[data-ui-theme="dark-orange"] {
 .lvl-row .lvl-badge { margin-left: 0; }
 .lvl-bar { height: 8px; border-radius: 4px; background: var(--bg-2); overflow: hidden; border: 1px solid var(--line); }
 .lvl-bar > span { display: block; height: 100%; background: var(--accent); }
+
+/* ---- batch D: ban appeals ---- */
+.appeal-box { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; text-align: left; }
+.appeal-box h2 { font-size: 1rem; margin: 0; }
+.appeal-box textarea { width: 100%; resize: vertical; }
+.appeal-box blockquote { margin: 0; padding: 6px 10px; border-left: 3px solid var(--border, #555); overflow-wrap: anywhere; }
+.queue-appeal { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.queue-appeal .input { flex: 1 1 180px; min-width: 0; }

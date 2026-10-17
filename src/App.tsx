@@ -1,3 +1,4 @@
+import { BanAppeal } from './components/BanAppeal';
 import { badgeLabel, clientTimeZone } from './components/Badges';
 import { isUiTheme } from '../shared/uiTheme';
 import { applyUiTheme, currentUiTheme } from './uiTheme';
@@ -674,6 +675,7 @@ export default function App() {
         <section className="login-card">
           <h1 className="brand-title"><img className="lockup" src="/logo-lockup.png" alt="zeronoise" width={512} height={359} /></h1>
           <p className="form-error" data-testid="blocked">{blocked}</p>
+          <BanAppeal />
           <button className="btn ghost" onClick={() => { setBlocked(null); session.current = { ...session.current, nick: null, roomId: null }; reconnect(); }}>Try again</button>
         </section>
       </main>

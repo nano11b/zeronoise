@@ -147,6 +147,7 @@ export function ModQueue({ mode, roomId, toast }: { mode: 'site' | 'room'; roomI
                 {(Object.entries(it.categories) as [ReportCategory, number][]).map(([c, n]) => <span key={c} className="tag cat-tag">{REPORT_CATEGORY_LABELS[c]}{n > 1 ? ` ×${n}` : ''}</span>)}
               </p>
               {it.kind === 'message' && it.messageId && !it.messageGone && <EditHistory messageId={it.messageId} />}
+              {site && active && it.key.startsWith('appeal:') && <AppealActions appealId={Number(it.key.slice(7))} onDone={() => void load()} />}
               {it.snapshot && (it.kind === 'message' || it.kind === 'whisper') && (
                 <div className="queue-snap">
                   {it.snapshot.text != null ? <p className="small"><span className="muted">Reported message{it.snapshot.editedAt ? ' (as it was when reported)' : ''}:</span> <span className="quoted" data-snapshot="1">{it.snapshot.text || '(no text)'}</span></p>
@@ -252,6 +253,26 @@ function BotActions({ scope, version }: { scope: 'site' | 'room'; version: numbe
 
 type Versions = { versions: { text: string; at: number }[]; current: { text: string; at: number } };
 /** batch C: earlier versions of a reported message (only shown when it was edited) */
+function AppealActions({ appealId, onDone }: { appealId: number; onDone: () => void }) {
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const decide = async (decision: 'approve' | 'deny') => {
+    setBusy(true); setErr('');
+    try { await api(`/api/admin/appeals/${appealId}`, { decision, note: note.trim() || undefined }); onDone(); }
+    catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="queue-appeal" data-testid="appeal-actions">
+      <span className="tag status-review">Ban appeal</span>
+      <input className="input" placeholder="Note (optional, logged)" maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} aria-label="Decision note" />
+      <button type="button" className="btn small-btn" disabled={busy} data-action="appeal-approve" onClick={() => void decide('approve')}>Approve (lift ban)</button>
+      <button type="button" className="btn ghost small-btn" disabled={busy} data-action="appeal-deny" onClick={() => void decide('deny')}>Deny</button>
+      {err && <span className="form-error small" role="alert">{err}</span>}
+    </div>
+  );
+}
+
 function EditHistory({ messageId }: { messageId: string }) {
   const [h, setH] = useState<Versions | null | 'err'>(null);
   const load = () => call<Versions>((ack) => socket.emit('modq:history', { messageId }, ack)).then(setH, () => setH('err'));

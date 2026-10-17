@@ -62,6 +62,9 @@ export const live = {
   profileChanged: (_userId: number) => {},
   /** shown badges changed: refresh live UserInfo.badges + broadcast user:updated */
   badgesChanged: (_userId: number) => {},
+  /** batch D: a banned person filed an appeal (staff mod queue entry) / it was decided (close the entry) */
+  appealFiled: (_a: { id: number; username: string | null; userId: number | null; text: string; reason: string }) => {},
+  appealDecided: (_id: number, _status: 'approved' | 'denied', _by: string, _note: string | null) => {},
   /** batch D: XP level shown / hidden changed */
   levelChanged: (_userId: number) => {},
   /** is this nick currently used by a guest from a different device? */
