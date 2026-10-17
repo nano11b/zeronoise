@@ -3,10 +3,11 @@
  * Two panes on wide screens (list | conversation), one pane with a Back button on phones.
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { DM, disappearLabel, type DmConvo, type DmMessage, type DmPolicy } from '../../shared/dm';
+import { DM, DM_FILE_TYPES, disappearLabel, type DmConvo, type DmMessage, type DmPolicy } from '../../shared/dm';
 import { dmCall, dmSock, loadDm, loadOlder, markRead, openConvo, requestCount, setDmPrefs, totalUnread, useDm, blockLocally } from '../dmStore';
 import { call, socket } from '../socket';
 import { fmtTime } from '../util';
+import { storedDeviceId } from '../api';
 import { ChatText } from './ChatText';
 import { UserAvatar } from './UserAvatar';
 import type { RoomState } from '../../shared/types';
@@ -171,6 +172,17 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [c.id]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const attach = async (file: File | null | undefined) => {
+    if (!file) return;
+    if (file.size > DM.fileMaxBytes) return toast(`Files can be up to ${DM.fileMaxBytes / 1024 / 1024} MB`, 'error');
+    setUploading(true);
+    try {
+      const r = await dmUpload<{ file: { id: string } }>(`/api/dm/${encodeURIComponent(c.id)}/files`, file, file.name);
+      await dmCall('dm:send', { convoId: c.id, fileId: r.file.id });
+    } catch (e) { toast((e as Error).message, 'error'); } finally { setUploading(false); if (fileRef.current) fileRef.current.value = ''; }
+  };
   const startCall = async (video: boolean) => {
     try { const r = await dmCall<{ room: RoomState; rang: number }>('dm:call', { convoId: c.id, video }); onJoinCall?.(r.room); }
     catch (e) { toast((e as Error).message, 'error'); }
@@ -216,7 +228,9 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
         ))}
       </div>
       {typing.length > 0 && <div className="dm-typing small muted" aria-live="polite" data-testid="dm-typing">{typing.join(', ')} {typing.length === 1 ? 'is' : 'are'} typing…</div>}
-      <form className="dm-composer" onSubmit={send}>
+      <form className="dm-composer" onSubmit={send} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void attach(e.dataTransfer.files?.[0]); }}>
+        <input ref={fileRef} type="file" hidden accept={Object.keys(DM_FILE_TYPES).join(',')} onChange={(e) => void attach(e.target.files?.[0])} data-field="dm-file" />
+        {c.state === 'active' && <button type="button" className="icon-btn" onClick={() => fileRef.current?.click()} aria-label="Attach a file or image (up to 10 MB)" title="Attach (up to 10 MB)" disabled={uploading} data-action="dm-attach">{uploading ? '…' : '📎'}</button>}
         <textarea rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Whisper ${convoTitle(c, myId)}`} aria-label="Message"
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }} maxLength={2000} data-field="dm-text" />
         <button className="btn primary small-btn" disabled={!text.trim()} data-action="dm-send">Send</button>
@@ -231,12 +245,41 @@ function Line({ m, mine, children }: { m: DmMessage; mine: boolean; children?: R
     <div className={`dm-line${mine ? ' mine' : ''}`} data-msg={m.id}>
       <div className="dm-bubble">
         {!mine && <span className="dm-from small">{m.from}</span>}
-        {m.deleted ? <em className="muted">Message deleted</em> : <ChatText text={m.text} className="dm-text" />}
+        {m.deleted ? <em className="muted">Message deleted</em> : m.file ? <FileView f={m.file} /> : <ChatText text={m.text} className="dm-text" />}
         <span className="dm-meta small muted">{fmtTime(m.ts)}{m.editedAt ? ' · edited' : ''}</span>
       </div>
       {children}
     </div>
   );
+}
+
+const fmtBytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
+function FileView({ f }: { f: NonNullable<DmMessage['file']> }) {
+  if (f.image) {
+    return (
+      <a href={f.url} target="_blank" rel="noopener noreferrer" className="dm-image" data-testid="dm-image">
+        <img src={f.url} alt={f.name} loading="lazy" width={f.width ?? undefined} height={f.height ?? undefined} />
+      </a>
+    );
+  }
+  return (
+    <a href={`${f.url}?download=1`} className="dm-file" download={f.name} data-testid="dm-file">
+      <span aria-hidden="true">📄</span><span className="dm-file-name">{f.name}</span><span className="muted small">{fmtBytes(f.bytes)}</span>
+    </a>
+  );
+}
+
+/** POST one file to a whisper upload route (same headers as room uploads). */
+export async function dmUpload<T>(url: string, blob: Blob, name: string, field = 'file'): Promise<T> {
+  const fd = new FormData();
+  fd.append(field, blob, name);
+  const headers: Record<string, string> = { 'X-CSRF': '1' };
+  const dev = storedDeviceId();
+  if (dev) headers['X-Device-Id'] = dev;
+  const res = await fetch(url, { method: 'POST', headers, credentials: 'same-origin', body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.ok === false) throw new Error(data?.error || 'Upload failed');
+  return data as T;
 }
 
 function Manage({ c, myId, toast, onClose }: { c: DmConvo; myId: number; toast: Toast; onClose: () => void }) {

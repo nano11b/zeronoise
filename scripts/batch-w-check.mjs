@@ -174,6 +174,44 @@ try {
     await emit(A.s, 'call:respond', { roomId: d1.roomId, accept: false });
     await emit(B.s, 'room:leave', {});
   }
+  // @@W1-3
+  {
+    const up = (u, convo, buf, type, name) => { const fd = new FormData(); fd.append('file', new Blob([buf], { type }), name); return u.j.form(`/api/dm/${convo}/files`, fd); };
+    const jpg = await sharp({ create: { width: 3000, height: 1500, channels: 3, background: '#3366cc' } }).jpeg().withMetadata({ exif: { IFD0: { Copyright: 'SECRET-EXIF', Artist: 'Someone' } } }).toBuffer();
+    ok(jpg.includes(Buffer.from('SECRET-EXIF')), 'W1-3: (test image carries EXIF)');
+    const r1 = await up(A, globalThis.DIRECT, jpg, 'image/jpeg', 'holiday.jpg');
+    ok(r1.ok && r1.file?.image, 'W1-3: upload an image', r1.error);
+    const s1 = await emit(A.s, 'dm:send', { convoId: globalThis.DIRECT, fileId: r1.file?.id });
+    ok(s1.ok, 'W1-3: send it as a message', s1.error);
+    const again = await emit(A.s, 'dm:send', { convoId: globalThis.DIRECT, fileId: r1.file?.id });
+    ok(!again.ok, 'W1-3: one upload, one message');
+    const got = await fetch(BASE + r1.file.url, { headers: { cookie: B.j.header() } });
+    const body = Buffer.from(await got.arrayBuffer());
+    const meta = await sharp(body).metadata();
+    ok(got.status === 200 && !body.includes(Buffer.from('SECRET-EXIF')) && !meta.exif, 'W1-3: re-encoded without EXIF');
+    ok(Math.max(meta.width, meta.height) <= 2048, `W1-3: large images are scaled for preview (${meta.width}x${meta.height})`);
+    ok(got.headers.get('x-content-type-options') === 'nosniff', 'W1-3: served with nosniff');
+    const out = await fetch(BASE + r1.file.url, { headers: { cookie: D.j.header() } });
+    ok(out.status === 404, 'W1-3: non-participants get 404');
+    const anon = await fetch(BASE + r1.file.url);
+    ok(anon.status === 404, 'W1-3: signed-out visitors get 404');
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(2000, 32), Buffer.from('\n%%EOF')]);
+    const r2 = await up(B, globalThis.DIRECT, pdf, 'application/pdf', 'notes.pdf');
+    ok(r2.ok && !r2.file.image && r2.file.mime === 'application/pdf', 'W1-3: PDFs are allowed as files', r2.error);
+    await emit(B.s, 'dm:send', { convoId: globalThis.DIRECT, fileId: r2.file?.id });
+    const dl = await fetch(BASE + r2.file.url + '?download=1', { headers: { cookie: A.j.header() } });
+    ok(/attachment/.test(dl.headers.get('content-disposition') || ''), 'W1-3: files download as attachments');
+    const exe = await up(A, globalThis.DIRECT, Buffer.concat([Buffer.from('MZ'), Buffer.alloc(500)]), 'application/octet-stream', 'x.exe');
+    ok(!exe.ok && exe.status === 400, 'W1-3: other file types are refused', exe.error);
+    const fake = await up(A, globalThis.DIRECT, Buffer.from('<script>alert(1)</script>'), 'image/png', 'x.png');
+    ok(!fake.ok, 'W1-3: content is sniffed, not trusted from the name/type');
+    const big = await up(A, globalThis.DIRECT, Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(10 * 1024 * 1024 + 10)]), 'application/pdf', 'big.pdf');
+    ok(big.status === 413, 'W1-3: files over 10 MB are refused', String(big.status));
+    const dUp = await up(D, globalThis.DIRECT, pdf, 'application/pdf', 'n.pdf');
+    ok(!dUp.ok, 'W1-3: non-participants cannot upload');
+    const op = await emit(B.s, 'dm:open', { convoId: globalThis.DIRECT });
+    ok(op.messages.some((m) => m.file?.image && m.file.name === 'holiday.webp'), 'W1-3: the image shows in the history');
+  }
   // @@API-END
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
   for (const width of [1366, 390]) {
@@ -216,6 +254,21 @@ try {
       await b.ctx.close();
       await a.page.goto(BASE + '/', { waitUntil: 'networkidle0' }); await sleep(600);
       await a.page.click('[data-action="dm-open"]'); await sleep(500);
+    }
+    {
+      if (phone) await a.page.click('[data-action="dm-back"]').catch(() => {});
+      await sleep(300);
+      await a.page.click(`[data-convo="${globalThis.DIRECT}"]`); await sleep(600);
+      const img = await a.page.waitForSelector('[data-testid="dm-image"] img', { timeout: 6000 }).then(() => true, () => false);
+      ok(img, `${width}: W1-3: image preview in the conversation`);
+      ok(!!(await a.page.$('[data-testid="dm-file"]')), `${width}: W1-3: file chip for documents`);
+      const input = await a.page.$('[data-field="dm-file"]');
+      const tmp = path.join(os.tmpdir(), `w-up-${width}.png`); fs.writeFileSync(tmp, await png('#22aa66', 200));
+      await input.uploadFile(tmp);
+      ok(await a.page.waitForFunction(() => document.querySelectorAll('[data-testid="dm-image"] img').length >= 2, { timeout: 8000 }).then(() => true, () => false), `${width}: W1-3: attach from the composer`);
+      await sleep(500);
+      await shot(a.page, `w3-files-${width}`);
+      if (phone) { await a.page.click('[data-action="dm-back"]'); await sleep(300); }
     }
     // @@UI-W
     await a.ctx.close();

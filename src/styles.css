@@ -2568,3 +2568,8 @@ html[data-ui-theme="dark-orange"] {
 
 .dm-ring { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 10000; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center;
   background: var(--panel, #1b2333); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 14px; box-shadow: 0 8px 30px rgba(0,0,0,.45); max-width: calc(100vw - 20px); }
+
+.dm-image { display: block; margin-top: 2px; }
+.dm-image img { display: block; max-width: min(100%, 320px); max-height: 280px; width: auto; height: auto; border-radius: 8px; object-fit: contain; }
+.dm-file { display: inline-flex; gap: 6px; align-items: center; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; color: inherit; text-decoration: none; max-width: 100%; }
+.dm-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
