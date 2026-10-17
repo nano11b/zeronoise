@@ -311,6 +311,21 @@ try {
     ok(offR.ok && !op3.messages.find((x) => x.text === 'kept')?.expiresAt, 'W2-7: turning it off stops new expiries');
     void m; void keep;
   }
+  // @@W2-8
+  {
+    const pin = await emit(B.s, 'dm:pin', { convoId: globalThis.GROUP, on: true });
+    const l1 = await emit(B.s, 'dm:list', {});
+    ok(pin.ok && l1.convos.find((c) => c.id === globalThis.GROUP)?.pinned, 'W2-8: pin a conversation', pin.error);
+    const lA = await emit(A.s, 'dm:list', {});
+    ok(!lA.convos.find((c) => c.id === globalThis.GROUP)?.pinned, 'W2-8: pins are personal');
+    const ar = await emit(B.s, 'dm:archive', { convoId: globalThis.DIRECT, on: true });
+    const l2 = await emit(B.s, 'dm:list', {});
+    ok(ar.ok && l2.convos.find((c) => c.id === globalThis.DIRECT)?.archived, 'W2-8: archive a conversation');
+    await emit(A.s, 'dm:send', { convoId: globalThis.DIRECT, text: 'wake up' });
+    const l3 = await emit(B.s, 'dm:list', {});
+    ok(!l3.convos.find((c) => c.id === globalThis.DIRECT)?.archived, 'W2-8: a new message unarchives it');
+    await emit(B.s, 'dm:archive', { convoId: globalThis.GROUP2, on: true });
+  }
   // @@API-END
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
   for (const width of [1366, 390]) {
@@ -428,6 +443,21 @@ try {
       await shot(a.page, `w7-disappear-${width}`);
       await a.page.click('[data-action="dm-manage"]'); await sleep(150);
       ok(/⏱/.test(await a.page.$eval('.dm-thread-title', (e) => e.textContent)), `${width}: W2-7: the header shows the timer`);
+    }
+    if (!phone) {
+      const bp = globalThis.BPAGE.page;
+      await bp.click('[data-action="dm-back"]').catch(() => {});
+      await bp.goto(BASE + '/?whispers=1', { waitUntil: 'networkidle0' });
+      await bp.waitForSelector('[data-testid="dm-rows"] [data-convo]', { timeout: 10000 });
+      ok(true, `${width}: W2-8: ?whispers=1 (push link) opens the inbox`);
+      const first = await bp.$eval('[data-testid="dm-rows"] [data-convo]', (e) => e.getAttribute('data-convo'));
+      ok(first === globalThis.GROUP, `${width}: W2-8: pinned conversation sits on top`);
+      ok(!(await bp.$(`[data-testid="dm-rows"] [data-convo="${globalThis.GROUP2}"]`)), `${width}: W2-8: archived ones leave Chats`);
+      await bp.click('[data-tab="archived"]'); await sleep(200);
+      ok(!!(await bp.$(`[data-convo="${globalThis.GROUP2}"]`)), `${width}: W2-8: and are listed under Archived`);
+      await shot(bp, `w8-archived-${width}`);
+      await bp.click('[data-tab="chats"]'); await sleep(150);
+      await shot(bp, `w8-pinned-${width}`);
     }
     // @@UI-W
     await a.ctx.close();

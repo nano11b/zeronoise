@@ -59,8 +59,8 @@ export function insertMessage(m: Omit<MsgRow, 'edited_at' | 'deleted_at'>) {
     q(`INSERT INTO dm_messages (id, convo_id, ts, from_user_id, text, kind, reply_to, file_id, voice_id, voice_ms, expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
       .run(m.id, m.convo_id, m.ts, m.from_user_id, m.text, m.kind, m.reply_to, m.file_id, m.voice_id, m.voice_ms, m.expires_at);
     q('UPDATE dm_convos SET last_ts = ? WHERE id = ?').run(m.ts, m.convo_id);
-    // a new message brings an archived conversation back for everyone in it (batch W8)
-    q('UPDATE dm_members SET archived = 0 WHERE convo_id = ? AND left_at IS NULL').run(m.convo_id);
+    // a new message brings an archived conversation back for everyone in it (batch W8); notices (timer, joins) don't
+    if (m.kind !== 'system') q('UPDATE dm_members SET archived = 0 WHERE convo_id = ? AND left_at IS NULL').run(m.convo_id);
   });
 }
 export const msgById = (id: string) => q('SELECT * FROM dm_messages WHERE id = ?').get(id) as MsgRow | undefined;

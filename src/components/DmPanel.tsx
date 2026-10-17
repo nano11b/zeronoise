@@ -375,6 +375,10 @@ function Manage({ c, myId, toast, onClose }: { c: DmConvo; myId: number; toast: 
         </label>
       )}
       <div className="dm-manage-actions">
+        {c.state === 'active' && <>
+          <button type="button" className="btn ghost small-btn" onClick={() => void act('dm:pin', { on: !c.pinned }, c.pinned ? 'Unpinned' : 'Pinned to the top')} data-action="dm-pin" aria-pressed={c.pinned}>{c.pinned ? 'Unpin' : 'Pin'}</button>
+          <button type="button" className="btn ghost small-btn" onClick={() => { onClose(); void act('dm:archive', { on: !c.archived }, c.archived ? 'Moved back to Chats' : 'Archived; a new message brings it back').then(() => { if (!c.archived) void openConvo(null); }); }} data-action="dm-archive">{c.archived ? 'Unarchive' : 'Archive'}</button>
+        </>}
         <button type="button" className="btn ghost small-btn" onClick={() => { onClose(); void act('dm:leave', {}, c.kind === 'group' ? 'You left the group' : 'Conversation closed'); }} data-action="dm-leave">{c.kind === 'group' ? 'Leave group' : 'Close conversation'}</button>
       </div>
     </div>
