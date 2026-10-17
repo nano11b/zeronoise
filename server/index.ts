@@ -607,7 +607,8 @@ function sendReminder(row: repo2.EventRow, stage: 'soon' | 'start') {
     const sid = accountSockets.get(uid);
     if (sid) io.to(sid).emit('event:reminder', payload);
   }
-  if (room) postAnnounceLine(room, stage === 'start' ? `📅 **${row.title}** is starting now!` : `📅 Reminder: **${row.title}** starts in ${Math.max(1, Math.round((row.starts_at - Date.now()) / 60_000))} minute${Math.max(1, Math.round((row.starts_at - Date.now()) / 60_000)) === 1 ? '' : 's'}.`, 'Event reminder');
+  // same system line as before (kept in history like other system lines); old clients and tests rely on this text
+  if (room) systemMsg(room, stage === 'start' ? `📅 ${row.title} is starting!` : `📅 ${row.title} starts in 15 minutes`);
 }
 /** Due-reminder check. Each stage is claimed in SQLite first, so a restart never re-sends. */
 function eventTick(at = Date.now()) {
@@ -1805,13 +1806,6 @@ function emitSchedules(room: Room) {
   }
 }
 /** An announcement line in chat that is kept in history (scheduled posts, event reminders). */
-function postAnnounceLine(room: Room, text: string, by: string) {
-  const msg: ChatMessage = { kind: 'chat', id: randomUUID(), ts: Date.now(), fromId: '', from: by, role: 'user', text, mentions: [], reactions: [], announce: { by } };
-  repo.insertMessage({ id: msg.id, room_id: room.id, ts: msg.ts, user_id: null, nick: by, role: 'user', text, ip: null, device_id: null });
-  repo3.markAnnounce(msg.id, room.id, null, by);
-  io.to(`room:${room.id}`).emit('chat:message', msg);
-  if (!room.isPrivate) io.emit('room:activity', { roomId: room.id, mentions: [] });
-}
 function postScheduled(room: Room, r: repo3.ScheduleRow) {
   if (r.kind === 'banner') {
     // scheduled banner: replaces the room's announcement banner at that time

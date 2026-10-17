@@ -202,10 +202,10 @@ try {
   ok(ev.ok, 'owner creates an event 6s ahead', ev.error);
   await sleep(3500);
   h2 = (await emit(other.s, 'room:join', { roomId: room })).room;
-  ok(h2.history.some((m) => m.announce && /Reminder: \*\*Trivia hour\*\* starts in [1-9]\d* minutes?\./.test(m.text)), 'the "starts soon" reminder posted as a kept announcement line', JSON.stringify(h2.history.slice(-3).map((m) => m.text)));
+  ok(h2.history.some((m) => /📅 Trivia hour starts in 15 minutes/.test(m.text)), 'the "starts soon" reminder posted as a chat line', JSON.stringify(h2.history.slice(-3).map((m) => m.text)));
   await sleep(3200);
   h2 = (await emit(other.s, 'room:join', { roomId: room })).room;
-  ok(h2.history.some((m) => m.announce && /Trivia hour\*\* is starting now/.test(m.text)), 'the "starting now" reminder posted');
+  ok(h2.history.some((m) => /📅 Trivia hour is starting!/.test(m.text)), 'the "starting now" reminder posted');
 
   // ---------- 9. link previews ----------
   await emit(owner.s, 'room:filters:set', { words: '', links: 'off', allow: '' });
