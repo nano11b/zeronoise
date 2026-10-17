@@ -390,6 +390,10 @@ export interface ClientToServer {
   'room:mod': (p: { accountId: number; on: boolean }, ack: Ack<{ mods: RoomModInfo[] }>) => void;
   /** owner, room mods and site staff: mute someone in this room's chat */
   'room:mute': (p: { userId: string; minutes: number }, ack: Ack) => void;
+  'roles:get': (p: Record<string, never>, ack: Ack<{ roles: RoomRoleInfo[]; members: Record<string, number>; perms: RoomRolePerm[] }>) => void;
+  'roles:save': (p: { id?: number; name: string; color: string | null; perms: RoomRolePerm[] }, ack: Ack<{ role: RoomRoleInfo }>) => void;
+  'roles:archive': (p: { id: number }, ack: Ack) => void;
+  'roles:assign': (p: { accountId: number; roleId: number | null }, ack: Ack) => void;
   'chat:preview-remove': (p: { messageId: string }, ack: Ack) => void;
   'poll:create': (p: { question: string; options: string[]; durationMin?: number | null; parentId?: string }, ack: Ack<{ poll: PollInfo }>) => void;
   'poll:vote': (p: { pollId: string; option: number }, ack: Ack<{ poll: PollInfo }>) => void;
@@ -454,6 +458,7 @@ export interface ServerToClient {
   /** Lightweight ping so other clients can badge a room. Not stored. */
   'room:activity': (p: { roomId: string; mentions?: number[] }) => void;
   'mentions:new': (p: { item: MentionItem; unread: number }) => void;
+  'roles:update': (p: { roles: RoomRoleInfo[]; members: Record<string, number> }) => void;
   'chat:edited': (p: { id: string; text: string; editedAt: number; mentions?: number[] }) => void;
   'chat:deleted': (p: { id: string }) => void;
   'chat:replies': (p: { messageId: string; replyCount: number }) => void;
@@ -722,3 +727,7 @@ export interface RoomAnalytics {
   peakByHour: [number, number, number][];
   totals: { members: number; active7: number; activePrev7: number; growthPct: number | null; new7: number; new30: number; returning7: number; peak30: number };
 }
+
+/** Batch G4: custom room roles */
+export type RoomRolePerm = 'messages' | 'pin' | 'mute' | 'kick' | 'floor';
+export interface RoomRoleInfo { id: number; name: string; color: string | null; perms: RoomRolePerm[] }

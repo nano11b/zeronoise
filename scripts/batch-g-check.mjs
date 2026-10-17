@@ -173,6 +173,55 @@ try {
     ok(row?.status === 'expired' && /expired/.test(txt || '') && (await fetch(BASE + m.voice.url, { headers: { cookie: mem.j.header() } })).status === 404, 'G2: clips are removed with the recording (retention)', JSON.stringify({ row, txt }));
     ok([404, 410].includes((await clipUp(owner, { recordingId: st.rec.id, startMs: 0, durationMs: 3000 })).status), 'G2: no new clips from an expired recording');
   }
+  // ---------- G4 custom room roles ----------
+  {
+    const kickee = await nodeUser('GgKickee'); sockets.push(kickee.s);
+    const pr = await emit(owner.s, 'room:create', { name: 'gg-roles', category: 'talk' });
+    const rr = pr.roomId;
+    for (const u of [owner, mem, other, kickee]) await emit(u.s, 'room:join', { roomId: rr });
+    ok((await emit(owner.s, 'roles:save', { name: 'Helper', color: '#202830', perms: ['pin'] })).error?.includes('too dark'), 'G4: a hard-to-read name colour is refused');
+    ok(!(await emit(owner.s, 'roles:save', { name: 'Admin', color: null, perms: [] })).ok, 'G4: reserved names refused');
+    ok(!(await emit(mem.s, 'roles:save', { name: 'Mine', color: null, perms: ['kick'] })).ok, 'G4: members cannot create roles');
+    const h = await emit(owner.s, 'roles:save', { name: 'Helper', color: '#7cc4ff', perms: ['pin', 'kick', 'messages', 'bogus'] });
+    ok(h.ok && h.role.perms.join() === 'pin,kick,messages', 'G4: owner creates a role with chosen powers (unknown powers dropped)', JSON.stringify(h));
+    const t = await emit(owner.s, 'roles:save', { name: 'Talker', color: '#ffd166', perms: ['floor'] });
+    await sleep(300);
+    const upP = new Promise((res) => { const t0 = setTimeout(() => res(null), 4000); const f = (p) => { if (p.members?.[mem.id]) { clearTimeout(t0); kickee.s.off('roles:update', f); res(p); } }; kickee.s.on('roles:update', f); });
+    ok((await emit(owner.s, 'roles:assign', { accountId: mem.id, roleId: h.role.id })).ok, 'G4: owner assigns the role');
+    const up = await upP;
+    ok(up?.members?.[mem.id] === h.role.id && up.roles.length === 2, 'G4: everyone in the room gets the role update (for name colours)', JSON.stringify(up));
+    ok(!(await emit(owner.s, 'roles:assign', { accountId: admin.id, roleId: h.role.id })).ok, 'G4: staff cannot be given room roles');
+    ok(!(await emit(mem.s, 'roles:assign', { accountId: other.id, roleId: h.role.id })).ok, 'G4: role holders cannot hand out roles');
+    // other's message: Helper may pin and delete it
+    const sent = await new Promise((res) => { owner.s.once('chat:message', res); emit(other.s, 'chat:send', { text: 'please pin me' }); });
+    ok((await emit(mem.s, 'chat:pin', { messageId: sent.id, pinned: true })).ok, 'G4: Helper pins (pin power)');
+    ok(!(await emit(mem.s, 'room:mute', { userId: other.s.id, minutes: 5 })).ok, 'G4: Helper cannot mute (power not given)');
+    ok(!(await emit(mem.s, 'room:ban', { userId: kickee.s.id, minutes: 60 })).ok, 'G4: roles never ban');
+    ok(!(await emit(mem.s, 'room:kick', { userId: owner.s.id })).ok, 'G4: cannot act on the owner');
+    ok(!(await emit(mem.s, 'room:filters:set', { words: ['x'], links: false, allow: [] })).ok && !(await emit(mem.s, 'room:theme:set', { accent: '#7cc4ff', welcome: 'hi' })).ok, 'G4: roles cannot change filters or theme');
+    await emit(owner.s, 'roles:assign', { accountId: other.id, roleId: t.role.id });
+    ok(!(await emit(mem.s, 'chat:delete', { messageId: sent.id })).ok, 'G4: cannot delete another role holder\'s message');
+    ok(!(await emit(mem.s, 'room:kick', { userId: other.s.id })).ok, 'G4: cannot kick another role holder');
+    await emit(owner.s, 'roles:assign', { accountId: other.id, roleId: null });
+    ok((await emit(mem.s, 'chat:delete', { messageId: sent.id })).ok, 'G4: Helper deletes an ordinary member\'s message (messages power)');
+    const modSent = await new Promise((res) => { mem.s.once('chat:message', res); emit(owner.s, 'chat:send', { text: 'owner line' }); });
+    ok(!(await emit(mem.s, 'chat:delete', { messageId: modSent.id })).ok, 'G4: cannot delete the owner\'s message');
+    ok((await emit(mem.s, 'room:kick', { userId: kickee.s.id })).ok, 'G4: Helper kicks an ordinary member (kick power)');
+    // floor power in a voice room
+    await emit(owner.s, 'roles:assign', { accountId: other.id, roleId: null });
+    const vroles = await emit(owner.s, 'roles:save', { name: 'Floor', color: '#ffd166', perms: ['floor'] });
+    void vroles;
+    await emit(owner.s, 'room:join', { roomId: room }); await emit(other.s, 'room:join', { roomId: room }); await emit(mem.s, 'room:join', { roomId: room });
+    const ft = await emit(owner.s, 'roles:save', { name: 'Floorie', color: '#ffd166', perms: ['floor'] });
+    await emit(owner.s, 'roles:assign', { accountId: other.id, roleId: ft.role.id });
+    ok(!(await emit(mem.s, 'stage:invite', { userId: owner.s.id })).ok, 'G4: no floor power, no floor control');
+    await emit(mem.s, 'stage:hand', { up: true });
+    ok((await emit(other.s, 'stage:invite', { userId: mem.s.id })).ok, 'G4: floor power gives the voice floor');
+    const arc = await emit(owner.s, 'roles:archive', { id: ft.role.id });
+    await emit(mem.s, 'stage:hand', { up: true });
+    ok(arc.ok && !(await emit(other.s, 'stage:invite', { userId: mem.s.id })).ok, 'G4: removing a role removes its powers');
+    globalThis.__rolesRoom = rr;
+  }
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
@@ -252,6 +301,51 @@ try {
         await shot(o.page, `g2-clip-posted-${width}`);
       }
       await o.ctx.close(); await fresh(owner); await emit(owner.s, 'room:join', { roomId: room });
+    }
+    // G4 UI: owner manages roles; holder's name shows in the role colour; holder gets only their powers in menus
+    {
+      const rr = globalThis.__rolesRoom;
+      await fresh(owner); await emit(owner.s, 'room:join', { roomId: rr });
+      await fresh(other); await emit(other.s, 'room:join', { roomId: rr }); await fresh(mem); await emit(mem.s, 'room:join', { roomId: rr });
+      await emit(mem.s, 'chat:send', { text: `helper says hi ${width}` });
+      const o = await pageFor(owner, width);
+      await enterRoom(o.page, rr);
+      await openSettings(o.page, width < 800, 'roles');
+      const panel = await o.page.waitForSelector('[data-testid="roles-panel"] [data-role="Helper"]', { timeout: 8000 }).catch(() => null);
+      ok(!!panel, `${width}: G4: owner sees the roles list`);
+      await o.page.$eval('[data-action="role-new"]', (b) => b.click());
+      await o.page.waitForSelector('[data-testid="role-name"]');
+      await o.page.type('[data-testid="role-name"]', `Greeter${width}`);
+      await o.page.$eval('[data-testid="role-color"]', (e) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(e, '#1a1a40'); e.dispatchEvent(new Event('input', { bubbles: true })); });
+      const warn = await o.page.waitForSelector('[data-testid="role-color-warn"]', { timeout: 3000 }).catch(() => null);
+      ok(!!warn && await o.page.$eval('[data-action="role-save"]', (b) => b.disabled), `${width}: G4: dark colours are flagged and can't be saved`);
+      await o.page.$eval('[data-testid="role-form"]', (e) => e.scrollIntoView({ block: 'center' }));
+      await shot(o.page, `g4-role-contrast-${width}`);
+      await o.page.$eval('[data-testid="role-color"]', (e) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(e, '#9be38c'); e.dispatchEvent(new Event('input', { bubbles: true })); });
+      await o.page.$eval('[data-perm="mute"]', (b) => b.click());
+      await o.page.$eval('[data-action="role-save"]', (b) => b.click());
+      const saved = await o.page.waitForSelector(`[data-role="Greeter${width}"]`, { timeout: 5000 }).catch(() => null);
+      ok(!!saved, `${width}: G4: owner creates a role from the panel`);
+      await saved?.evaluate((e) => e.closest('[data-testid="roles-panel"]').scrollIntoView({ block: 'start' }));
+      ok(await noSideScroll(o.page), `${width}: G4: roles panel: no sideways scroll`);
+      await shot(o.page, `g4-roles-panel-${width}`);
+      await o.ctx.close(); await fresh(owner); await emit(owner.s, 'room:join', { roomId: rr });
+      // holder view: chip + colour in chat; menu on an ordinary member shows Kick but not Ban
+      await fresh(mem);
+      const m = await pageFor(mem, width);
+      await enterRoom(m.page, rr);
+      const chip = await m.page.waitForSelector('.chat-log [data-role-chip="Helper"]', { timeout: 6000 }).catch(() => null);
+      const col = chip ? await chip.evaluate((e) => getComputedStyle(e).color) : '';
+      ok(!!chip && col === 'rgb(124, 196, 255)', `${width}: G4: role name colour shows in chat`, col);
+      await m.page.evaluate(() => document.querySelector('[data-action="rec-ok"]')?.click());
+      if (width < 800) { await m.page.evaluate(() => document.querySelector('[data-action="people"], [data-action="toggle-people"], [aria-label*="Online"]')?.click()); await sleep(400); }
+      const opened = await m.page.evaluate(() => { const li = [...document.querySelectorAll('.users li')].find((e) => e.textContent.includes('GgOther')); const b = li?.querySelector('button, .user-row, [role=button]') || li; b?.click(); return !!li; });
+      await sleep(400);
+      const menu = await m.page.evaluate(() => [...document.querySelectorAll('.users [data-action]')].map((b) => b.dataset.action));
+      ok(opened && menu.includes('kick') && !menu.includes('room-ban') && !menu.includes('room-mute'), `${width}: G4: holder's menu shows exactly their powers`, JSON.stringify(menu));
+      await shot(m.page, `g4-holder-menu-${width}`);
+      await m.ctx.close(); await fresh(mem); await emit(mem.s, 'room:join', { roomId: rr });
+      await emit(owner.s, 'room:join', { roomId: room }); await emit(mem.s, 'room:join', { roomId: room }); await emit(other.s, 'room:join', { roomId: room });
     }
     // @@UI-END
   }

@@ -2456,3 +2456,12 @@ html[data-ui-theme="dark-orange"] {
 .clip-maker input[type=range] { width: 100%; min-height: 40px; }
 .clip-maker .row { display: flex; flex-wrap: wrap; gap: 6px; }
 .clip-label { display: block; margin-bottom: 2px; }
+/* batch G4 roles */
+.role-chip { display: inline-block; margin-left: 4px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; font-size: .75em; line-height: 1.5; vertical-align: middle; white-space: nowrap; max-width: 12em; overflow: hidden; text-overflow: ellipsis; }
+.roles-panel .roles-list { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 6px; }
+.roles-panel .roles-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.roles-panel .row, .role-form .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.role-form, .role-assign { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.role-form fieldset { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; display: flex; flex-direction: column; }
+.role-form label.check { display: flex; align-items: center; gap: 6px; min-height: 40px; }
+.role-form input[type=color] { width: 48px; height: 40px; padding: 0; border: 0; background: none; vertical-align: middle; }

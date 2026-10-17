@@ -31,6 +31,7 @@ import {
 import { gifById } from './gifs';
 import { COOKIE_SID, checkSecret, createApp, deviceIdsOf, hashSecret, iceServers, isStaffRole } from './http';
 import * as recs from './recordings';
+import * as roles from './roles';
 import * as alerts from './alerts';
 import { initRestoreChecks } from './restoreCheck';
 import { live, type BotFeedQuery, type BotIdentity, type BotModBody, type BotModMessage, type BotResult, type BotRoomLine } from './live';
@@ -241,6 +242,14 @@ const isOwner = (s: Session, room: Room) =>
 const isRoomMod = (s: Session, room: Room) => !!s.account && room.mods.has(s.account.id);
 /** site staff, the room owner, or a room moderator: the room-level moderation powers */
 const canRoomManage = (s: Session, room: Room) => isStaff(s) || isOwner(s, room) || isRoomMod(s, room);
+// batch G4: custom room roles grant single powers; holders never outrank room mods
+const roleHolder = (s: Session, room: Room) => !!s.account && !!roles.roleOf(room.id, s.account.id);
+const roomPerm = (s: Session, room: Room, perm: roles.RolePerm) => canRoomManage(s, room) || (!!s.account && roles.hasPerm(room.id, s.account.id, perm));
+function canActAs(actor: Session, target: Session, room: Room, perm: roles.RolePerm): boolean {
+  if (canRoomManage(actor, room)) return canModerate(actor, target, room, true);
+  if (actor === target || !actor.account || !roles.hasPerm(room.id, actor.account.id, perm)) return false;
+  return !isStaff(target) && !isOwner(target, room) && !isRoomMod(target, room) && !roleHolder(target, room);
+}
 // ---------- stage mode ----------
 const stageKey = (s: Session) => repo.userKey(identOf(s));
 /** may publish camera / mic / screen in this room right now */
@@ -2623,10 +2632,10 @@ function onConnection(socket: AppSocket) {
     if (!s.user || !s.roomId) return ack({ ok: false, error: 'Not in a room' });
     if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited' });
     const room = rooms.get(s.roomId)!;
-    if (!canRoomManage(s, room)) return ack({ ok: false, error: kickOnly ? 'Only the room owner or a moderator can kick' : 'Only the room owner or a moderator can ban' });
+    if (!(kickOnly ? roomPerm(s, room, 'kick') : canRoomManage(s, room))) return ack({ ok: false, error: kickOnly ? 'Only the room owner or a moderator can kick' : 'Only the room owner or a moderator can ban' });
     const t = target(p?.userId);
     if (!t || !room.members.has(t.sock.id)) return ack({ ok: false, error: 'User not in room' });
-    if (!canModerate(s, t.ts, room, true)) return ack({ ok: false, error: 'You cannot do that to this user' });
+    if (!(kickOnly ? canActAs(s, t.ts, room, 'kick') : canModerate(s, t.ts, room, true))) return ack({ ok: false, error: 'You cannot do that to this user' });
     const minutes = kickOnly ? 10 : p?.minutes && Number(p.minutes) > 0 ? Math.min(Math.round(Number(p.minutes)), 525_600) : null;
     const reason = cleanText(p?.reason, LIMITS.banReasonMax);
     punishRoom({
@@ -3220,8 +3229,10 @@ function onConnection(socket: AppSocket) {
       // room owner / room moderators may remove other people's lines in their room (not site staff's; mods not the owner's)
       const room = rooms.get(s.roomId);
       const authorRoom = room && m.user_id != null && (room.ownerUserId === m.user_id || room.mods.has(m.user_id));
-      const allowed = !!room && canRoomManage(s, room) && m.role !== 'admin' && m.role !== 'moderator'
-        && (isOwner(s, room) || !authorRoom);
+      const allowed = (!!room && canRoomManage(s, room) && m.role !== 'admin' && m.role !== 'moderator'
+        && (isOwner(s, room) || !authorRoom))
+        || (!!room && !canRoomManage(s, room) && roomPerm(s, room, 'messages') && m.role !== 'admin' && m.role !== 'moderator' && !authorRoom
+          && !(m.user_id != null && roles.roleOf(room.id, m.user_id)));
       if (!allowed) return ack({ ok: false, error: 'You can only delete your own messages.' });
     }
     const parentId = m.parent_id;
@@ -3391,7 +3402,7 @@ function onConnection(socket: AppSocket) {
     const g = stageRoom(ack);
     if (!g) return;
     const { s, room } = g;
-    if (!canRoomManage(s, room)) return ack({ ok: false, error: 'Only the room owner or moderators can bring people up.' });
+    if (!roomPerm(s, room, 'floor')) return ack({ ok: false, error: 'Only the room owner or moderators can bring people up.' });
     if (!room.stage.on && !room.voice) return ack({ ok: false, error: 'Stage mode is off.' });
     const id = String(p?.userId ?? '');
     const t = room.members.has(id) ? sessions.get(id) : undefined;
@@ -3419,7 +3430,7 @@ function onConnection(socket: AppSocket) {
     if (!room.stage.on && !room.voice) return ack({ ok: false, error: 'Stage mode is off.' });
     const id = String(p?.userId ?? '');
     const self = id === socket.id;
-    if (!self && !canRoomManage(s, room)) return ack({ ok: false, error: 'Only the room owner or moderators can move people down.' });
+    if (!self && !roomPerm(s, room, 'floor')) return ack({ ok: false, error: 'Only the room owner or moderators can move people down.' });
     const t = room.members.has(id) ? sessions.get(id) : undefined;
     if (!t?.user) return ack({ ok: false, error: 'User not found' });
     const key = stageKey(t);
@@ -3441,7 +3452,7 @@ function onConnection(socket: AppSocket) {
     if (!s.user || !s.roomId) return ack({ ok: false, error: 'Not in a room' });
     const room = rooms.get(s.roomId);
     if (!room) return ack({ ok: false, error: 'Not in a room' });
-    if (!canRoomManage(s, room)) return ack({ ok: false, error: 'Only the room owner or a moderator can pin messages.' });
+    if (!roomPerm(s, room, 'pin')) return ack({ ok: false, error: 'Only the room owner or a moderator can pin messages.' });
     if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down' });
     const m = repo.messageById(String(p?.messageId ?? ''));
     if (!m || m.deleted || m.room_id !== room.id) return ack({ ok: false, error: 'Message not found' });
@@ -4411,16 +4422,68 @@ function onConnection(socket: AppSocket) {
     systemMsg(room, on ? `${target.username} is now a room moderator` : `${target.username} is no longer a room moderator`);
     ack({ ok: true, mods });
   });
+  // ---- batch G4: custom room roles ----
+  socket.on('roles:get', (_p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error });
+    ack({ ok: true, ...roles.rolesPayload(c.room.id), perms: roles.ROLE_PERMS });
+  });
+  const rolesOwner = (ack: (r: { ok: boolean; error?: string }) => void) => {
+    const c = roomCtx();
+    if ('error' in c) { ack({ ok: false, error: c.error }); return null; }
+    if (!(isStaff(c.s) || isOwner(c.s, c.room))) { ack({ ok: false, error: 'Only the room owner can manage roles' }); return null; }
+    if (c.room.isPrivate) { ack({ ok: false, error: 'Roles are for public rooms' }); return null; }
+    if (limited(actRl, ipAct)) { ack({ ok: false, error: 'Slow down' }); return null; }
+    return c;
+  };
+  const rolesChanged = (room: Room) => io.to(`room:${room.id}`).emit('roles:update', roles.rolesPayload(room.id));
+  socket.on('roles:save', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = rolesOwner(ack); if (!c) return;
+    const r = roles.cleanRole(p);
+    if (typeof r === 'string') return ack({ ok: false, error: r });
+    const id = p?.id != null ? Number(p.id) : null;
+    const saved = roles.saveRole(c.room.id, Number.isInteger(id) ? id : null, r);
+    if (typeof saved === 'string') return ack({ ok: false, error: saved });
+    repo.logAction(actorLabel(c.s), c.s.account?.id ?? null, id ? 'role-edit' : 'role-create', saved.name, c.room.id, saved.perms.join(','));
+    rolesChanged(c.room);
+    ack({ ok: true, role: saved });
+  });
+  socket.on('roles:archive', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = rolesOwner(ack); if (!c) return;
+    const role = roles.rolesOf(c.room.id).find((x) => x.id === Number(p?.id));
+    if (!role || !roles.archiveRole(c.room.id, role.id)) return ack({ ok: false, error: 'No such role' });
+    repo.logAction(actorLabel(c.s), c.s.account?.id ?? null, 'role-remove', role.name, c.room.id, null);
+    rolesChanged(c.room);
+    ack({ ok: true });
+  });
+  socket.on('roles:assign', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = rolesOwner(ack); if (!c) return;
+    const uid = Number(p?.accountId);
+    const acct = Number.isInteger(uid) ? repo.accountById(uid) : null;
+    if (!acct) return ack({ ok: false, error: 'Roles are for registered members' });
+    if (acct.id === c.room.ownerUserId) return ack({ ok: false, error: 'The owner already has every power' });
+    if (acct.role === 'admin' || acct.role === 'moderator') return ack({ ok: false, error: 'Site staff already outrank room roles' });
+    const roleId = p?.roleId == null ? null : Number(p.roleId);
+    if (!roles.assign(c.room.id, acct.id, roleId, actorLabel(c.s))) return ack({ ok: false, error: 'No such role' });
+    repo.logAction(actorLabel(c.s), c.s.account?.id ?? null, roleId == null ? 'role-unassign' : 'role-assign', acct.username, c.room.id, roleId == null ? null : roles.roleOf(c.room.id, acct.id)?.name ?? null);
+    rolesChanged(c.room);
+    ack({ ok: true });
+  });
+
   socket.on('room:mute', (p, ackRaw) => {
     const ack = safeAck(ackRaw);
     const c = roomCtx();
     if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
     const { s, room } = c;
-    if (!canRoomManage(s, room)) return ack({ ok: false, error: 'Only the room owner or a moderator can mute here', status: 403 });
+    if (!roomPerm(s, room, 'mute')) return ack({ ok: false, error: 'Only the room owner or a moderator can mute here', status: 403 });
     if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited', status: 429 });
     const t = target(p?.userId);
     if (!t || !room.members.has(t.sock.id)) return ack({ ok: false, error: 'User not in room', status: 404 });
-    if (!canModerate(s, t.ts, room, true)) return ack({ ok: false, error: 'You cannot do that to this user', status: 403 });
+    if (!canActAs(s, t.ts, room, 'mute')) return ack({ ok: false, error: 'You cannot do that to this user', status: 403 });
     const minutes = Math.round(Number(p?.minutes));
     if (!(minutes >= 1 && minutes <= 10080)) return ack({ ok: false, error: 'Mute for 1 minute to 7 days', status: 400 });
     const until = repo2.addRoomMute(room.id, identOf(t.ts), actorLabel(s), minutes);

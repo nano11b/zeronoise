@@ -34,3 +34,8 @@ export function contrast(a: string, b: string): number {
   const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m);
   return (x + 0.05) / (y + 0.05);
 }
+/** Batch G4: a name colour is allowed only if it keeps 4.5:1 contrast on every theme's backgrounds and panels. */
+export function readableOnAllThemes(hex: string): boolean {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return false;
+  return UI_THEMES.every((t) => { const p = UI_PALETTES[t]; return [p.bg, p.bg2, p.panel, p.panel2].every((b) => contrast(hex, b) >= 4.5); });
+}

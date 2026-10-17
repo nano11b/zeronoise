@@ -1,4 +1,6 @@
 import { translateText, TranslateUnavailable } from '../translate';
+import type { RolesState } from './RolesPanel';
+import { RoleChip } from './RoleChip';
 import { TranslationLine, type TranslationState } from './TranslationLine';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTileFit } from '../useTileFit';
@@ -57,7 +59,7 @@ import { LinkPreviewCard } from './LinkPreviewCard';
 import { RoomThumbEditor } from './RoomThumb';
 import { RoomIconMini } from './RoomIcon';
 import { RoomIconEditor } from './RoomIconEditor';
-import type { RoomAnnouncement, RoomEmote, RoomScheduleInfo } from '../../shared/types';
+import type { RoomAnnouncement, RoomEmote, RoomScheduleInfo, RoomRolePerm } from '../../shared/types';
 import { EmoteContext, emoteMap } from '../emotes';
 import { refreshRadio, useRadio } from '../radioState';
 import { NowPlayingCard } from './NowPlaying';
@@ -92,6 +94,7 @@ const SchedulePanel = lazyNamed(loadManage, 'SchedulePanel');
 const EmoteManager = lazyNamed(loadManage, 'EmoteManager');
 const StatsPanel = lazyNamed(loadManage, 'StatsPanel');
 const FiltersPanel = lazyNamed(loadManage, 'FiltersPanel');
+const RolesPanel = lazyNamed(() => import('./RolesPanel'), 'RolesPanel');
 const EventsPanel = lazyNamed(() => import('./EventsPanel'), 'EventsPanel');
 const panelFallback = <p className="muted small" aria-busy="true">Loading…</p>;
 
@@ -462,6 +465,23 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
     }
   };
   const canRoomManage = canManageRoom || isRoomMod;
+  // batch G4: custom room roles
+  const [roomRoles, setRoomRoles] = useState<RolesState>({ roles: [], members: {} });
+  useEffect(() => {
+    if (initial.isPrivate) return;
+    const load = () => socket.emit('roles:get', {}, (r) => { if (r.ok) setRoomRoles({ roles: r.roles, members: r.members }); });
+    load();
+    const onUp = (p: RolesState) => setRoomRoles(p);
+    socket.on('roles:update', onUp); socket.on('connect', load);
+    return () => { socket.off('roles:update', onUp); socket.off('connect', load); };
+  }, [initial.id, initial.isPrivate]);
+  const roleOfAcct = (id: number | null | undefined) => (id == null ? null : roomRoles.roles.find((r) => r.id === roomRoles.members[String(id)]) ?? null);
+  const myRole = roleOfAcct(me.accountId);
+  const myPerms = new Set(canRoomManage ? [] : myRole?.perms ?? []);
+  const rolePerm = (p: RoomRolePerm) => canRoomManage || myPerms.has(p);
+  /** a role holder may act on ordinary members only (never owner, staff, room mods or other role holders) */
+  const roleCanActOn = (u: { id?: string; nick: string; role?: string; accountId?: number | null }, p: RoomRolePerm) => !canRoomManage && myPerms.has(p) && u.nick !== me.nick
+    && u.role !== 'admin' && u.role !== 'moderator' && u.nick !== initial.ownerNick && !(u.accountId != null && (modIds.has(u.accountId) || roleOfAcct(u.accountId)));
   const [modsCanInvite, setModsCanInvite] = useState(!!initial.modsCanInvite);
   /** owner / staff, or a room mod when the owner allows it; never in private calls */
   const canInvite = !initial.isPrivate && (canManageRoom || (isRoomMod && modsCanInvite));
@@ -1776,7 +1796,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                 <button className="user-row" onClick={(e) => { e.stopPropagation(); if (u.id !== me.id) setMenuFor(menuFor === u.id ? null : u.id); }} data-nick={u.nick}>
                   <UserAvatar nick={u.nick} accountId={u.accountId} chatColor={u.chatColor} hasAvatar={u.hasAvatar} size={28} />
                   <span className="user-id">
-                    <NickLabel nick={u.nick} chatColor={u.chatColor} chatEffect={u.chatEffect} className="nick" /><LevelBadge level={u.level} />
+                    <NickLabel nick={u.nick} chatColor={roleOfAcct(u.accountId)?.color ?? u.chatColor} chatEffect={u.chatEffect} className="nick" /><LevelBadge level={u.level} /><RoleChip role={roleOfAcct(u.accountId)} />
                     <span className="user-badges">
                       {!u.id.startsWith('bot:') && <BadgeIcons ids={u.badges} />}
                       {initial.ownerNick === u.nick && <span className="tag owner" title="Room owner">owner</span>}
@@ -1813,13 +1833,20 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                       <button key={c.info.id} data-action="whisper-add" onClick={() => { addToWhisper(c.info.id, u); setMenuFor(null); setPeopleOpen(false); }}>🤫 Add to {whisperLabel(c.info, me.id)}</button>
                     ))}
                     {(u.cam || u.mic || u.screen) && <button onClick={() => { setBigId(u.id); setMenuFor(null); }}>Watch</button>}
-                    {stageOn && canRoomManage && !u.id.startsWith('bot:') && !u.id.startsWith('whip:') && (
+                    {stageOn && rolePerm('floor') && !u.id.startsWith('bot:') && !u.id.startsWith('whip:') && (
                       stage.speakers.includes(u.id)
                         ? (stageInvited(u) && <button data-action="stage-down" onClick={() => { stageDown(u.id); setMenuFor(null); }}>Move to audience</button>)
                         : <button data-action="stage-invite" onClick={() => { stageInvite(u.id); setMenuFor(null); }}>Bring up to speak</button>
                     )}
                     <button data-action="block" onClick={() => { toggleIgnore(u.nick); setMenuFor(null); }}>{isIgnored(u.nick) ? 'Unblock' : 'Block'}</button>
                     <button onClick={() => reportUser(u)} data-action="report-user">Report…</button>
+                    {!canActOn(u) && !u.id.startsWith('bot:') && !u.id.startsWith('whip:') && (roleCanActOn(u, 'mute') || roleCanActOn(u, 'kick')) && (
+                      <>
+                        <div className="menu-sep">Moderation · {myRole?.name}</div>
+                        {roleCanActOn(u, 'mute') && <button onClick={() => roomMute(u)} data-action="room-mute">Mute in this room…</button>}
+                        {roleCanActOn(u, 'kick') && <button className="danger" onClick={() => kick(u)} data-action="kick">Kick from room</button>}
+                      </>
+                    )}
                     {canActOn(u) && !u.id.startsWith('bot:') && !u.id.startsWith('whip:') && (
                       <>
                         <div className="menu-sep">Moderation</div>
@@ -2065,11 +2092,11 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     <div className="msg-body">
                     <span className="msg-meta">
                     {m.from.toLowerCase() === me.nick.toLowerCase() ? (
-                      <><NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} /></>
+                      <><NickLabel nick={m.from} chatColor={roleOfAcct(m.accountId)?.color ?? m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} /><RoleChip role={roleOfAcct(m.accountId)} /></>
                     ) : (
                       <span className="name-block">
                         <button type="button" className="name-btn" data-action="user-name" onClick={(e) => { e.stopPropagation(); if (m.accountId != null && !m.fromId.startsWith('bot:')) openProfile(m.from); else setBlockFor(blockFor === m.id ? null : m.id); }}>
-                          <NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} />
+                          <NickLabel nick={m.from} chatColor={roleOfAcct(m.accountId)?.color ?? m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} /><RoleChip role={roleOfAcct(m.accountId)} />
                         </button>
                         {blockFor === m.id && (
                           <span className="menu name-menu" onClick={(e) => e.stopPropagation()}>
@@ -2133,8 +2160,9 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                       {m.from !== me.nick && !(m.burn && (m.burn.burned || burnedLocal.has(m.id))) && <button className="icon-btn" title="Report message" aria-label="Report message" onClick={() => reportMsg(m)} data-action="report-msg">⚑</button>}
                       {isStaff && !mineMsg(m) && <button className="icon-btn" title="Delete message" aria-label="Delete message" onClick={() => deleteMsg(m)} data-action="delete-msg">🗑</button>}
                       {!isStaff && canRoomManage && !mineMsg(m) && m.role !== 'admin' && m.role !== 'moderator' && (isOwner || m.from !== initial.ownerNick) && <button className="icon-btn" title="Delete message" aria-label="Delete message" onClick={() => deleteOwn(m)} data-action="room-delete-msg">🗑</button>}
+                      {!mineMsg(m) && roleCanActOn({ nick: m.from, role: m.role, accountId: m.accountId }, 'messages') && <button className="icon-btn" title="Delete message" aria-label="Delete message" onClick={() => deleteOwn(m)} data-action="room-delete-msg">🗑</button>}
                       {me.registered && !m.burn && <button className={`icon-btn${bookmarkIds.has(m.id) ? ' on' : ''}`} title={bookmarkIds.has(m.id) ? 'Remove bookmark' : 'Bookmark'} aria-label={bookmarkIds.has(m.id) ? 'Remove bookmark' : 'Bookmark message'} aria-pressed={bookmarkIds.has(m.id)} onClick={() => void toggleBookmark(m)} data-action="bookmark">{bookmarkIds.has(m.id) ? '★' : '☆'}</button>}
-                      {canRoomManage && !m.burn && <button className="icon-btn" title={pins.some((pin) => pin.id === m.id) ? 'Unpin' : 'Pin'} aria-label={pins.some((pin) => pin.id === m.id) ? 'Unpin message' : 'Pin message'} onClick={() => togglePin(m)} data-action="pin-msg">{pins.some((pin) => pin.id === m.id) ? 'Unpin' : 'Pin'}</button>}
+                      {rolePerm('pin') && !m.burn && <button className="icon-btn" title={pins.some((pin) => pin.id === m.id) ? 'Unpin' : 'Pin'} aria-label={pins.some((pin) => pin.id === m.id) ? 'Unpin message' : 'Pin message'} onClick={() => togglePin(m)} data-action="pin-msg">{pins.some((pin) => pin.id === m.id) ? 'Unpin' : 'Pin'}</button>}
                     </span>
                     </div>
                   </div>
@@ -2211,11 +2239,11 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     <div key={m.id} className={`msg${jumpHit === m.id ? ' jump-hit' : ''}`} data-msg={m.id}>
                       <span className="ts">{fmtTime(m.ts)}</span>{' '}
                       {m.from.toLowerCase() === me.nick.toLowerCase() ? (
-                        <><NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} /></>
+                        <><NickLabel nick={m.from} chatColor={roleOfAcct(m.accountId)?.color ?? m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} /><RoleChip role={roleOfAcct(m.accountId)} /></>
                       ) : (
                         <span className="name-block">
                           <button type="button" className="name-btn" data-action="user-name" onClick={(e) => { e.stopPropagation(); if (m.accountId != null && !m.fromId.startsWith('bot:')) openProfile(m.from); else setBlockFor(blockFor === `t:${m.id}` ? null : `t:${m.id}`); }}>
-                            <NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} />
+                            <NickLabel nick={m.from} chatColor={roleOfAcct(m.accountId)?.color ?? m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} /><RoleChip role={roleOfAcct(m.accountId)} />
                           </button>
                           {blockFor === `t:${m.id}` && (
                             <span className="menu name-menu" onClick={(e) => e.stopPropagation()}>
@@ -2355,6 +2383,12 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                   <summary>Reports{roomReports.open + roomReports.review > 0 ? ` · ${roomReports.open + roomReports.review}` : ''}</summary>
                   <p className="muted small">Reports about messages in this room. Reporters stay anonymous to room moderators.</p>
                   <Lazy fallback={panelFallback} inline><ModQueue mode="room" roomId={initial.id} toast={toast} /></Lazy>
+                </details>
+              )}
+              {!initial.isPrivate && canManageRoom && (
+                <details className="manage-sec" data-section="roles">
+                  <summary>Custom roles{roomRoles.roles.length ? ` · ${roomRoles.roles.length}` : ''}</summary>
+                  <Lazy fallback={panelFallback} inline><RolesPanel state={roomRoles} people={people} ownerNick={initial.ownerNick ?? null} toast={toast} /></Lazy>
                 </details>
               )}
               {!initial.isPrivate && canManageRoom && (
