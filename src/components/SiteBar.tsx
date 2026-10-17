@@ -11,6 +11,9 @@ import { NickLabel, UserAvatar } from './UserAvatar';
 import { useStaffCounts } from '../modq';
 import { Sheet } from './Sheet';
 import { useMentions } from '../mentions';
+import { useDm, totalUnread, requestCount } from '../dmStore';
+import type { RoomState } from '../../shared/types';
+import { useEffect } from 'react';
 
 const loadProfile = () => import('./ProfilePanel');
 const ProfilePanel = lazyNamed(loadProfile, 'ProfilePanel');
@@ -18,12 +21,13 @@ const ProfileDialogBody = lazyNamed(loadProfile, 'ProfileDialogBody');
 const BotsDialogBody = lazyNamed(loadProfile, 'BotsDialogBody');
 const NotificationsDialogBody = lazyNamed(loadProfile, 'NotificationsDialogBody');
 const MentionsDialogBody = lazyNamed(() => import('./MentionsPanel'), 'MentionsDialogBody');
-type ProfileDialogKind = 'profile' | 'bots' | 'notifications' | 'mentions';
-const DIALOG_TITLE: Record<ProfileDialogKind, string> = { profile: 'Profile', bots: 'Bots', notifications: 'Notifications', mentions: 'Mentions' };
+const DmPanel = lazyNamed(() => import('./DmPanel'), 'DmPanel');
+type ProfileDialogKind = 'profile' | 'bots' | 'notifications' | 'mentions' | 'whispers';
+const DIALOG_TITLE: Record<ProfileDialogKind, string> = { profile: 'Profile', bots: 'Bots', notifications: 'Notifications', mentions: 'Mentions', whispers: 'Whispers' };
 
 /** Shared top bar: logo, centered section buttons, online status, and the name chip. */
 export function SiteBar({
-  me, account, onAccount, toast, signOut, openAdmin, wantAccount, showGuestActions, onAudioVideo, onFriends, onStartRoom, friendRequests, extras, children,
+  me, account, onAccount, toast, signOut, openAdmin, wantAccount, showGuestActions, onAudioVideo, onFriends, onStartRoom, friendRequests, extras, children, onJoinCall,
 }: {
   me: UserInfo;
   account?: Account | null;
@@ -40,6 +44,8 @@ export function SiteBar({
   /** Opens the Start a room dialog (menu item). */
   onStartRoom?: () => void;
   friendRequests?: number;
+  /** batch W: a whisper call was placed or accepted; join that call room. */
+  onJoinCall?: (room: RoomState) => void;
   extras?: ReactNode;
   children?: ReactNode;
 }) {
@@ -53,6 +59,15 @@ export function SiteBar({
   const [statusOpen, setStatusOpen] = useState(false);
   const [dialog, setDialog] = useState<ProfileDialogKind | null>(null);
   const { unread: mentionsUnread } = useMentions();
+  const dm = useDm();
+  const dmBadge = account ? totalUnread(dm) + requestCount(dm) : 0;
+  const [dmWith, setDmWith] = useState<string | null>(null);
+  useEffect(() => {
+    if (!account) return;
+    const on = (e: Event) => { setDmWith((e as CustomEvent<string | undefined>).detail ?? null); setProfileOpen(false); setDialog('whispers'); };
+    window.addEventListener('zn:open-whispers', on);
+    return () => window.removeEventListener('zn:open-whispers', on);
+  }, [account]);
   // The profile panel loads the first time it opens, then stays mounted.
   const [profileEver, setProfileEver] = useState(false);
   if (profileOpen && !profileEver) setProfileEver(true);
@@ -117,6 +132,13 @@ export function SiteBar({
         </div>
         )}
         {account && onAccount && (
+          <button type="button" className="btn ghost small-btn bell-btn" data-action="dm-open" onClick={() => { setProfileOpen(false); setDmWith(null); setDialog('whispers'); }}
+            title="Whispers" aria-label={dmBadge ? `Whispers, ${dmBadge} new` : 'Whispers'}>
+            <span aria-hidden="true" className="dm-ico">✉</span>
+            {dmBadge > 0 && <span className="admin-badge" data-testid="dm-badge" aria-hidden="true">{dmBadge > 99 ? '99+' : dmBadge}</span>}
+          </button>
+        )}
+        {account && onAccount && (
           <button type="button" className="btn ghost small-btn bell-btn" data-action="mentions-bell" onClick={() => { setProfileOpen(false); setDialog('mentions'); }}
             title="Mentions" aria-label={mentionsUnread ? `Mentions, ${mentionsUnread} unread` : 'Mentions'}>
             <Icon name="bell" />
@@ -164,11 +186,12 @@ export function SiteBar({
         )}
       </div>
       {dialog && account && onAccount && (
-        <Sheet name={dialog} title={DIALOG_TITLE[dialog]} onClose={() => setDialog(null)}>
+        <Sheet name={dialog} title={DIALOG_TITLE[dialog]} onClose={() => setDialog(null)} wide={dialog === 'whispers'}>
           <Lazy fallback={<p className="muted">Loading…</p>}>
             {dialog === 'profile' && <ProfileDialogBody account={account} onAccount={onAccount} toast={toast} />}
             {dialog === 'bots' && <BotsDialogBody toast={toast} />}
             {dialog === 'notifications' && <NotificationsDialogBody toast={toast} />}
+            {dialog === 'whispers' && <DmPanel myId={account.id} toast={toast} startWith={dmWith} onJoinCall={onJoinCall ? (r) => { setDialog(null); onJoinCall(r); } : undefined} />}
             {dialog === 'mentions' && <MentionsDialogBody toast={toast} onJump={() => setDialog(null)} />}
           </Lazy>
         </Sheet>

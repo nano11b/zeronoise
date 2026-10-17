@@ -30,9 +30,12 @@ async function openNoteMic(): Promise<MediaStream> {
 }
 
 /** Press-and-hold (or tap, tap) mic button that records, uploads and posts a voice note. */
-export function VoiceNoteButton({ roomId, parentId, toast }: {
+export function VoiceNoteButton({ roomId, parentId, toast, uploadUrl, post }: {
   roomId: string;
   parentId?: string;
+  /** batch W4: whispers upload elsewhere and post over their own event */
+  uploadUrl?: string;
+  post?: (voiceId: string, durationMs: number) => Promise<void>;
   toast: (t: string, tone?: 'error' | 'info') => void;
 }) {
   const [phase, setPhase] = useState<Phase>('idle');
@@ -69,10 +72,11 @@ export function VoiceNoteButton({ roomId, parentId, toast }: {
       const ext = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm';
       const fd = new FormData();
       fd.append('voice', blob, `voice.${ext}`);
-      const res = await fetch(`/api/rooms/${encodeURIComponent(roomId)}/voice`, { method: 'POST', headers: devHeaders(), credentials: 'same-origin', body: fd });
+      const res = await fetch(uploadUrl ?? `/api/rooms/${encodeURIComponent(roomId)}/voice`, { method: 'POST', headers: devHeaders(), credentials: 'same-origin', body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.ok === false) throw new Error(data?.error || 'Upload failed');
-      await new Promise<void>((resolve, reject) => {
+      if (post) await post(data.id, durationMs);
+      else await new Promise<void>((resolve, reject) => {
         socket.emit('chat:voice', { voiceId: data.id, durationMs, parentId }, (r) => (r.ok ? resolve() : reject(new Error(r.error))));
       });
     } catch (e) {
@@ -80,7 +84,7 @@ export function VoiceNoteButton({ roomId, parentId, toast }: {
     } finally {
       setP('idle');
     }
-  }, [roomId, parentId, toast]);
+  }, [roomId, parentId, toast, uploadUrl, post]);
 
   /** Stop recording; send unless cancelled or too short. */
   const finish = useCallback((send: boolean) => {

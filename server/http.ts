@@ -50,6 +50,8 @@ import { SOUND_MAX_BYTES, cleanSoundName, removeSoundFile, soundFilePath, storeS
 import { normalizeChatColor, normalizeChatEffect, AVATAR_MAX_BYTES, CHAT_COLORS } from '../shared/colors';
 import { avatarExists, avatarPath, deleteAvatarFile, processAvatarUpload, writeAvatar } from './avatars';
 import multer from 'multer';
+import * as dmStore from './dm';
+import { DM } from '../shared/dm';
 import { asyncSafeRoutes, crashTestHooks, jsonErrorHandler } from './guard';
 import * as repo2 from './repo2';
 import * as modq from './modq';
@@ -425,6 +427,65 @@ export function createApp(roomList: () => unknown) {
     });
   });
 
+  // ---------- batch W3/W4: files, images and voice notes in private conversations (participants only) ----------
+  const dmFileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: DM.fileMaxBytes, files: 1 } }).single('file');
+  const dmUploadLimiter = new KeyedLimiter(30, 10 * 60_000);
+  const dmParticipant = (req: Request, res: Response) => {
+    const a = reqAccount(req);
+    if (!a) { fail(res, 401, 'Sign in first'); return null; }
+    const convoId = String(req.params.convoId);
+    const mr = dmStore.memberRow(convoId, a.id);
+    if (!mr || mr.left_at != null) { fail(res, 404, 'Conversation not found'); return null; }
+    if (mr.state !== 'active') { fail(res, 403, 'Accept the request first'); return null; }
+    if (!dmUploadLimiter.take(`u:${a.id}`) || !uploadLimiter.take(clientIp(req))) { fail(res, 429, 'Too many uploads. Try again later.'); return null; }
+    return { a, convoId };
+  };
+  app.post('/api/dm/:convoId/files', (req, res) => {
+    const x = dmParticipant(req, res);
+    if (!x) return;
+    dmFileUpload(req, res, async (err) => {
+      if (err) return fail(res, /File too large|LIMIT_FILE_SIZE/i.test(String((err as Error).message)) ? 413 : 400, /File too large|LIMIT_FILE_SIZE/i.test(String((err as Error).message)) ? `Files can be up to ${DM.fileMaxBytes / 1024 / 1024} MB` : 'Upload failed');
+      const file = (req as Request & { file?: Express.Multer.File }).file;
+      if (!file?.buffer?.length) return fail(res, 400, 'No file');
+      try {
+        const row = await dmStore.storeFile(x.convoId, x.a.id, file.buffer, file.mimetype, Buffer.from(file.originalname, 'latin1').toString('utf8'));
+        res.json({ ok: true, file: dmStore.fileInfo(row) });
+      } catch (e) { fail(res, 400, (e as Error).message || 'Could not store the file'); }
+    });
+  });
+  app.post('/api/dm/:convoId/voice', (req, res) => {
+    const x = dmParticipant(req, res);
+    if (!x) return;
+    voiceUpload(req, res, (err) => {
+      if (err) return fail(res, 413, 'Voice note too large (max 1 MB)');
+      const file = (req as Request & { file?: Express.Multer.File }).file;
+      if (!file?.buffer?.length) return fail(res, 400, 'No recording');
+      try {
+        const row = storeVoiceNote(`dm:${x.convoId}`, file.buffer, { userId: x.a.id, devices: [] });
+        res.json({ ok: true, id: row.id, mime: row.mime });
+      } catch (e) { fail(res, 400, (e as Error).message || 'Could not store voice note'); }
+    });
+  });
+  app.get('/api/dm/files/:id', (req, res) => {
+    const a = reqAccount(req);
+    const f = dmStore.fileById(String(req.params.id));
+    // same answer for "no such file" and "not yours", so ids can't be probed
+    if (!a || !f || !dmStore.isParticipant(f.convo_id, a.id)) return res.status(404).end();
+    if (!f.message_id && f.uploader_id !== a.id) return res.status(404).end();
+    const msg = f.message_id ? dmStore.msgById(f.message_id) : undefined;
+    const me = dmStore.memberRow(f.convo_id, a.id)!;
+    if (msg && (msg.ts < me.joined_at || (msg.expires_at != null && msg.expires_at <= Date.now()))) return res.status(404).end();
+    const file = dmStore.filePath(f.id);
+    if (!file || !fs.existsSync(file)) return res.status(404).end();
+    const image = f.mime.startsWith('image/');
+    res.setHeader('Content-Type', f.mime);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    res.setHeader('Content-Disposition', `${image && req.query.download !== '1' ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.name)}`);
+    res.sendFile(file);
+  });
+
   // ---------- batch F6: voice-room recordings (owner's browser streams chunks; owner downloads) ----------
   const recChunk = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024, files: 1 } }).single('chunk');
   app.post('/api/rooms/:roomId/recordings/:id/chunk', (req, res, next) => recChunk(req, res, (err) => (err ? fail(res, 413, 'Chunk too large') : next())), (req, res) => {
@@ -523,7 +584,12 @@ export function createApp(roomList: () => unknown) {
     const row = repo.voiceNoteById(String(req.params.id));
     if (!row) return res.status(404).end();
     const actor = soundActor(req);
-    if (!live.isRoomMember(row.room_id, actor.accountId, actor.devices)) return res.status(403).end();
+    if (row.room_id.startsWith('dm:')) {
+      // batch W4: whisper voice notes play only for current participants
+      const a = reqAccount(req);
+      if (!a || !dmStore.isParticipant(row.room_id.slice(3), a.id)) return res.status(404).end();
+      if (!row.message_id && row.uploader_user_id !== a.id) return res.status(404).end();
+    } else if (!live.isRoomMember(row.room_id, actor.accountId, actor.devices)) return res.status(403).end();
     const file = voiceFilePath(row.id, row.ext);
     if (!file || !fs.existsSync(file)) return res.status(404).end();
     res.setHeader('Content-Type', row.mime);
@@ -2323,8 +2389,9 @@ export function createApp(roomList: () => unknown) {
     if (!exportIpLimiter.take(clientIp(req)) || !exportUserLimiter.take(`u:${a.id}`)) return fail(res, 429, `You can download your data ${EXPORT_PER_USER === 1 ? 'once' : `${EXPORT_PER_USER} times`} an hour. Try again later.`);
     const data = repo8.exportData(a.id);
     if (!data) return fail(res, 404, 'No such account');
+    const conversations = dmStore.exportFor(a.id); // batch W: private conversations the account is or was in
     const generatedAt = new Date().toISOString();
-    const meta = { format: 'zeronoise-export/1', generatedAt, username: a.username, counts: { messages: data.messages.length, whispers: data.whispers.length }, truncated: data.truncated,
+    const meta = { format: 'zeronoise-export/1', generatedAt, username: a.username, counts: { messages: data.messages.length, whispers: data.whispers.length, conversations: conversations.length }, truncated: data.truncated,
       note: 'Burn-after-reading messages, deleted messages, passwords, two-factor secrets and IP addresses are not included.' };
     repo.logAction(a.username, a.id, 'data-export', a.username, null, `${data.messages.length} messages, ${data.whispers.length} whispers`);
     const stamp = generatedAt.slice(0, 10);
@@ -2332,16 +2399,17 @@ export function createApp(roomList: () => unknown) {
     res.setHeader('Cache-Control', 'no-store');
     if (req.body?.format === 'json') {
       res.setHeader('Content-Disposition', `attachment; filename="${base}.json"`);
-      return res.type('application/json').send(JSON.stringify({ ...meta, ...data }, null, 2));
+      return res.type('application/json').send(JSON.stringify({ ...meta, ...data, conversations }, null, 2));
     }
     const j = (v: unknown) => JSON.stringify(v, null, 2);
     const zip = makeZip([
-      { name: 'README.txt', data: `Your ${BRAND_NAME} data, exported ${generatedAt}.\n\nprofile.json   account and profile\nsettings.json  preferences, notifications, blocks, bookmarks\nmessages.json  room messages you sent (${data.messages.length})\nwhispers.json  whispers you sent or received (${data.whispers.length})\n\n${meta.note}\n` },
+      { name: 'README.txt', data: `Your ${BRAND_NAME} data, exported ${generatedAt}.\n\nprofile.json   account and profile\nsettings.json  preferences, notifications, blocks, bookmarks\nmessages.json  room messages you sent (${data.messages.length})\nwhispers.json  whispers you sent or received (${data.whispers.length})\nconversations.json  private conversations and group whispers (${conversations.length}); files are listed by name\n\n${meta.note}\n` },
       { name: 'export.json', data: j(meta) },
       { name: 'profile.json', data: j(data.profile) },
       { name: 'settings.json', data: j(data.settings) },
       { name: 'messages.json', data: j(data.messages) },
       { name: 'whispers.json', data: j(data.whispers) },
+      { name: 'conversations.json', data: j(conversations) },
     ]);
     res.setHeader('Content-Disposition', `attachment; filename="${base}.zip"`);
     res.type('application/zip').send(zip);

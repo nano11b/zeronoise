@@ -138,6 +138,25 @@ export default function App() {
     socket.emit('blocks:set', { usernames: [...ignored] }, () => {});
   }, [ignored]);
 
+  // batch W: blocking from a whisper adds the person to this browser's list too, so blocks:set keeps them.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const k = String((e as CustomEvent<string>).detail ?? '').toLowerCase();
+      if (!k) return;
+      setIgnored((prev) => { if (prev.has(k)) return prev; const next = new Set(prev); next.add(k); saveIgnored(next); return next; });
+    };
+    window.addEventListener('zn:block', on);
+    return () => window.removeEventListener('zn:block', on);
+  }, []);
+  useEffect(() => {
+    if (!account) return;
+    const q = new URLSearchParams(location.search);
+    if (!q.has('whispers')) return;
+    const who = q.get('whispers');
+    const t = window.setTimeout(() => window.dispatchEvent(new CustomEvent('zn:open-whispers', { detail: who && who !== '1' ? who : undefined })), 300);
+    return () => window.clearTimeout(t);
+  }, [account?.id]);
+
   // Once signed in, fetch the room and games code in the background so joining stays instant.
   const signedIn = !!me;
   useEffect(() => {

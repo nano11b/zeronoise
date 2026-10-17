@@ -78,6 +78,8 @@ import { MODQ, REPORT_CATEGORY_LABELS, REPORTER_THANKS, isReportCategory, type Q
 import { uploadPath } from './chatImages';
 import { clampStageCap, sdpPublishes, STAGE_CAP_DEFAULT, type StageState } from '../shared/stage';
 import { voiceFilePath } from './voiceNotes';
+import { registerDm, announceGone } from './dmSocket';
+import * as dmStore from './dm';
 
 // Log stray rejections; exit cleanly on an uncaught throw (systemd restarts). Handler-level guards make this rare.
 installProcessGuards();
@@ -785,6 +787,17 @@ function accountConnected(userId: number): boolean {
   return !!sid && !!io.sockets.sockets.get(sid)?.connected;
 }
 /** Push only when the person has no live socket (they would see it in the app otherwise). */
+/** batch W: every tab of an account (emitToAccount only reaches the newest one). */
+function emitToAllTabs(userId: number, ev: string, payload: unknown) {
+  for (const [sid, ss] of sessions) if (ss.account?.id === userId) (io.sockets.sockets.get(sid) as unknown as { emit: (e: string, p: unknown) => void } | undefined)?.emit(ev, payload);
+}
+function dmIsStaff(userId: number): boolean {
+  const a = repo.accountById(userId);
+  return !!a && (a.role === 'admin' || a.role === 'moderator');
+}
+setInterval(() => {
+  try { announceGone(dmStore.sweep(), emitToAllTabs); } catch (err) { console.error('[dm] sweep', (err as Error).message); }
+}, Number(process.env.DM_SWEEP_MS) || 30_000).unref();
 function pushIfAway(userId: number, payload: { title: string; body: string; url: string; tag?: string }, roomId?: string, kind: 'mention' | 'message' = 'mention') {
   if (accountConnected(userId)) return;
   try {
@@ -3045,6 +3058,22 @@ function onConnection(socket: AppSocket) {
     if (!c.room.whispers.get(id)?.has(socket.id)) return ack({ ok: false, error: 'Whisper not found' });
     leaveWhisper(c.room, id, socket.id);
     ack({ ok: true });
+  });
+
+  // ---- batch W: private conversations (account-only; see server/dmSocket.ts) ----
+  registerDm(socket as never, {
+    account: () => session().account,
+    nick: () => session().user?.nick ?? '',
+    ip: () => session().ip,
+    isStaff: dmIsStaff,
+    online: (uid) => accountConnected(uid),
+    emitTo: emitToAllTabs,
+    limitedAct: () => limited(actRl, ipAct),
+    limitedChat: () => limited(chatRl, ipChat),
+    prepareText: (raw) => prepareChatText(session(), raw),
+    push: (uid, title, body, tag) => pushIfAway(uid, { title, body, url: '/?whispers=1', tag }, undefined, 'message'),
+    reportOk: (k) => reportUserRl.take(k) && ipReport.take(session().ip),
+    afterReport: (id) => { const r = modq.reportById(id); if (r) afterNewReport(r); },
   });
 
   socket.on('room:delete', (ackRaw) => {

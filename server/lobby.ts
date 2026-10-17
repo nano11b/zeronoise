@@ -34,6 +34,10 @@ export function setBlocks(userId: number, ids: number[]): number[] {
   });
 }
 /** Either side blocked the other. */
+/** batch W10: add one block (server side), keeping the rest of the list. */
+export function addBlock(userId: number, blockedId: number) {
+  q('INSERT OR IGNORE INTO user_blocks (user_id, blocked_id, created_at) VALUES (?,?,?)').run(userId, blockedId, now());
+}
 export function blockedEitherWay(a: number, b: number): boolean {
   return !!q('SELECT 1 FROM user_blocks WHERE (user_id = ? AND blocked_id = ?) OR (user_id = ? AND blocked_id = ?) LIMIT 1').get(a, b, b, a);
 }

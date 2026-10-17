@@ -532,6 +532,9 @@ export function deleteUsersMatching(pattern: string): { deleted: number; usernam
       q('DELETE FROM mention_inbox WHERE user_id = ?').run(u.id);
       q('DELETE FROM room_reads WHERE user_id = ?').run(u.id);
       q('DELETE FROM whisper_members WHERE user_id = ?').run(u.id);
+      q('DELETE FROM dm_reactions WHERE user_id = ?').run(u.id);
+      q("UPDATE dm_messages SET text = '', deleted_at = ? WHERE from_user_id = ?").run(Date.now(), u.id);
+      q('UPDATE dm_members SET left_at = COALESCE(left_at, ?) WHERE user_id = ?').run(Date.now(), u.id);
       q('DELETE FROM whisper_messages WHERE id NOT IN (SELECT message_id FROM whisper_members)').run();
       q('DELETE FROM users WHERE id = ?').run(u.id);
     }
@@ -848,8 +851,9 @@ export function voiceNotesForRoom(roomId: string): VoiceRow[] {
 }
 /** Unclaimed uploads older than the cutoff, and notes whose message was deleted, pruned or cascaded away. */
 export function orphanVoiceNotes(unclaimedBefore: number): VoiceRow[] {
-  return q(`SELECT v.* FROM voice_notes v LEFT JOIN messages m ON m.id = v.message_id
-    WHERE (v.message_id IS NULL AND v.created_at < ?) OR (v.message_id IS NOT NULL AND (m.id IS NULL OR m.deleted = 1))`).all(unclaimedBefore) as unknown as VoiceRow[];
+  // batch W4: a whisper voice note belongs to a dm_messages row instead
+  return q(`SELECT v.* FROM voice_notes v LEFT JOIN messages m ON m.id = v.message_id LEFT JOIN dm_messages d ON d.id = v.message_id
+    WHERE (v.message_id IS NULL AND v.created_at < ?) OR (v.message_id IS NOT NULL AND (m.id IS NULL OR m.deleted = 1) AND (d.id IS NULL OR d.deleted_at IS NOT NULL))`).all(unclaimedBefore) as unknown as VoiceRow[];
 }
 export function deleteVoiceNoteRow(id: string) { q('DELETE FROM voice_notes WHERE id = ?').run(id); }
 

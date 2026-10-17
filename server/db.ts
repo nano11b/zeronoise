@@ -882,6 +882,71 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS mutes_expires ON mutes(expires_at);
   CREATE INDEX IF NOT EXISTS room_visitors_day ON room_visitors(day)
   `,
+  // 46: batch W - private conversations (1:1 and groups) with files, voice, reactions, replies, requests, disappearing messages
+  `
+  CREATE TABLE IF NOT EXISTS dm_convos (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    name TEXT,
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_ts INTEGER NOT NULL,
+    disappear_sec INTEGER NOT NULL DEFAULT 0,
+    direct_key TEXT UNIQUE
+  );
+  CREATE TABLE IF NOT EXISTS dm_members (
+    convo_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    joined_at INTEGER NOT NULL,
+    left_at INTEGER,
+    state TEXT NOT NULL DEFAULT 'active',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    archived INTEGER NOT NULL DEFAULT 0,
+    read_ts INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (convo_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS dm_members_user ON dm_members(user_id);
+  CREATE TABLE IF NOT EXISTS dm_messages (
+    id TEXT PRIMARY KEY,
+    convo_id TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    from_user_id INTEGER,
+    text TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'text',
+    reply_to TEXT,
+    edited_at INTEGER,
+    deleted_at INTEGER,
+    file_id TEXT,
+    voice_id TEXT,
+    voice_ms INTEGER,
+    expires_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS dm_messages_convo ON dm_messages(convo_id, ts);
+  CREATE INDEX IF NOT EXISTS dm_messages_expires ON dm_messages(expires_at);
+  CREATE INDEX IF NOT EXISTS dm_messages_ts ON dm_messages(ts);
+  CREATE TABLE IF NOT EXISTS dm_reactions (
+    message_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, user_id, emoji)
+  );
+  CREATE TABLE IF NOT EXISTS dm_files (
+    id TEXT PRIMARY KEY,
+    convo_id TEXT NOT NULL,
+    uploader_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    created_at INTEGER NOT NULL,
+    message_id TEXT
+  );
+  CREATE INDEX IF NOT EXISTS dm_files_convo ON dm_files(convo_id);
+  ALTER TABLE users ADD COLUMN dm_policy TEXT NOT NULL DEFAULT 'requests';
+  ALTER TABLE users ADD COLUMN dm_typing INTEGER NOT NULL DEFAULT 1
+  `,
 ];
 
 /**
