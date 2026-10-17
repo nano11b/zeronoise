@@ -438,6 +438,13 @@ export function createApp(roomList: () => unknown) {
     res.setHeader('Content-Disposition', `attachment; filename="recording-${new Date(r!.started_at).toISOString().slice(0, 16).replace(/[:T]/g, '-')}.webm"`);
     res.sendFile(f);
   });
+  // batch F8: one line per room you own (active members, growth, peak) for the stats panel
+  app.get('/api/me/rooms/analytics', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!uploadLimiter.take(`an:${a.id}`)) return fail(res, 429, 'Slow down');
+    res.json({ ok: true, rooms: repo8.ownedRoomIds(a.id).map((r) => { const x = repo8.roomAnalytics(r.id, Date.now(), 14).totals; return { id: r.id, name: r.name, active7: x.active7, growthPct: x.growthPct, new7: x.new7, peak: x.peak30, members: x.members }; }) });
+  });
   app.get('/api/voice/:id', (req, res) => {
     const row = repo.voiceNoteById(String(req.params.id));
     if (!row) return res.status(404).end();

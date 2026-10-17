@@ -11,6 +11,7 @@ import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(path.join(ROOT, 'package.json'));
@@ -142,9 +143,7 @@ try {
   ok((await owner.j.req(`/api/rooms/${encodeURIComponent(room)}/recordings/settings`, { retentionDays: 7 })).retentionDays === 7, 'F6: owner sets retention');
   ok((await owner.j.req(`/api/rooms/${encodeURIComponent(room)}/recordings/settings`, { retentionDays: 5 })).status === 400, 'F6: retention must be one of the choices');
   const st2 = await emit(owner.s, 'rec:start', {});
-  const idleP = ev(mem.s, 'rec:state');
-  const idleE = await new Promise((res) => { const t = setTimeout(() => res(null), 15000); mem.s.once('rec:state', (p) => { clearTimeout(t); res(p); }); });
-  void idleP;
+  const idleE = await new Promise((res) => { const f = (p) => { if (p.rec === null) { clearTimeout(t); mem.s.off('rec:state', f); res(p); } }; const t = setTimeout(() => { mem.s.off('rec:state', f); res(null); }, 15000); mem.s.on('rec:state', f); });
   ok(st2.ok && idleE?.rec === null && idleE.reason === 'idle', 'F6: a recorder that goes quiet is stopped automatically', JSON.stringify(idleE));
   // ---------- 7. captions relay ----------
   {
@@ -160,6 +159,27 @@ try {
     let burst = 0; for (let i = 0; i < 12; i++) if ((await emit(owner.s, 'caption:send', { text: `b${i}`, final: false })).ok) burst++;
     ok(burst <= 8, 'F7: caption flood is limited', String(burst));
     await emit(other.s, 'room:join', { roomId: room });
+  }
+  // ---------- 8. room analytics ----------
+  {
+    const today = Math.floor(Date.now() / 86400000);
+    const db = new DatabaseSync(path.join(DATA, 'camchat.db'));
+    // two members active 10 days ago (one of them comes back today), plus an hourly peak record
+    const ownerId = (await owner.j.req('/api/me')).account.id;
+    db.prepare('INSERT OR IGNORE INTO room_visitors (room_id, day, user_id, messages) VALUES (?,?,?,0)').run(room, today - 10, ownerId);
+    db.prepare('INSERT OR IGNORE INTO room_visitors (room_id, day, user_id, messages) VALUES (?,?,?,3)').run(room, today - 10, 999001);
+    db.prepare('INSERT INTO room_stats_hourly (room_id, hour, messages, peak) VALUES (?,?,5,9) ON CONFLICT(room_id, hour) DO UPDATE SET peak = 9').run(room, (today - 2) * 24 + 15);
+    db.close();
+    const an = await emit(owner.s, 'stats:analytics');
+    const t = an.analytics?.totals;
+    ok(an.ok && t.active7 >= 3 && t.activePrev7 === 2 && t.growthPct === Math.round((t.active7 - 2) / 2 * 100), 'F8: active members this week vs last week, with growth %', JSON.stringify(t));
+    ok(t.returning7 === 1 && t.members === t.active7 + 1 && t.new7 === t.active7 - 1, 'F8: new and returning members counted', JSON.stringify(t));
+    ok(an.analytics.peakByHour[15][2] === 9 && an.analytics.days.length === 30 && t.peak30 >= 9, 'F8: peak times by hour of day');
+    ok(!(await emit(mem.s, 'stats:analytics')).ok, 'F8: members cannot see analytics');
+    await emit(owner.s, 'room:create', { name: 'ff-second', category: 'talk' });
+    await emit(owner.s, 'room:join', { roomId: room });
+    const mine = await owner.j.req('/api/me/rooms/analytics');
+    ok(mine.ok && mine.rooms.length === 2 && mine.rooms.some((r) => r.id === room && r.active7 >= 3), 'F8: per-room summary for everything you own', JSON.stringify(mine.rooms));
   }
   // @@API-END
 
@@ -231,6 +251,20 @@ try {
       ok(await noSideScroll(li.page), `${width}: captions: no sideways scroll`);
       await sp.ctx.close(); await li.ctx.close();
       await fresh(owner); await emit(owner.s, 'room:join', { roomId: room }); await fresh(other);
+    }
+    // F8 UI: Stats tab shows members, growth and peak times
+    {
+      const o = await pageFor(owner, width);
+      await enterRoom(o.page, room);
+      if (width < 800) { await o.page.$eval('[data-action="collapse-panel"]', (b) => b.click()); await sleep(400); }
+      await o.page.$eval('[data-action="tab-stats"]', (b) => b.click());
+      const sec = await o.page.waitForSelector('[data-testid="room-analytics"] [data-stat="growth"]', { timeout: 8000 }).catch(() => null);
+      ok(!!sec && !!(await o.page.$('[data-testid="peak-hours"]')) && !!(await o.page.$('[data-testid="rooms-growth"]')), `${width}: Stats shows active members, growth, peak times and all your rooms`);
+      if (sec) { await sec.evaluate((e) => e.closest('.room-analytics').scrollIntoView({ block: 'start' })); }
+      ok(await noSideScroll(o.page), `${width}: analytics: no sideways scroll`);
+      await shot(o.page, `f8-analytics-${width}`);
+      await o.ctx.close();
+      await fresh(owner); await emit(owner.s, 'room:join', { roomId: room });
     }
     // @@UI-END
   }

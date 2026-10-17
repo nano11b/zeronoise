@@ -232,3 +232,50 @@ export function saveDraft(userId: number, roomId: string, threadId: string, text
      ON CONFLICT(user_id, room_id, thread_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`).run(userId, roomId, threadId, text, at);
   return at;
 }
+
+// ---------- room analytics for owners (batch F8): active members, peak times, growth ----------
+const DAY = 86_400_000;
+export interface DayPoint { day: number; active: number; chatters: number; guests: number; newMembers: number; peak: number; messages: number }
+export interface RoomAnalytics {
+  days: DayPoint[];
+  /** [hour of day UTC 0..23, average daily peak online, highest peak] over the window */
+  peakByHour: [number, number, number][];
+  totals: { members: number; active7: number; activePrev7: number; growthPct: number | null; new7: number; new30: number; returning7: number; peak30: number };
+}
+export function roomAnalytics(roomId: string, at = Date.now(), days = 30): RoomAnalytics {
+  const today = Math.floor(at / DAY); const from = today - (days - 1);
+  const pts = new Map<number, DayPoint>();
+  for (let d = from; d <= today; d++) pts.set(d, { day: d, active: 0, chatters: 0, guests: 0, newMembers: 0, peak: 0, messages: 0 });
+  for (const r of q('SELECT day, COUNT(*) AS a, SUM(messages > 0) AS c FROM room_visitors WHERE room_id = ? AND day >= ? GROUP BY day').all(roomId, from) as { day: number; a: number; c: number }[]) {
+    const p = pts.get(Number(r.day)); if (p) { p.active = Number(r.a); p.chatters = Number(r.c); }
+  }
+  for (const r of q('SELECT day, guests FROM room_stats_daily WHERE room_id = ? AND day >= ?').all(roomId, from) as { day: number; guests: number }[]) {
+    const p = pts.get(Number(r.day)); if (p) p.guests = Number(r.guests);
+  }
+  for (const r of q('SELECT first AS day, COUNT(*) AS n FROM (SELECT user_id, MIN(day) AS first FROM room_visitors WHERE room_id = ? GROUP BY user_id) WHERE first >= ? GROUP BY first').all(roomId, from) as { day: number; n: number }[]) {
+    const p = pts.get(Number(r.day)); if (p) p.newMembers = Number(r.n);
+  }
+  const hourly = q('SELECT hour, messages, peak FROM room_stats_hourly WHERE room_id = ? AND hour >= ?').all(roomId, from * 24) as { hour: number; messages: number; peak: number }[];
+  const byHour = Array.from({ length: 24 }, () => ({ sum: 0, max: 0 }));
+  for (const r of hourly) {
+    const p = pts.get(Math.floor(Number(r.hour) / 24));
+    if (p) { p.peak = Math.max(p.peak, Number(r.peak)); p.messages += Number(r.messages); }
+    const h = byHour[Number(r.hour) % 24]; h.sum += Number(r.peak); h.max = Math.max(h.max, Number(r.peak));
+  }
+  const distinct = (a: number, b: number) => (q('SELECT COUNT(DISTINCT user_id) AS n FROM room_visitors WHERE room_id = ? AND day >= ? AND day <= ?').get(roomId, a, b) as { n: number }).n;
+  const active7 = distinct(today - 6, today); const activePrev7 = distinct(today - 13, today - 7);
+  const returning7 = (q(`SELECT COUNT(DISTINCT user_id) AS n FROM room_visitors WHERE room_id = ? AND day >= ? AND user_id IN
+    (SELECT user_id FROM room_visitors WHERE room_id = ? AND day < ?)`).get(roomId, today - 6, roomId, today - 6) as { n: number }).n;
+  const list = [...pts.values()];
+  return {
+    days: list,
+    peakByHour: byHour.map((h, i) => [i, Math.round((h.sum / days) * 10) / 10, h.max]),
+    totals: {
+      members: (q('SELECT COUNT(DISTINCT user_id) AS n FROM room_visitors WHERE room_id = ?').get(roomId) as { n: number }).n,
+      active7, activePrev7, growthPct: activePrev7 ? Math.round(((active7 - activePrev7) / activePrev7) * 100) : null,
+      new7: list.filter((p) => p.day > today - 7).reduce((a, p) => a + p.newMembers, 0),
+      new30: list.reduce((a, p) => a + p.newMembers, 0), returning7, peak30: Math.max(0, ...list.map((p) => p.peak)),
+    },
+  };
+}
+export const ownedRoomIds = (userId: number) => (q('SELECT id, name FROM rooms WHERE owner_user_id = ? AND is_private = 0 ORDER BY name_lower LIMIT 50').all(userId) as { id: string; name: string }[]);

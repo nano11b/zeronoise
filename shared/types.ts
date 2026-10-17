@@ -413,6 +413,8 @@ export interface ClientToServer {
   'radio:get': (ack: Ack<{ np: RadioNowPlaying | null }>) => void;
   'clip:saved': (p: { userId: string }, ack: Ack) => void;
   'stats:get': (ack: Ack<{ stats: RoomStats }>) => void;
+  /** batch F8: members, peak times and growth for this room (owner / room mods) */
+  'stats:analytics': (ack: Ack<{ analytics: RoomAnalytics; serverNow: number }>) => void;
 }
 
 export interface ServerToClient {
@@ -713,3 +715,10 @@ export interface PublicProfile {
 
 /** batch F6: live recording notice */
 export interface RecState { id: string; by: string; startedAt: number; maxMs: number }
+
+/** batch F8 (days are UTC day numbers: floor(ms / 86400000)) */
+export interface RoomAnalytics {
+  days: { day: number; active: number; chatters: number; guests: number; newMembers: number; peak: number; messages: number }[];
+  peakByHour: [number, number, number][];
+  totals: { members: number; active7: number; activePrev7: number; growthPct: number | null; new7: number; new30: number; returning7: number; peak30: number };
+}

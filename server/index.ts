@@ -4778,6 +4778,16 @@ function onConnection(socket: AppSocket) {
 
   // ---- 5. room stats (owner / staff / room mods) ----
   const statsRl = new RateLimiter(20, 60_000);
+  socket.on('stats:analytics', (ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
+    if (!canRoomManage(c.s, c.room)) return ack({ ok: false, error: 'Only the room owner or a moderator can see analytics', status: 403 });
+    if (c.room.isPrivate) return ack({ ok: false, error: 'Private calls have no stats', status: 400 });
+    if (!statsRl.take()) return ack({ ok: false, error: 'Slow down', status: 429 });
+    statsSample();
+    ack({ ok: true, analytics: repo8.roomAnalytics(c.room.id), serverNow: Date.now() });
+  });
   socket.on('stats:get', (ackRaw) => {
     const ack = safeAck(ackRaw);
     const c = roomCtx();

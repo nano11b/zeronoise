@@ -2424,3 +2424,15 @@ html[data-ui-theme="dark-orange"] {
 .captions { background: rgba(0,0,0,.78); color: #fff; border-radius: 8px; padding: 6px 10px; margin-top: 6px; font-size: 1.02rem; line-height: 1.35; max-height: 7.5em; overflow: hidden; }
 .captions p { margin: 0; overflow-wrap: anywhere; }
 .captions p.interim { opacity: .75; font-style: italic; }
+/* batch F8: room analytics */
+.room-analytics h5 { margin: 10px 0 4px; font-size: .85rem; }
+.room-analytics .stat-grid { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.room-analytics .stat.down b { color: #f88; }
+.room-analytics .stat.up b { color: #8f8; }
+.day-bars.new .bar { background: #b07cff; }
+.hour-bars { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; height: 56px; align-items: end; }
+.hour-bar { height: 100%; display: flex; align-items: flex-end; }
+.hour-bar .bar { width: 100%; background: var(--accent, #6cf); border-radius: 2px 2px 0 0; min-height: 1px; }
+.hour-axis { display: flex; justify-content: space-between; font-size: .7rem; color: var(--muted, #9aa); }
+.rooms-growth { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.rooms-growth th, .rooms-growth td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--border, #333); }

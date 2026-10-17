@@ -1,4 +1,5 @@
 /** Batch 3 room UI: category/tags, announcement banner + editor, scheduled messages, emotes, stats. */
+import { RoomAnalyticsSection } from './RoomAnalytics';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ANNOUNCE_MAX, CATEGORY_ICON, CATEGORY_LABEL, EMOTE_MAX_BYTES, EMOTE_NAME_RE, EMOTES_PER_ROOM, isRoomCategory, ROOM_CATEGORIES,
@@ -276,6 +277,7 @@ export function StatsPanel({ roomName, toast }: { roomName: string; toast: Toast
             ))}
             <div className="heat-row heat-axis"><span className="heat-day" />{[0, 6, 12, 18].map((h) => <span key={h} className="heat-tick" style={{ gridColumn: `${h + 2} / span 6` }}>{h}</span>)}</div>
           </div>
+          <RoomAnalyticsSection range={range} />
           <h4>Top chatters</h4>
           {view.win.top.length === 0 ? <p className="muted small">No messages from registered users yet.</p> : (
             <ol className="top-list">
