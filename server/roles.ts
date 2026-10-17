@@ -78,3 +78,4 @@ export function assign(roomId: string, userId: number, roleId: number | null, by
   return true;
 }
 export const rolesPayload = (roomId: string) => ({ roles: rolesOf(roomId), members: membersOf(roomId) });
+export const setRoomTemplate = (roomId: string, key: string) => q('UPDATE rooms SET template = ? WHERE id = ?').run(key, roomId);

@@ -2465,3 +2465,11 @@ html[data-ui-theme="dark-orange"] {
 .role-form fieldset { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; display: flex; flex-direction: column; }
 .role-form label.check { display: flex; align-items: center; gap: 6px; min-height: 40px; }
 .role-form input[type=color] { width: 48px; height: 40px; padding: 0; border: 0; background: none; vertical-align: middle; }
+/* batch G3 templates */
+.template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.template-card { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px; min-height: 44px; border: 2px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); cursor: pointer; }
+.template-card.on { background: rgba(var(--accent-rgb), .08); }
+.template-preview { margin-top: 8px; overflow-wrap: anywhere; }
+.template-preview .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; }
+.template-pick { display: flex; flex-direction: column; gap: 4px; }
+.template-pick select { max-width: 100%; }

@@ -254,7 +254,7 @@ export interface ClientToServer {
   /** resume: same tab reconnecting. Keeps the WebRTC peers instead of leaving the room. */
   login: (p: { nick?: string; resume?: boolean; tz?: string } | undefined, ack: Ack<{ user: UserInfo }>) => void;
   'rooms:list': (ack: Ack<{ rooms: RoomSummary[] }>) => void;
-  'room:create': (p: { name: string; topic?: string; password?: string; voice?: boolean; category?: string | null; tags?: string[] | string }, ack: Ack<{ roomId: string }>) => void;
+  'room:create': (p: { name: string; topic?: string; password?: string; voice?: boolean; category?: string | null; tags?: string[] | string; template?: string }, ack: Ack<{ roomId: string }>) => void;
   'room:join': (p: { roomId: string; password?: string; invite?: string }, ack: Ack<{ room: RoomState; resumed?: boolean }>) => void;
   'room:leave': () => void;
   'room:kick': (p: { userId: string }, ack: Ack) => void;
@@ -390,6 +390,7 @@ export interface ClientToServer {
   'room:mod': (p: { accountId: number; on: boolean }, ack: Ack<{ mods: RoomModInfo[] }>) => void;
   /** owner, room mods and site staff: mute someone in this room's chat */
   'room:mute': (p: { userId: string; minutes: number }, ack: Ack) => void;
+  'room:template:apply': (p: { template: string }, ack: Ack<{ filters: unknown }>) => void;
   'roles:get': (p: Record<string, never>, ack: Ack<{ roles: RoomRoleInfo[]; members: Record<string, number>; perms: RoomRolePerm[] }>) => void;
   'roles:save': (p: { id?: number; name: string; color: string | null; perms: RoomRolePerm[] }, ack: Ack<{ role: RoomRoleInfo }>) => void;
   'roles:archive': (p: { id: number }, ack: Ack) => void;

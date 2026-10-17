@@ -1,3 +1,4 @@
+import { ROOM_TEMPLATES, TEMPLATE_KEYS, type RoomTemplateKey } from '../../shared/templates';
 import { RoomAppeal } from './RoomAppeal';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Sheet } from './Sheet';
@@ -53,6 +54,7 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
   const [activeFirst, setActiveFirst] = useState(false);
   const [newCat, setNewCat] = useState('');
   const [newVoice, setNewVoice] = useState(false);
+  const [newTemplate, setNewTemplate] = useState('');
   const [newTags, setNewTags] = useState('');
   const [busy, setBusy] = useState(false);
   const [askPw, setAskPw] = useState<RoomSummary | null>(null);
@@ -121,7 +123,8 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
       const parsedTags = cleanTags(newTags);
       if ('error' in parsedTags) throw new Error(parsedTags.error);
       const meta = { ...(newCat ? { category: newCat } : {}), ...(parsedTags.tags.length ? { tags: parsedTags.tags } : {}) };
-      const r = await call<{ roomId: string }>((ack) => socket.emit('room:create', { name, topic, ...(password ? { password } : {}), ...(newVoice ? { voice: true } : {}), ...meta }, ack));
+      const r = await call<{ roomId: string }>((ack) => socket.emit('room:create', { name, topic, ...(password ? { password } : {}), ...(newVoice ? { voice: true } : {}), ...(newTemplate ? { template: newTemplate } : {}), ...meta }, ack));
+      setNewTemplate('');
       setName(''); setTopic(''); setRoomPw(''); setNewCat(''); setNewTags('');
       if (newThumb) {
         // optional: a failed thumbnail never blocks the new room; it can be set later from the room info tab
@@ -243,6 +246,10 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
               <CategorySelect value={newCat} onChange={setNewCat} />
               <input placeholder="Tags: music, chill" value={newTags} maxLength={140} onChange={(e) => setNewTags(e.target.value)} aria-label="Tags (optional)" data-field="create-tags" />
             </div>
+            <label className="template-pick">Template <select value={newTemplate} data-field="room-template" onChange={(e) => { setNewTemplate(e.target.value); const t = ROOM_TEMPLATES[e.target.value as RoomTemplateKey]; if (t && !newCat) setNewCat(t.category); }}>
+              <option value="">None (blank room)</option>
+              {TEMPLATE_KEYS.map((k) => <option key={k} value={k}>{ROOM_TEMPLATES[k].icon} {ROOM_TEMPLATES[k].label} — {ROOM_TEMPLATES[k].blurb}</option>)}
+            </select></label>
             <label className="check-row voice-check"><input type="checkbox" checked={newVoice} onChange={(e) => setNewVoice(e.target.checked)} data-field="room-voice" /> <span>🎙 Voice room (audio only)</span></label>
             <input type="password" placeholder="Password (optional)" value={roomPw} maxLength={LIMITS.passwordMax} onChange={(e) => setRoomPw(e.target.value)} autoComplete="new-password" aria-label="Room password" />
             {account && (

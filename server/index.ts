@@ -32,6 +32,7 @@ import { gifById } from './gifs';
 import { COOKIE_SID, checkSecret, createApp, deviceIdsOf, hashSecret, iceServers, isStaffRole } from './http';
 import * as recs from './recordings';
 import * as roles from './roles';
+import { ROOM_TEMPLATES, isTemplateKey, type RoomTemplate, type RoomTemplateKey } from '../shared/templates';
 import * as alerts from './alerts';
 import { initRestoreChecks } from './restoreCheck';
 import { live, type BotFeedQuery, type BotIdentity, type BotModBody, type BotModMessage, type BotResult, type BotRoomLine } from './live';
@@ -1023,6 +1024,21 @@ function sweepClips() {
 setInterval(guardTimer('recording retention', () => { const n = recs.sweepRecordings(); sweepClips(); if (n) console.log(`[rec] removed ${n} recording(s) past retention`); }), Number(process.env.RECORDING_SWEEP_MS) || 3_600_000).unref();
 setTimeout(() => { try { recs.sweepRecordings(); } catch (e) { console.error('[rec] sweep', e); } }, 30_000).unref();
 
+/** batch G3: apply a room template (accent, welcome, filters, slow mode; adds its roles if missing). */
+function applyTemplate(room: Room, key: RoomTemplateKey, s: Session) {
+  const t: RoomTemplate = ROOM_TEMPLATES[key];
+  repo4.setRoomTheme(room.id, { accent: t.accent, welcome: t.welcome });
+  repo6.setFilters(room.id, t.filters.words, t.filters.links, t.filters.allow, s.user?.nick ?? 'template');
+  room.slowModeSec = t.slowModeSec;
+  repo.setRoomSlowMode(room.id, t.slowModeSec);
+  const have = new Set(roles.rolesOf(room.id).map((r) => r.name.toLowerCase()));
+  for (const r of t.roles) if (!have.has(r.name.toLowerCase())) roles.saveRole(room.id, null, { name: r.name, color: r.color, perms: [...r.perms] });
+  roles.setRoomTemplate(room.id, key);
+  repo.logAction(actorLabel(s), s.account?.id ?? null, 'room-template', key, room.id, null);
+  io.to(`room:${room.id}`).emit('room:theme', { theme: themeOf(room) });
+  io.to(`room:${room.id}`).emit('room:settings', { locked: room.locked, slowModeSec: room.slowModeSec });
+  io.to(`room:${room.id}`).emit('roles:update', roles.rolesPayload(room.id));
+}
 function systemMsg(room: Room, text: string) {
   const msg: ChatMessage = { kind: 'system', id: randomUUID(), ts: Date.now(), text };
   room.notices.push(msg);
@@ -2553,6 +2569,7 @@ function onConnection(socket: AppSocket) {
       const voice = !!(p as { voice?: unknown })?.voice;
       if (voice) repo.setRoomVoice(row.id, true);
       const room = loadRoom({ ...row, category: meta.category, tags: meta.tags.length ? JSON.stringify(meta.tags) : null, voice: voice ? 1 : 0 });
+      { const tk = (p as { template?: unknown })?.template; if (isTemplateKey(tk)) applyTemplate(room, tk, s); }
       broadcastRooms();
       ack({ ok: true, roomId: room.id });
       bumpStat(badgeEarner(socket.id, s), 'rooms_created');
@@ -4421,6 +4438,19 @@ function onConnection(socket: AppSocket) {
     io.to(`room:${room.id}`).emit('room:mods', { mods });
     systemMsg(room, on ? `${target.username} is now a room moderator` : `${target.username} is no longer a room moderator`);
     ack({ ok: true, mods });
+  });
+  socket.on('room:template:apply', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error });
+    const { s, room } = c;
+    if (room.isPrivate) return ack({ ok: false, error: 'Private calls have no templates' });
+    if (!isStaff(s) && !isOwner(s, room)) return ack({ ok: false, error: 'Only the room owner can apply a template' });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited' });
+    if (!isTemplateKey(p?.template)) return ack({ ok: false, error: 'Unknown template' });
+    applyTemplate(room, p.template, s);
+    systemMsg(room, `${s.user!.nick} applied the ${ROOM_TEMPLATES[p.template].label} template`);
+    ack({ ok: true, filters: repo6.filtersFor(room.id) });
   });
   // ---- batch G4: custom room roles ----
   socket.on('roles:get', (_p, ackRaw) => {

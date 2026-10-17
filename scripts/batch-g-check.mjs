@@ -222,6 +222,33 @@ try {
     ok(arc.ok && !(await emit(other.s, 'stage:invite', { userId: mem.s.id })).ok, 'G4: removing a role removes its powers');
     globalThis.__rolesRoom = rr;
   }
+  // ---------- G3 room templates ----------
+  {
+    const cr = await emit(other.s, 'room:create', { name: 'gg-study', category: 'talk', template: 'study' });
+    const j = await emit(other.s, 'room:join', { roomId: cr.roomId });
+    const f = await emit(other.s, 'room:filters:get');
+    const rl = await emit(other.s, 'roles:get', {});
+    ok(cr.ok && j.room.theme.accent === '#60a5fa' && /Study room/.test(j.room.theme.welcome) && j.room.slowModeSec === 30, 'G3: creating with the Study template sets accent, welcome and slow mode', JSON.stringify({ t: j.room?.theme, s: j.room?.slowModeSec }));
+    ok(f.filters.links === 'allowlist' && f.filters.allow.includes('wikipedia.org'), 'G3: template filters applied', JSON.stringify(f.filters));
+    ok(rl.roles.map((r) => r.name).join() === 'Tutor,Proctor' && rl.roles[0].perms.join() === 'pin,floor', 'G3: template roles created', JSON.stringify(rl.roles));
+    await emit(mem.s, 'room:join', { roomId: cr.roomId });
+    ok(!(await emit(mem.s, 'room:template:apply', { template: 'chill' })).ok, 'G3: members cannot apply templates');
+    ok(!(await emit(other.s, 'room:template:apply', { template: 'nope' })).ok, 'G3: unknown template refused');
+    const thP = ev(mem.s, 'room:theme');
+    const ap = await emit(other.s, 'room:template:apply', { template: 'gaming' });
+    const th = await thP;
+    const rl2 = await emit(other.s, 'roles:get', {});
+    const j2 = await emit(mem.s, 'room:join', { roomId: cr.roomId });
+    ok(ap.ok && th?.theme?.accent === '#a78bfa' && j2.room.slowModeSec === 0, 'G3: applying Gaming to an existing room updates it live', JSON.stringify({ th, s: j2.room?.slowModeSec }));
+    ok(rl2.roles.map((r) => r.name).join() === 'Tutor,Proctor,Squad Lead,Ref', 'G3: template adds its roles and keeps existing ones', rl2.roles.map((r) => r.name).join());
+    for (const k of ['gaming', 'study', 'music', 'chill', 'support']) {
+      const r = await emit(other.s, 'room:template:apply', { template: k });
+      if (!r.ok) { ok(false, `G3: ${k} applies`, r.error); }
+      await sleep(150);
+    }
+    ok(true, 'G3: all five templates apply cleanly');
+    globalThis.__tplRoom = cr.roomId;
+  }
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
@@ -346,6 +373,29 @@ try {
       await shot(m.page, `g4-holder-menu-${width}`);
       await m.ctx.close(); await fresh(mem); await emit(mem.s, 'room:join', { roomId: rr });
       await emit(owner.s, 'room:join', { roomId: room }); await emit(mem.s, 'room:join', { roomId: room }); await emit(other.s, 'room:join', { roomId: room });
+    }
+    // G3 UI: owner picks a template, sees what it sets, applies it
+    {
+      const tr = globalThis.__tplRoom;
+      await fresh(other);
+      const o = await pageFor(other, width);
+      await enterRoom(o.page, tr);
+      await openSettings(o.page, width < 800, 'template');
+      const card = await o.page.waitForSelector('[data-template="music"]', { timeout: 8000 }).catch(() => null);
+      ok(!!card, `${width}: G3: five template cards`, String(await o.page.$$eval('[data-template]', (x) => x.length)));
+      await card?.click();
+      const pv = await o.page.waitForSelector('[data-testid="template-preview"]', { timeout: 3000 }).catch(() => null);
+      ok(!!pv && /DJ/.test(await pv.evaluate((e) => e.textContent)), `${width}: G3: preview lists accent, slow mode, links, roles and welcome`);
+      await o.page.$eval('[data-testid="template-picker"]', (e) => e.scrollIntoView({ block: 'start' }));
+      ok(await noSideScroll(o.page), `${width}: G3: no sideways scroll`);
+      await shot(o.page, `g3-template-preview-${width}`);
+      await o.page.$eval('[data-action="template-apply"]', (b) => b.click());
+      const done = await o.page.waitForFunction(() => /Music template applied/.test(document.body.textContent), { timeout: 6000 }).catch(() => null);
+      const acc = await o.page.waitForFunction(() => /f472b6|244, 114, 182/i.test(document.documentElement.outerHTML), { timeout: 4000 }).catch(() => null);
+      ok(!!done && !!acc, `${width}: G3: applied; the room picks up the new accent`);
+      if (width < 800) { await o.page.evaluate(() => document.querySelector('[data-action="panel-close"], [data-action="collapse-panel"]')?.click()); await sleep(300); }
+      await shot(o.page, `g3-template-applied-${width}`);
+      await o.ctx.close(); await fresh(other); await emit(other.s, 'room:join', { roomId: room });
     }
     // @@UI-END
   }

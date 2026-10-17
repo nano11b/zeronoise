@@ -95,6 +95,7 @@ const EmoteManager = lazyNamed(loadManage, 'EmoteManager');
 const StatsPanel = lazyNamed(loadManage, 'StatsPanel');
 const FiltersPanel = lazyNamed(loadManage, 'FiltersPanel');
 const RolesPanel = lazyNamed(() => import('./RolesPanel'), 'RolesPanel');
+const TemplatePicker = lazyNamed(() => import('./TemplatePicker'), 'TemplatePicker');
 const EventsPanel = lazyNamed(() => import('./EventsPanel'), 'EventsPanel');
 const panelFallback = <p className="muted small" aria-busy="true">Loading…</p>;
 
@@ -2383,6 +2384,12 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                   <summary>Reports{roomReports.open + roomReports.review > 0 ? ` · ${roomReports.open + roomReports.review}` : ''}</summary>
                   <p className="muted small">Reports about messages in this room. Reporters stay anonymous to room moderators.</p>
                   <Lazy fallback={panelFallback} inline><ModQueue mode="room" roomId={initial.id} toast={toast} /></Lazy>
+                </details>
+              )}
+              {!initial.isPrivate && canManageRoom && (
+                <details className="manage-sec" data-section="template">
+                  <summary>Room template</summary>
+                  <Lazy fallback={panelFallback} inline><TemplatePicker toast={toast} /></Lazy>
                 </details>
               )}
               {!initial.isPrivate && canManageRoom && (
