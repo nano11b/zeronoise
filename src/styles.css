@@ -2378,3 +2378,8 @@ html[data-ui-theme="dark-orange"] {
 .tfa-secret { font-size: .95rem; overflow-wrap: anywhere; user-select: all; }
 .tfa-codes ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 4px; list-style: none; padding: 0; margin: 6px 0; }
 .tfa-codes code { font-size: .95rem; }
+/* room chips in the profile card: real tap targets on touch screens */
+@media (pointer: coarse), (max-width: 640px) {
+  .pc-room { min-height: 32px; padding: 4px 10px; display: inline-flex; align-items: center; }
+  .pc-room-list { gap: 6px; }
+}
