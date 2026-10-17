@@ -481,7 +481,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const [clockTick, setClockTick] = useState(0);
   const [bookmarkIds, setBookmarkIds] = useState<ReadonlySet<string>>(() => new Set());
   const [savedVersion, setSavedVersion] = useState(0);
-  const [pollDraft, setPollDraft] = useState<{ question: string; options: string[] } | null>(null);
+  const [pollDraft, setPollDraft] = useState<{ question: string; options: string[]; parentId?: string } | null>(null);
   const [profileFor, setProfileFor] = useState<string | null>(null);
   const [jumpHit, setJumpHit] = useState<string | null>(null);
   useEffect(() => {
@@ -1167,6 +1167,14 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
     e.preventDefault();
     const body = threadText.trim();
     if (!body || !thread) return;
+    const pollCmd = threadBurnOn ? null : parsePollCommand(body);
+    if (pollCmd) {
+      if (pollCmd.question && pollCmd.options.length >= 2) {
+        try { await call((ack) => socket.emit('poll:create', { question: pollCmd.question, options: pollCmd.options, parentId: thread.parent.id }, ack)); setThreadText(''); }
+        catch (err) { toast((err as Error).message, 'error'); }
+      } else { setPollDraft({ ...pollCmd, parentId: thread.parent.id }); setThreadText(''); }
+      return;
+    }
     try {
       await call((ack) => socket.emit('chat:send', threadBurnOn ? { text: body, parentId: thread.parent.id, burnTtl: threadBurnTtl } : { text: body, parentId: thread.parent.id }, ack));
       setThreadBurnOn(false);
@@ -2157,7 +2165,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                           )}
                         </span>
                       )}{' '}
-                      {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <VoicePlayer voice={m.voice} /> : <ChatText text={m.text} className="text" />}
+                      {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <VoicePlayer voice={m.voice} /> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <ChatText text={m.text} className="text" />}
                       {m.kind === 'chat' && m.editedAt ? editedMark(m) : null}
                       {m.preview && !m.burn && <LinkPreviewCard messageId={m.id} preview={m.preview} canRemove={mineMsg(m)} onRemove={() => removePreview(m)} />}
                     </div>
@@ -2168,6 +2176,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                   <input className={threadBurnOn ? 'burn-armed' : undefined} value={threadText} onChange={(e) => setThreadText(e.target.value)} maxLength={LIMITS.messageMax} placeholder={threadBurnOn ? `🔥 Burn reply (${threadBurnTtl}s after viewing)` : 'Reply in thread'} aria-label="Thread reply" />
                   <BurnToggle armed={threadBurnOn} ttl={threadBurnTtl} onArmed={setThreadBurnOn} onTtl={setThreadBurnTtl} />
                   {!threadBurnOn && <VoiceNoteButton roomId={initial.id} parentId={thread.parent.id} toast={toast} />}
+                  {!threadBurnOn && <button type="button" className="btn ghost icon-act" title="Poll in this thread" aria-label="Poll in this thread" data-action="thread-poll" onClick={() => setPollDraft({ question: '', options: [], parentId: thread.parent.id })}>📊</button>}
                   <button className="btn primary">Reply</button>
                 </form>
               </div>
@@ -2276,7 +2285,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     <Lazy fallback={panelFallback} inline><FiltersPanel toast={toast} /></Lazy>
                   </details>
                   <details className="manage-sec" data-section="schedules">
-                    <summary>Scheduled announcements{schedules.length ? ` · ${schedules.length}` : ''}</summary>
+                    <summary>Scheduled posts and polls{schedules.length ? ` · ${schedules.length}` : ''}</summary>
                     <Lazy fallback={panelFallback} inline><SchedulePanel schedules={schedules} toast={toast} /></Lazy>
                   </details>
                 </>
@@ -2311,7 +2320,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
       {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
       {notifyOpen && <NotifyDialog roomName={initial.name} onClose={() => setNotifyOpen(false)} />}
       {reportTarget && <ReportDialog target={reportTarget} onClose={() => setReportTarget(null)} toast={toast} registered={me.registered} />}
-      {pollDraft && <PollDialog initial={pollDraft} onClose={() => setPollDraft(null)} toast={toast} />}
+      {pollDraft && <PollDialog initial={pollDraft} parentId={pollDraft.parentId} onClose={() => setPollDraft(null)} toast={toast} />}
       {profileFor && (() => {
         const u = users.find((x) => x.nick.toLowerCase() === profileFor.toLowerCase());
         return (

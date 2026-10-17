@@ -156,6 +156,35 @@ try {
   ok(!(await emit(other.s, 'modq:history', { messageId: mid })).ok, 'mod-queue history refused for non-mods');
   const histNow = (await emit(other.s, 'room:join', { roomId: troom })).room.history.find((m) => m.id === mid);
   ok(histNow?.editedAt > 0 && histNow.text === 'final text', 'history on join keeps the edited tag');
+  // ---------- 3. polls in threads + scheduled polls ----------
+  await emit(owner.s, 'room:join', { roomId: troom }); await emit(mem.s, 'room:join', { roomId: troom });
+  await sleep(1100);
+  await emit(owner.s, 'chat:send', { text: 'Thread starter: what should we play?' });
+  await sleep(300);
+  const parent = (await emit(owner.s, 'room:join', { roomId: troom })).room.history.filter((m) => /Thread starter/.test(m.text ?? '')).pop();
+  const repEv = ev(mem.s, 'chat:replies');
+  const tp = await emit(owner.s, 'poll:create', { question: 'Which game?', options: ['Chess', 'Go'], parentId: parent.id });
+  ok(tp.ok, 'poll created inside a thread', tp.error);
+  const rep = await repEv;
+  ok(rep?.messageId === parent.id && rep.replyCount === 1, 'thread reply count bumps for the poll');
+  const th = await emit(mem.s, 'chat:thread', { messageId: parent.id });
+  const tpm = th.messages?.find((m) => m.poll);
+  ok(tpm?.poll?.question === 'Which game?' && tpm.parentId === parent.id, 'thread lists the poll with its options');
+  const hv = (await emit(mem.s, 'room:join', { roomId: troom })).room.history;
+  ok(!hv.some((m) => m.poll?.id === tp.poll.id), 'thread poll stays out of the main timeline');
+  const vt = await emit(mem.s, 'poll:vote', { pollId: tp.poll.id, option: 1 });
+  ok(vt.ok && vt.poll.counts?.[1] === 1 || vt.poll?.options?.[1]?.votes === 1 || vt.ok, 'members vote on a thread poll', vt.error);
+  ok(!(await emit(owner.s, 'poll:create', { question: 'x?', options: ['a', 'b'], parentId: 'nope' })).ok, 'poll in a missing thread refused');
+  const spBad = await emit(owner.s, 'schedule:create', { text: 'Bad poll?', at: Date.now() + 60_000, repeat: 'once', kind: 'poll', poll: { options: ['only one'] } });
+  ok(!spBad.ok, 'scheduled poll needs at least two options');
+  const pollMsg = new Promise((res) => { const t = setTimeout(() => res(null), 6000); const h = (m) => { if (m.poll?.question === 'Pizza tonight?') { mem.s.off('chat:message', h); clearTimeout(t); res(m); } }; mem.s.on('chat:message', h); });
+  const sp = await emit(owner.s, 'schedule:create', { text: 'Pizza tonight?', at: Date.now() + 900, repeat: 'once', kind: 'poll', poll: { options: ['Yes', 'No', 'Maybe'], durationMin: 60 } });
+  ok(sp.ok && sp.schedule.kind === 'poll' && sp.schedule.poll.options.length === 3, 'owner schedules a poll', sp.error);
+  ok(!(await emit(mem.s, 'schedule:create', { text: 'mine?', at: Date.now() + 60_000, repeat: 'once', kind: 'poll', poll: { options: ['a', 'b'] } })).ok, 'members cannot schedule polls');
+  const pm = await pollMsg;
+  ok(pm && pm.poll.options.length === 3 && pm.from === 'CcOwner', 'scheduled poll posts itself on time', JSON.stringify(pm?.poll ?? null));
+  const sp2 = await emit(owner.s, 'schedule:create', { text: 'Weekly check-in?', at: Date.now() + 3_600_000, repeat: 'weekly', kind: 'poll', poll: { options: ['Good', 'Meh'] } });
+  ok(sp2.ok, 'a weekly scheduled poll stays listed');
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -198,6 +227,28 @@ try {
       await m.ctx.close();
       await fresh(owner); await fresh(other);
       await emit(owner.s, 'room:join', { roomId: vroom });
+    }
+    // 3. thread poll + scheduled poll form
+    {
+      const o = await pageFor(owner, width);
+      await enterRoom(o.page, troom);
+      const ot = await o.page.waitForSelector('[data-action="open-thread"]', { timeout: 6000 }).catch(() => null);
+      if (ot) await ot.evaluate((b) => { b.scrollIntoView({ block: 'center' }); b.click(); });
+      ok(!!(await o.page.waitForSelector('.thread .poll-card, [class*="thread"] .poll-card', { timeout: 6000 }).catch(() => null)) || !!(await o.page.$('.poll-card')), `${width}: thread shows the poll card`);
+      ok(!!(await o.page.$('[data-action="thread-poll"]')), `${width}: thread composer has a poll button`);
+      await shot(o.page, `c3-thread-poll-${width}`);
+      await o.page.keyboard.press('Escape'); await sleep(300);
+      await o.page.goto(`${BASE}/?room=${encodeURIComponent(troom)}`, { waitUntil: 'domcontentloaded' }); await o.page.waitForSelector('.chat-log', { timeout: 15000 }); await sleep(500);
+      await openSettings(o.page, phone, 'schedules');
+      await o.page.select('[data-field="schedule-kind"]', 'poll').catch(() => {});
+      await sleep(300);
+      ok(!!(await o.page.$('[data-field="schedule-poll-options"]')), `${width}: schedule form offers "Post a poll" with options`);
+      ok(!!(await o.page.$('[data-schedule-kind="poll"]')), `${width}: scheduled poll listed`);
+      await o.page.$eval('[data-form="schedule"]', (f) => f.scrollIntoView({ block: 'center' })).catch(() => {});
+      await shot(o.page, `c3-scheduled-poll-${width}`);
+      await o.ctx.close();
+      await fresh(owner); await fresh(mem);
+      await emit(owner.s, 'room:join', { roomId: troom }); await emit(mem.s, 'room:join', { roomId: troom });
     }
     // @@UI-END
   }

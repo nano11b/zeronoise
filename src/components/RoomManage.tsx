@@ -73,7 +73,9 @@ export function SchedulePanel({ schedules, toast }: { schedules: RoomScheduleInf
   const [text, setText] = useState('');
   const [when, setWhen] = useState(() => toLocalInput(Math.ceil((Date.now() + 3_600_000) / 900_000) * 900_000));
   const [repeat, setRepeat] = useState<'once' | 'daily' | 'weekly'>('once');
-  const [kind, setKind] = useState<'message' | 'banner'>('message');
+  const [kind, setKind] = useState<'message' | 'banner' | 'poll'>('message');
+  const [pollOpts, setPollOpts] = useState('');
+  const optList = pollOpts.split(/\n|\|/).map((o) => o.trim()).filter(Boolean);
   const [busy, setBusy] = useState(false);
   const add = async (e: FormEvent) => {
     e.preventDefault();
@@ -81,9 +83,9 @@ export function SchedulePanel({ schedules, toast }: { schedules: RoomScheduleInf
     if (!Number.isFinite(at)) return toast('Pick a date and time', 'error');
     setBusy(true);
     try {
-      await call((ack) => socket.emit('schedule:create', { text: text.trim(), at, repeat, kind, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }, ack));
-      setText('');
-      toast(`${kind === 'banner' ? 'Banner' : 'Announcement'} ${repeat === 'once' ? 'scheduled' : `repeats ${repeat}`}`);
+      await call((ack) => socket.emit('schedule:create', { text: text.trim(), at, repeat, kind, ...(kind === 'poll' ? { poll: { options: optList, durationMin: 60 } } : {}), tz: Intl.DateTimeFormat().resolvedOptions().timeZone }, ack));
+      setText(''); setPollOpts('');
+      toast(`${kind === 'banner' ? 'Banner' : kind === 'poll' ? 'Poll' : 'Announcement'} ${repeat === 'once' ? 'scheduled' : `repeats ${repeat}`}`);
     } catch (err) { toast((err as Error).message, 'error'); } finally { setBusy(false); }
   };
   const remove = async (id: string) => {
@@ -96,7 +98,7 @@ export function SchedulePanel({ schedules, toast }: { schedules: RoomScheduleInf
           {schedules.map((s) => (
             <li key={s.id} className="sched-row" data-schedule={s.id}>
               <span className="sched-main">
-                <span className="sched-when">{s.repeat === 'once' ? '⏰' : '🔁'} {fmtWhen(s.nextAt)}{s.repeat !== 'once' ? ` · ${s.repeat}` : ''} · <span data-schedule-kind={s.kind ?? 'message'}>{s.kind === 'banner' ? 'banner' : 'chat'}</span></span>
+                <span className="sched-when">{s.repeat === 'once' ? '⏰' : '🔁'} {fmtWhen(s.nextAt)}{s.repeat !== 'once' ? ` · ${s.repeat}` : ''} · <span data-schedule-kind={s.kind ?? 'message'}>{s.kind === 'banner' ? 'banner' : s.kind === 'poll' ? `📊 poll (${s.poll?.options.length ?? 0} options)` : 'chat'}</span></span>
                 <span className="sched-text" title={s.text}>{s.text}</span>
                 <span className="muted small">by {s.by}</span>
               </span>
@@ -107,17 +109,18 @@ export function SchedulePanel({ schedules, toast }: { schedules: RoomScheduleInf
       )}
       {schedules.length < SCHEDULES_PER_ROOM && (
         <form className="stack manage-form" onSubmit={add} data-form="schedule">
-          <textarea value={text} onChange={(e) => setText(e.target.value)} maxLength={SCHEDULE_TEXT_MAX} rows={2} required placeholder="Message to post as a room announcement" aria-label="Scheduled message" data-field="schedule-text" />
+          <textarea value={text} onChange={(e) => setText(e.target.value)} maxLength={SCHEDULE_TEXT_MAX} rows={2} required placeholder={kind === 'poll' ? 'Poll question' : 'Message to post as a room announcement'} aria-label="Scheduled message" data-field="schedule-text" />
+          {kind === 'poll' && <textarea value={pollOpts} onChange={(e) => setPollOpts(e.target.value)} rows={3} placeholder={'Options, one per line\nYes\nNo'} aria-label="Poll options" data-field="schedule-poll-options" />}
           <div className="sched-inputs">
             <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} required aria-label="When" data-field="schedule-when" />
             <select value={repeat} onChange={(e) => setRepeat(e.target.value as 'once' | 'daily' | 'weekly')} aria-label="Repeat" data-field="schedule-repeat">
               <option value="once">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option>
             </select>
-            <select value={kind} onChange={(e) => setKind(e.target.value as 'message' | 'banner')} aria-label="Post as" data-field="schedule-kind">
-              <option value="message">Post in chat</option><option value="banner">Set the banner</option>
+            <select value={kind} onChange={(e) => setKind(e.target.value as 'message' | 'banner' | 'poll')} aria-label="Post as" data-field="schedule-kind">
+              <option value="message">Post in chat</option><option value="banner">Set the banner</option><option value="poll">Post a poll (closes in 1 h)</option>
             </select>
           </div>
-          <button className="btn small-btn" disabled={busy || !text.trim()} data-action="add-schedule">Schedule</button>
+          <button className="btn small-btn" disabled={busy || !text.trim() || (kind === 'poll' && optList.length < 2)} data-action="add-schedule">Schedule</button>
         </form>
       )}
     </div>

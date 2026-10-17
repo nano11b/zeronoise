@@ -64,7 +64,7 @@ export function PollCard({ poll, canClose, toast, onPoll }: { poll: PollInfo; ca
 }
 
 /** Create a poll: question, 2-6 options, optional time limit. */
-export function PollDialog({ initial, onClose, toast }: { initial?: { question: string; options: string[] }; onClose: () => void; toast: (t: string, tone?: 'error' | 'info') => void }) {
+export function PollDialog({ initial, onClose, toast, parentId }: { initial?: { question: string; options: string[] }; parentId?: string; onClose: () => void; toast: (t: string, tone?: 'error' | 'info') => void }) {
   const [question, setQuestion] = useState(initial?.question ?? '');
   const [options, setOptions] = useState<string[]>(() => {
     const o = (initial?.options ?? []).slice(0, POLL_MAX_OPTIONS);
@@ -78,7 +78,7 @@ export function PollDialog({ initial, onClose, toast }: { initial?: { question: 
     e.preventDefault();
     setBusy(true);
     try {
-      await call((ack) => socket.emit('poll:create', { question: question.trim(), options: filled, durationMin: duration || null }, ack));
+      await call((ack) => socket.emit('poll:create', { question: question.trim(), options: filled, durationMin: duration || null, ...(parentId ? { parentId } : {}) }, ack));
       onClose();
     } catch (err) { toast((err as Error).message, 'error'); }
     finally { setBusy(false); }
@@ -87,8 +87,8 @@ export function PollDialog({ initial, onClose, toast }: { initial?: { question: 
   useModal(modalRef, onClose);
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <form ref={modalRef} className="modal panel poll-dialog" role="dialog" aria-modal="true" aria-label="New poll" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h3>New poll</h3>
+      <form ref={modalRef} className="modal panel poll-dialog" role="dialog" aria-modal="true" aria-label={parentId ? 'New poll in thread' : 'New poll'} data-thread-poll={parentId ? '1' : undefined} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h3>{parentId ? 'New poll in this thread' : 'New poll'}</h3>
         <input autoFocus value={question} maxLength={POLL_QUESTION_MAX} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask a question" aria-label="Poll question" data-field="poll-question" required />
         <div className="poll-edit-options">
           {options.map((o, i) => (

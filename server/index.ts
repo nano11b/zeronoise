@@ -1799,7 +1799,9 @@ function nextSlotAfter(prev: number, repeat: 'daily' | 'weekly', tz: string | nu
   return next;
 }
 function scheduleInfo(r: repo3.ScheduleRow): RoomScheduleInfo {
-  return { id: r.id, text: r.text, repeat: r.repeat, nextAt: r.next_at, by: r.created_by_nick, createdAt: r.created_at, kind: r.kind === 'banner' ? 'banner' : 'message' };
+  let poll: RoomScheduleInfo['poll'];
+  if (r.kind === 'poll') { try { const j = JSON.parse(r.poll ?? '{}'); poll = { options: Array.isArray(j.options) ? j.options.map(String) : [], durationMin: Number(j.durationMin) || null }; } catch { poll = { options: [], durationMin: null }; } }
+  return { id: r.id, text: r.text, repeat: r.repeat, nextAt: r.next_at, by: r.created_by_nick, createdAt: r.created_at, kind: r.kind === 'banner' ? 'banner' : r.kind === 'poll' ? 'poll' : 'message', ...(poll ? { poll } : {}) };
 }
 /** Only people who can manage the room see the schedule list. */
 function emitSchedules(room: Room) {
@@ -1811,7 +1813,40 @@ function emitSchedules(room: Room) {
   }
 }
 /** An announcement line in chat that is kept in history (scheduled posts, event reminders). */
+/** Post a poll line (top level or in a thread). Used by poll:create and scheduled polls. */
+function postPoll(room: Room, by: { fromId: string; nick: string; role?: Role; userId: number | null; profile: ReturnType<typeof profileOf>; key: string; ip: string | null; device: string | null },
+  rawQuestion: string, rawOptions: string[], durationMin: number | null, parentId: string | null): repo2.PollRow {
+  const question = maskWords(rawQuestion);
+  const options = rawOptions.map(maskWords);
+  const text = pollFallbackText(question);
+  const msg: ChatMessage = { kind: 'chat', id: randomUUID(), ts: Date.now(), fromId: by.fromId, from: by.nick, role: by.role, text, ...by.profile, mentions: [], ...(parentId ? { parentId } : {}) };
+  repo.insertMessage({ id: msg.id, room_id: room.id, ts: msg.ts, user_id: by.userId, nick: by.nick, role: by.role ?? 'user', text, ip: by.ip, device_id: by.device, parent_id: parentId });
+  const row: Omit<repo2.PollRow, 'closed_at'> = {
+    id: randomUUID(), room_id: room.id, message_id: msg.id, question, options: JSON.stringify(options), created_by_user: by.userId,
+    created_by_key: by.key, created_by_nick: by.nick, created_at: msg.ts,
+    closes_at: durationMin ? msg.ts + durationMin * POLL_MINUTE : null,
+  };
+  repo2.insertPoll(row);
+  const stored = repo2.pollById(row.id)!;
+  schedulePollClose(stored);
+  msg.poll = pollInfo(stored);
+  msg.reactions = [];
+  if (parentId) msg.replyCount = repo.replyCount(parentId);
+  io.to(`room:${room.id}`).emit('chat:message', msg);
+  if (parentId) io.to(`room:${room.id}`).emit('chat:replies', { messageId: parentId, replyCount: msg.replyCount ?? 0 });
+  if (!room.isPrivate) io.emit('room:activity', { roomId: room.id, mentions: [] });
+  return stored;
+}
 function postScheduled(room: Room, r: repo3.ScheduleRow) {
+  if (r.kind === 'poll') {
+    let spec: { options?: unknown; durationMin?: unknown } = {};
+    try { spec = JSON.parse(r.poll ?? '{}'); } catch { /* bad row: skip */ }
+    const v = validatePoll({ question: r.text, options: spec.options, durationMin: spec.durationMin ?? null });
+    if (!v.ok) { console.error('[schedule] bad poll row', r.id, v.error); return; }
+    postPoll(room, { fromId: '', nick: r.created_by_nick, role: 'user', userId: r.created_by_user, profile: r.created_by_user ? profileOf(repo.accountById(r.created_by_user) ?? null) : {},
+      key: r.created_by_user ? `u:${r.created_by_user}` : `n:${r.created_by_nick.toLowerCase()}`, ip: null, device: null }, v.value.question, v.value.options, v.value.durationMin ?? null, null);
+    return;
+  }
   if (r.kind === 'banner') {
     // scheduled banner: replaces the room's announcement banner at that time
     room.announcement = { text: r.text, at: Date.now(), by: r.created_by_nick };
@@ -4210,25 +4245,20 @@ function onConnection(socket: AppSocket) {
     const v = validatePoll(p);
     if (!v.ok) return ack({ ok: false, error: v.error, status: 400 });
     if (hasFilteredWord(v.value.question) || v.value.options.some(hasFilteredWord)) return ack({ ok: false, error: 'Please reword the poll.', status: 400 });
+    // batch C: a poll can live in a thread (reply to a top-level line)
+    let parentId: string | null = null;
+    const rawParent = (p as { parentId?: unknown })?.parentId;
+    if (rawParent) {
+      const parent = repo.messageById(String(rawParent));
+      if (!parent || parent.deleted || parent.room_id !== room.id || parent.parent_id || parent.burn_ttl != null) return ack({ ok: false, error: 'Thread not found', status: 404 });
+      parentId = parent.id;
+    }
     if (!pollRl.take()) return ack({ ok: false, error: 'Too many polls. Try again in a few minutes.', status: 429 });
-    const question = maskWords(v.value.question);
-    const options = v.value.options.map(maskWords);
-    const text = pollFallbackText(question);
-    const msg: ChatMessage = { kind: 'chat', id: randomUUID(), ts: Date.now(), fromId: socket.id, from: s.user!.nick, role: s.user!.role, text, ...profileOf(s.account), mentions: [] };
-    repo.insertMessage({ id: msg.id, room_id: room.id, ts: msg.ts, user_id: s.account?.id ?? null, nick: s.user!.nick, role: s.user!.role, text, ip: s.ip, device_id: s.deviceIds[0] ?? null });
-    const row: Omit<repo2.PollRow, 'closed_at'> = {
-      id: randomUUID(), room_id: room.id, message_id: msg.id, question, options: JSON.stringify(options), created_by_user: s.account?.id ?? null,
-      created_by_key: pollVoterKeys(s)[0] ?? repo.userKey(identOf(s)), created_by_nick: s.user!.nick, created_at: msg.ts,
-      closes_at: v.value.durationMin ? msg.ts + v.value.durationMin * POLL_MINUTE : null,
-    };
-    repo2.insertPoll(row);
-    const stored = repo2.pollById(row.id)!;
-    schedulePollClose(stored);
-    msg.poll = pollInfo(stored);
-    msg.reactions = [];
-    room.lastChatAt.set(socket.id, msg.ts);
-    io.to(`room:${room.id}`).emit('chat:message', msg);
-    if (!room.isPrivate) socket.broadcast.emit('room:activity', { roomId: room.id, mentions: [] });
+    const stored = postPoll(room, {
+      fromId: socket.id, nick: s.user!.nick, role: s.user!.role, userId: s.account?.id ?? null, profile: profileOf(s.account),
+      key: pollVoterKeys(s)[0] ?? repo.userKey(identOf(s)), ip: s.ip, device: s.deviceIds[0] ?? null,
+    }, v.value.question, v.value.options, v.value.durationMin ?? null, parentId);
+    room.lastChatAt.set(socket.id, Date.now());
     ack({ ok: true, poll: pollInfo(stored, s) });
   });
   socket.on('poll:vote', (p, ackRaw) => {
@@ -4384,6 +4414,14 @@ function onConnection(socket: AppSocket) {
     const { s, room } = c;
     const raw = typeof p?.text === 'string' ? p.text : '';
     if (raw.trim().length > SCHEDULE_TEXT_MAX) return ack({ ok: false, error: `Max ${SCHEDULE_TEXT_MAX} characters`, status: 400 });
+    const isPoll = p?.kind === 'poll';
+    let pollSpec: string | null = null;
+    if (isPoll) {
+      const v = validatePoll({ question: raw, options: (p as { poll?: { options?: unknown } }).poll?.options, durationMin: (p as { poll?: { durationMin?: unknown } }).poll?.durationMin ?? null });
+      if (!v.ok) return ack({ ok: false, error: v.error, status: 400 });
+      if (hasFilteredWord(v.value.question) || v.value.options.some(hasFilteredWord)) return ack({ ok: false, error: 'Please reword the poll.', status: 400 });
+      pollSpec = JSON.stringify({ options: v.value.options.map(maskWords), durationMin: v.value.durationMin ?? null });
+    }
     const text = maskWords(cleanText(raw, SCHEDULE_TEXT_MAX));
     if (!text) return ack({ ok: false, error: 'Write the message first', status: 400 });
     if (!isScheduleRepeat(p?.repeat)) return ack({ ok: false, error: 'Repeat must be once, daily or weekly', status: 400 });
@@ -4395,7 +4433,7 @@ function onConnection(socket: AppSocket) {
     if (!scheduleRl.take()) return ack({ ok: false, error: 'Too many scheduled messages. Try again later.', status: 429 });
     const tz = isValidTimeZone(p?.tz) ? p!.tz! : null;
     const row = {
-      kind: p?.kind === 'banner' ? 'banner' : 'message',
+      kind: p?.kind === 'banner' ? 'banner' : isPoll ? 'poll' : 'message', poll: pollSpec,
       id: randomUUID(), room_id: room.id, text, repeat: p!.repeat as 'once' | 'daily' | 'weekly', next_at: Math.round(at), tz,
       created_by_user: s.account?.id ?? null, created_by_nick: s.user!.nick, created_at: now,
     };

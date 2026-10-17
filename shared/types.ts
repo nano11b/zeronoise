@@ -106,7 +106,7 @@ export interface RoomSummary {
 
 /** batch 3 */
 export interface RoomAnnouncement { text: string; at: number; by: string }
-export interface RoomScheduleInfo { id: string; text: string; repeat: 'once' | 'daily' | 'weekly'; nextAt: number; by: string; createdAt: number; kind?: 'message' | 'banner' }
+export interface RoomScheduleInfo { id: string; text: string; repeat: 'once' | 'daily' | 'weekly'; nextAt: number; by: string; createdAt: number; kind?: 'message' | 'banner' | 'poll'; poll?: { options: string[]; durationMin: number | null } }
 export interface RoomEmote { id: string; name: string; url: string; animated: boolean }
 export interface RadioNowPlaying {
   station: string; title: string; artist: string; album: string;
@@ -371,7 +371,7 @@ export interface ClientToServer {
   /** owner, room mods and site staff: mute someone in this room's chat */
   'room:mute': (p: { userId: string; minutes: number }, ack: Ack) => void;
   'chat:preview-remove': (p: { messageId: string }, ack: Ack) => void;
-  'poll:create': (p: { question: string; options: string[]; durationMin?: number | null }, ack: Ack<{ poll: PollInfo }>) => void;
+  'poll:create': (p: { question: string; options: string[]; durationMin?: number | null; parentId?: string }, ack: Ack<{ poll: PollInfo }>) => void;
   'poll:vote': (p: { pollId: string; option: number }, ack: Ack<{ poll: PollInfo }>) => void;
   'poll:close': (p: { pollId: string }, ack: Ack<{ poll: PollInfo }>) => void;
   // ---- batch 3 ----
@@ -382,7 +382,7 @@ export interface ClientToServer {
   'room:theme:set': (p: { accent?: string | null; welcome?: string | null }, ack: Ack<{ theme: import('./theme').RoomThemeInfo }>) => void;
   'announce:set': (p: { text: string }, ack: Ack<{ announcement: RoomAnnouncement | null }>) => void;
   'schedule:list': (ack: Ack<{ schedules: RoomScheduleInfo[] }>) => void;
-  'schedule:create': (p: { text: string; at: number; repeat: string; tz?: string; kind?: 'message' | 'banner' }, ack: Ack<{ schedule: RoomScheduleInfo }>) => void;
+  'schedule:create': (p: { text: string; at: number; repeat: string; tz?: string; kind?: 'message' | 'banner' | 'poll'; poll?: { options: string[]; durationMin?: number | null } }, ack: Ack<{ schedule: RoomScheduleInfo }>) => void;
   /** batch B: room word / link filters enforced by the moderator bot */
   'room:filters:get': (ack: Ack<{ filters: RoomFilters; bot: string }>) => void;
   'room:filters:set': (p: { words: string[] | string; links: string; allow: string[] | string }, ack: Ack<{ filters: RoomFilters }>) => void;
