@@ -9,6 +9,7 @@ import { LocalSpeakingMonitor, RemoteSpeakingMonitor } from '../speaking';
 import { LevelBadge } from './Level';
 import { call, getIceServers, socket } from '../socket';
 import { useDraftSync } from '../drafts';
+import { enqueue, newClientId, useOutbox } from '../outbox';
 import { fmtTime, unreadBadge } from '../util';
 import { readRoomLocally } from '../mentions';
 import { storedDeviceId } from '../api';
@@ -1119,6 +1120,18 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   };
   const [burnOn, setBurnOn] = useState(false);
   const [burnTtl, setBurnTtl] = useState<BurnTtl>(BURN_DEFAULT_TTL);
+  const outbox = useOutbox(initial.id);
+  /** batch E5: plain lines go through the outbox when offline (or behind lines still waiting), else straight out with a clientId */
+  const sendPlain = async (body: string, parentId?: string) => {
+    if (!socket.connected || outbox.items.some((i) => i.state !== 'failed')) { enqueue(initial.id, body, parentId); return; }
+    const cid = newClientId();
+    try { await call((ack) => socket.emit('chat:send', { text: body, clientId: cid, ...(parentId ? { parentId } : {}) }, ack)); }
+    catch (err) {
+      // lost connection mid-send: keep it; the server drops the copy if the first one did arrive
+      if (!socket.connected || /did not respond/i.test((err as Error).message)) { enqueue(initial.id, body, parentId, cid); return; }
+      throw err;
+    }
+  };
   // batch E4: drafts follow the account across devices (not while editing an old message)
   useDraftSync(initial.id, '', editingId ? '' : text, (t) => { if (!editingId) setText(t); }, !!account, !editingId);
   useDraftSync(initial.id, thread ? thread.parent.id : null, threadText, setThreadText, !!account, !!thread);
@@ -1164,7 +1177,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
     if (fx) { if (await playFx(fx)) { setText(''); noteTyping(false); } return; }
     try {
       if (editingId) await call((ack) => socket.emit('chat:edit', { messageId: editingId, text: t }, ack));
-      else await call((ack) => socket.emit('chat:send', burnOn ? { text: t, burnTtl } : { text: t }, ack));
+      else if (burnOn) await call((ack) => socket.emit('chat:send', { text: t, burnTtl }, ack));
+      else await sendPlain(t);
       if (!editingId) setBurnOn(false);
       setText('');
       setEditingId(null);
@@ -1184,7 +1198,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
       return;
     }
     try {
-      await call((ack) => socket.emit('chat:send', threadBurnOn ? { text: body, parentId: thread.parent.id, burnTtl: threadBurnTtl } : { text: body, parentId: thread.parent.id }, ack));
+      if (threadBurnOn) await call((ack) => socket.emit('chat:send', { text: body, parentId: thread.parent.id, burnTtl: threadBurnTtl }, ack));
+      else await sendPlain(body, thread.parent.id);
       setThreadBurnOn(false);
       setThreadText('');
     } catch (err) { toast((err as Error).message, 'error'); }
@@ -2104,6 +2119,15 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                   </div>
                 );
               })}
+              {outbox.items.map((o) => (
+                <div key={o.cid} className={`msg mine outbox-item ${o.state}`} data-testid="outbox-item" data-state={o.state}>
+                  <span className="nick">{me.nick}</span> <span className="text">{o.text}</span>{o.parentId ? <span className="muted small"> · in a thread</span> : null}
+                  <span className="outbox-status small" role="status">
+                    {o.state === 'failed' ? <>Not sent: {o.error} <button type="button" className="btn ghost small-btn" data-action="outbox-retry" onClick={() => outbox.retry(o.cid)}>Retry</button> <button type="button" className="btn ghost small-btn" data-action="outbox-discard" onClick={() => outbox.discard(o.cid)}>Discard</button></>
+                      : socket.connected ? <>⏳ Sending…</> : <>⏳ Waiting for connection</>}
+                  </span>
+                </div>
+              ))}
             </div>
             {typers.filter((tp) => !isIgnored(tp.nick)).length > 0 && (
               <div className="typing-line" data-typing="1">{typers.filter((tp) => !isIgnored(tp.nick)).map((tp) => tp.nick).join(', ')} {typers.filter((tp) => !isIgnored(tp.nick)).length === 1 ? 'is' : 'are'} typing…</div>

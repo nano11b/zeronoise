@@ -2397,3 +2397,8 @@ html[data-ui-theme="dark-orange"] {
 .secret-key h3 { margin: 0 0 4px; font-size: .95rem; }
 .secret-key pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
 .banner.warn { background: #3a2c00; color: #ffe08a; }
+/* batch E5: offline outbox */
+.outbox-item { opacity: .75; border-left: 3px dashed var(--accent, #6cf); padding-left: 8px; margin: 4px 0; }
+.outbox-item.failed { opacity: 1; border-left-color: #e55; }
+.outbox-status { display: block; color: var(--muted, #9aa); }
+.outbox-status .btn { min-height: 40px; }

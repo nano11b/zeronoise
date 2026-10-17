@@ -175,6 +175,14 @@ const sessions = new Map<string, Session>();
 const nicksInUse = new Map<string, string>(); // lowercase nick -> socket id
 const botUsers = new Map<string, UserInfo>();
 const botRooms = new Map<number, Set<string>>();
+/** batch E5: clientId -> posted message, so a resent outbox line is not posted twice (10 min, at most 20k) */
+const sentClientIds = new Map<string, { id: string; at: number }>();
+function rememberClientId(key: string, id: string) {
+  const now = Date.now();
+  sentClientIds.set(key, { id, at: now });
+  if (sentClientIds.size > 20_000) for (const [k, v] of sentClientIds) { if (now - v.at > 600_000 || sentClientIds.size > 15_000) sentClientIds.delete(k); else break; }
+}
+setInterval(() => { const now = Date.now(); for (const [k, v] of sentClientIds) { if (now - v.at > 600_000) sentClientIds.delete(k); else break; } }, 60_000).unref();
 const botPostRl = new KeyedLimiter(LIMITS.chatBurst, LIMITS.chatWindowMs);
 /** batch C: browse page queries per IP */
 const discoverRl = new KeyedLimiter(30, 10_000);
@@ -2968,6 +2976,9 @@ function onConnection(socket: AppSocket) {
     const ack = safeAck(ackRaw);
     const s = session();
     if (!s.user || !s.roomId) return ack({ ok: false, error: 'Not in a room' });
+    // batch E5: the offline outbox may resend a line whose ack was lost; same clientId = already posted
+    const clientId = typeof p?.clientId === 'string' && /^[\w-]{8,64}$/.test(p.clientId) ? `${identOf(s)}|${p.clientId}` : null;
+    if (clientId) { const seen = sentClientIds.get(clientId); if (seen) return ack({ ok: true, id: seen.id, duplicate: true }); }
     if (limited(chatRl, ipChat)) return ack({ ok: false, error: 'Slow down' });
     {
       // "/confetti" etc. play an effect and are never posted as chat (thread replies included)
@@ -3038,7 +3049,8 @@ function onConnection(socket: AppSocket) {
     if (!room.isPrivate) socket.broadcast.emit('room:activity', { roomId: room.id, mentions: msg.mentions });
     if (parentId) io.to(`room:${room.id}`).emit('chat:replies', { messageId: parentId, replyCount: msg.replyCount ?? 0 });
     socket.to(`room:${room.id}`).emit('chat:typing', { id: socket.id, nick: s.user.nick, typing: false });
-    ack({ ok: true });
+    if (clientId) rememberClientId(clientId, msg.id);
+    ack({ ok: true, id: msg.id });
     if (!burnTtl) {
       queuePreview(room.id, msg.id, text);
       // @mentions for people who are away: content only when the room is open to anyone

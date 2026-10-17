@@ -196,6 +196,15 @@ try {
     ok(((await emit(s2, 'draft:get', { roomId: room })).drafts || []).length === 0, 'E4: clearing (sending) removes the draft everywhere');
     s2.disconnect();
   }
+  // E5: dedup by clientId
+  {
+    const got = []; const on = (m) => { if (m.kind === 'chat' && /^outbox-dedup/.test(m.text)) got.push(m.id); }; other.s.on('chat:message', on);
+    await emit(other.s, 'room:join', { roomId: room });
+    const a1 = await emit(owner.s, 'chat:send', { text: 'outbox-dedup once', clientId: 'cid-dedup-0001' });
+    const a2 = await emit(owner.s, 'chat:send', { text: 'outbox-dedup once', clientId: 'cid-dedup-0001' });
+    await sleep(500); other.s.off('chat:message', on);
+    ok(a1.ok && a2.ok && a2.duplicate && a2.id === a1.id && got.length === 1, 'E5: a resent line with the same clientId is posted once', JSON.stringify({ a1, a2, got }));
+  }
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -333,6 +342,30 @@ try {
       ok(await C.page.$eval('input[aria-label="Chat message"]', (i) => i.value) === '', `${width}: once sent, the draft is gone on the first device too`);
       await C.ctx.close();
       await fresh0(other);
+    }
+    // E5: offline outbox: queue while offline, pending shown, in order on reconnect
+    {
+      const o = await pageFor(owner, width);
+      await enterRoom(o.page, room);
+      const seen = []; const on = (m) => { if (m.kind === 'chat' && m.text.startsWith(`queued ${width}`)) seen.push(m.text); };
+      other.s.on('chat:message', on); await emit(other.s, 'room:join', { roomId: room });
+      const cdp = await o.page.createCDPSession();
+      await cdp.send('Network.enable');
+      await cdp.send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+      await o.page.evaluate(() => window.dispatchEvent(new Event('offline')));
+      await sleep(2500);
+      for (const n of [1, 2, 3]) { await o.page.type('input[aria-label="Chat message"]', `queued ${width} #${n}`); await o.page.keyboard.press('Enter'); await sleep(250); }
+      const pend = await o.page.$$eval('[data-testid="outbox-item"]', (els) => els.map((e) => e.dataset.state));
+      ok(pend.length === 3 && pend.every((x) => x === 'pending' || x === 'sending'), `${width}: offline lines wait in the outbox with a pending marker`, JSON.stringify(pend));
+      await o.page.$eval('[data-testid="outbox-item"]', (e) => e.scrollIntoView({ block: 'center' })).catch(() => null);
+      await shot(o.page, `e5-outbox-pending-${width}`);
+      await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+      await o.page.evaluate(() => window.dispatchEvent(new Event('online')));
+      const gone = await o.page.waitForFunction(() => document.querySelectorAll('[data-testid="outbox-item"]').length === 0, { timeout: 25000 }).catch(() => null);
+      await sleep(800); other.s.off('chat:message', on);
+      ok(!!gone && seen.join('|') === [1, 2, 3].map((n) => `queued ${width} #${n}`).join('|'), `${width}: on reconnect they go out once each, in order`, JSON.stringify({ gone: !!gone, seen }));
+      await o.ctx.close();
+      await fresh(owner); await emit(owner.s, 'room:join', { roomId: room });
     }
     // @@UI-END
   }

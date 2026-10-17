@@ -260,7 +260,7 @@ export interface ClientToServer {
   'room:ban': (p: { userId: string; minutes: number | null; reason?: string }, ack: Ack) => void;
   'room:topic': (p: { topic: string }, ack: Ack) => void;
   'room:delete': (ack: Ack) => void;
-  'chat:send': (p: { text: string; parentId?: string; burnTtl?: number }, ack: Ack) => void;
+  'chat:send': (p: { text: string; parentId?: string; burnTtl?: number; clientId?: string }, ack: Ack<{ id?: string; duplicate?: boolean }>) => void;
   /** Reveal a burn message's content (records first view; refused after ttl). */
   'chat:reveal': (p: { messageId: string }, ack: Ack<{ text: string; ttlSec: number; firstAt: number; expiresAt: number; serverNow: number }>) => void;
   /** Post a voice note uploaded via POST /api/rooms/:roomId/voice. */
