@@ -614,10 +614,10 @@ function pinsOf(roomId: string, viewerKey: string): ChatMessage[] {
 /** batch H7: drop empty defaults from history lines (the client treats missing as empty); ~20-30% smaller join payloads */
 function compactMsg(m: ChatMessage): ChatMessage {
   const o = { ...m } as Record<string, unknown>;
-  for (const k of ['reactions', 'mentions']) if (Array.isArray(o[k]) && (o[k] as unknown[]).length === 0) delete o[k];
+  // Only fields the client treats as optional (null/false == missing). reactions, mentions and fromId stay: the
+  // client reads them directly (stripping fromId broke the name button / profile card on history messages).
   for (const k of ['chatColor', 'chatEffect']) if (o[k] == null) delete o[k];
   if (o.hasAvatar === false) delete o.hasAvatar;
-  if (o.fromId === '') delete o.fromId;
   return o as unknown as ChatMessage;
 }
 function history(room: Room, viewerKey: string, viewer?: Session): ChatMessage[] {

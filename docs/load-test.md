@@ -8,7 +8,7 @@ It starts a local server with a fresh data dir and `SQL_PROFILE` on. It register
 
 1. **Message search blocked the server for up to 3.4 s.** SQLite walked every message in the room and ran the FTS match once per row. A query with no hits ("coffee game") was the worst case. Every request queued behind it, which is why `/api/me`, `/api/status` and the admin pages all showed the same 3.4 s. Fix: `CROSS JOIN` makes the FTS index drive the query. The worst case went from 3471 ms to 0.4 ms.
 2. **Room join built history one line at a time.** For each of the 100 lines it looked up the user, link preview, poll and announcement separately: about 15,000 small queries for 200 joins. Fix: one batched query per kind for each history page.
-3. **Join payload.** Empty defaults (`reactions: []`, `mentions: []`, `chatColor: null`, `hasAvatar: false`, `fromId: ''`) are dropped from history lines; the client already treats a missing field as empty. Result: 26 KB → 17 KB per join.
+3. **Join payload.** Empty optional fields (`chatColor: null`, `chatEffect: null`, `hasAvatar: false`) are dropped from history lines, plus the batched lookups. Result: 26 KB → 21 KB per join. (A first version also dropped `reactions`, `mentions` and `fromId` for 17 KB, but the client reads those directly and the name button broke on history lines — caught by ui-check in H9 and reverted.)
 4. **Admin action log** is now paged: 100 per page with a "Load older" button, keyed on the row id. Before, it sent 200 rows on every refresh.
 5. **Indexes:** `mutes(expires_at)`, which is checked on every chat line, and `room_visitors(day)`, used for site stats.
 
@@ -35,7 +35,7 @@ It starts a local server with a fresh data dir and `SQL_PROFILE` on. It register
 
 | payload | before p50 / max (KB) | after p50 / max (KB) |
 |---|---|---|
-| room:join payload KB | 26.1 / 31.6 | 16.9 / 22.4 |
+| room:join payload KB | 26.1 / 31.6 | 20.9 / 26.4 |
 | rooms:list KB | 2.5 / 2.5 | 2.5 / 2.5 |
 | admin users KB | 13.2 / 13.2 | 13.2 / 13.2 |
 | admin log KB | 25.4 / 25.4 | 12.9 / 12.9 |
