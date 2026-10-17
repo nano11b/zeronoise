@@ -2447,3 +2447,7 @@ html[data-ui-theme="dark-orange"] {
 .ops-alerts li { overflow-wrap: anywhere; }
 .admin-ops code { overflow-wrap: anywhere; }
 .admin-ops .btn { min-height: 40px; }
+/* batch G1 translate */
+.msg-translation { margin-top: 4px; padding: 4px 8px; border-left: 3px solid var(--accent, #6aa1ff); background: rgba(127,127,127,.08); border-radius: 4px; font-size: .95em; overflow-wrap: anywhere; }
+.msg-translation.err { border-left-color: #d98b2b; }
+.msg-translation .linklike { background: none; border: 0; color: var(--accent, #6aa1ff); text-decoration: underline; cursor: pointer; padding: 0 6px; min-height: 40px; }

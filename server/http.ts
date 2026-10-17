@@ -30,6 +30,7 @@ import * as repo from './repo';
 import { backupHealth, backupPath, backupRunning, backupStatus, listBackups, runBackup } from './backup';
 import * as recs from './recordings';
 import * as alerts from './alerts';
+import { getSetting, setSetting } from './settings';
 import * as restore from './restoreCheck';
 import { live, type BotIdentity, type BotModAction, type BotModBody } from './live';
 import { consumeNativeHandoff, issueNativeHandoff } from './nativeHandoff';
@@ -459,6 +460,25 @@ export function createApp(roomList: () => unknown) {
     if (!a) return fail(res, 401, 'Sign in first');
     if (!uploadLimiter.take(`an:${a.id}`)) return fail(res, 429, 'Slow down');
     res.json({ ok: true, rooms: repo8.ownedRoomIds(a.id).map((r) => { const x = repo8.roomAnalytics(r.id, Date.now(), 14).totals; return { id: r.id, name: r.name, active7: x.active7, growthPct: x.growthPct, new7: x.new7, peak: x.peak30, members: x.members }; }) });
+  });
+  // batch G1: translation through the admin's LibreTranslate server (only when the browser can't translate itself)
+  const translateLimiter = new KeyedLimiter(30, 60_000);
+  app.get('/api/translate/config', (_req, res) => res.json({ ok: true, server: !!getSetting('libretranslate_url') }));
+  app.post('/api/translate', async (req, res) => {
+    const base = getSetting('libretranslate_url');
+    if (!base) return fail(res, 404, 'No translation server is set up');
+    if (!translateLimiter.take(clientIp(req))) return fail(res, 429, 'Too many translations. Try again in a minute.');
+    const text = typeof req.body?.text === 'string' ? req.body.text.slice(0, 2000) : '';
+    const target = typeof req.body?.target === 'string' && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(req.body.target) ? req.body.target.split('-')[0] : '';
+    if (!text.trim() || !target) return fail(res, 400, 'Nothing to translate');
+    const key = getSetting('libretranslate_key');
+    try {
+      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 8000);
+      const r = await fetch(`${base}/translate`, { method: 'POST', signal: ac.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ q: text, source: 'auto', target, format: 'text', ...(key ? { api_key: key } : {}) }) }).finally(() => clearTimeout(t));
+      const j = await r.json().catch(() => null) as { translatedText?: string; detectedLanguage?: { language?: string } } | null;
+      if (!r.ok || typeof j?.translatedText !== 'string') return fail(res, 502, 'The translation server did not answer');
+      res.json({ ok: true, text: j.translatedText.slice(0, 4000), from: j.detectedLanguage?.language ?? null });
+    } catch { return fail(res, 502, 'The translation server did not answer'); }
   });
   app.get('/api/voice/:id', (req, res) => {
     const row = repo.voiceNoteById(String(req.params.id));
@@ -2016,6 +2036,20 @@ export function createApp(roomList: () => unknown) {
   admin.use('/backups', (req, res, next) => {
     if (actor(req).role !== 'admin') return fail(res, 403, 'Admins only');
     next();
+  });
+  // ---------- batch G1: optional self-hosted LibreTranslate (admin-set URL) ----------
+  admin.get('/settings/translate', (req, res) => {
+    if (actor(req).role !== 'admin') return fail(res, 403, 'Admins only');
+    res.json({ ok: true, url: getSetting('libretranslate_url') || '', hasKey: !!getSetting('libretranslate_key') });
+  });
+  admin.post('/settings/translate', (req, res) => {
+    if (actor(req).role !== 'admin') return fail(res, 403, 'Admins only');
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim().replace(/\/+$/, '') : '';
+    if (url && (!/^https?:\/\/[^\s/]+(\/[^\s]*)?$/i.test(url) || url.length > 300)) return fail(res, 400, 'Use a full http(s) URL, e.g. http://10.0.10.60:5000');
+    setSetting('libretranslate_url', url, actor(req).username);
+    if (typeof req.body?.key === 'string') setSetting('libretranslate_key', req.body.key.trim().slice(0, 200), actor(req).username);
+    repo.logAction(actor(req).username, actor(req).id, 'settings-translate', null, null, url ? 'set' : 'cleared');
+    res.json({ ok: true, url, hasKey: !!getSetting('libretranslate_key') });
   });
   // ---------- batch F9/F10: alerts and restore checks ----------
   let lastOpsRun = 0; let lastTestAlert = 0;

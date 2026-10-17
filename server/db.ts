@@ -838,6 +838,46 @@ const MIGRATIONS: string[] = [
     detail TEXT NOT NULL DEFAULT '{}'
   )
   `,
+  // 45: batch G/H (clips, room templates, custom room roles, whisper receipts, onboarding)
+  `
+  CREATE TABLE IF NOT EXISTS room_clips (
+    id TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    recording_id TEXT NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    bytes INTEGER NOT NULL,
+    mime TEXT NOT NULL,
+    message_id TEXT,
+    expires_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'live'
+  );
+  CREATE INDEX IF NOT EXISTS room_clips_rec ON room_clips(recording_id);
+  ALTER TABLE rooms ADD COLUMN template TEXT;
+  CREATE TABLE IF NOT EXISTS room_roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    color TEXT,
+    perms TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    archived_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS room_roles_room ON room_roles(room_id);
+  CREATE TABLE IF NOT EXISTS room_role_members (
+    room_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    assigned_by TEXT,
+    assigned_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, user_id)
+  );
+  ALTER TABLE users ADD COLUMN whisper_receipts INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE users ADD COLUMN onboarded_at INTEGER;
+  ALTER TABLE users ADD COLUMN interests TEXT
+  `,
 ];
 
 /**

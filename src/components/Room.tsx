@@ -1,3 +1,5 @@
+import { translateText, TranslateUnavailable } from '../translate';
+import { TranslationLine, type TranslationState } from './TranslationLine';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTileFit } from '../useTileFit';
 import { APP_NAME, LIMITS } from '../../shared/config';
@@ -447,6 +449,18 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const modIds = useMemo(() => new Set(mods.map((m) => m.accountId)), [mods]);
   const isRoomMod = me.accountId != null && modIds.has(me.accountId);
   /** owner, site staff, or an appointed room mod: kick / room-ban / mute here, pin, delete lines, manage events */
+  // batch G1: tap-to-translate (browser on-device first, then the admin's LibreTranslate, else a clear note)
+  const [translations, setTranslations] = useState<Record<string, TranslationState>>({});
+  const translateMsg = async (m: { id: string; text: string }) => {
+    if (translations[m.id]) { setTranslations((p) => { const n = { ...p }; delete n[m.id]; return n; }); return; }
+    setTranslations((p) => ({ ...p, [m.id]: { busy: true } }));
+    try {
+      const r = await translateText(m.text);
+      setTranslations((p) => ({ ...p, [m.id]: { text: r.text, from: r.from, via: r.via, same: r.same } }));
+    } catch (e) {
+      setTranslations((p) => ({ ...p, [m.id]: { error: e instanceof TranslateUnavailable ? e.message : (e as Error).message || 'Translation failed' } }));
+    }
+  };
   const canRoomManage = canManageRoom || isRoomMod;
   const [modsCanInvite, setModsCanInvite] = useState(!!initial.modsCanInvite);
   /** owner / staff, or a room mod when the owner allows it; never in private calls */
@@ -2071,7 +2085,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     </span>
                     {m.hidden && !canRoomManage ? <span className="msg-hidden" data-hidden="1">Hidden pending review</span> : <>
                     {m.hidden && <span className="tag tag-warn msg-hidden-tag" data-hidden="1" title="Auto-hidden after several reports; others see a collapsed line">Hidden pending review</span>}
-                    {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <VoicePlayer voice={m.voice} /> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <ChatText text={m.text} className="text" />}
+                    {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <VoicePlayer voice={m.voice} /> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <><ChatText text={m.text} className="text" />{translations[m.id] && <TranslationLine t={translations[m.id]} onHide={() => setTranslations((p) => { const n = { ...p }; delete n[m.id]; return n; })} />}</>}
                     </>}
                     {m.editedAt ? editedMark(m) : null}
                     {m.preview && account?.linkPreviews !== false && !m.burn && !(m.hidden && !canRoomManage) && <LinkPreviewCard messageId={m.id} preview={m.preview} canRemove={mineMsg(m)} onRemove={() => removePreview(m)} />}
@@ -2112,6 +2126,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                       )}
                     </span>}
                     <span className="msg-actions">
+                      {!m.burn && !m.voice && !m.poll && m.text && m.from !== me.nick && <button className="icon-btn" title="Translate" aria-label="Translate message" onClick={() => void translateMsg(m)} data-action="translate-msg">🌐</button>}
                       {!m.burn && <button className="icon-btn" title="Reply in thread" aria-label="Reply in thread" onClick={() => openThread(m)} data-action="reply-thread">↩</button>}
                       {canEditMsg(m) && <button className="icon-btn" title="Edit message (for 10 minutes after sending)" aria-label="Edit message" onClick={() => startEdit(m)} data-action="edit-msg">✎</button>}
                       {mineMsg(m) && <button className="icon-btn" title="Delete message" aria-label="Delete your message" onClick={() => deleteOwn(m)} data-action="delete-own">🗑</button>}
@@ -2210,7 +2225,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                           )}
                         </span>
                       )}{' '}
-                      {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <VoicePlayer voice={m.voice} /> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <ChatText text={m.text} className="text" />}
+                      {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <VoicePlayer voice={m.voice} /> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <><ChatText text={m.text} className="text" />{translations[m.id] && <TranslationLine t={translations[m.id]} onHide={() => setTranslations((p) => { const n = { ...p }; delete n[m.id]; return n; })} />}</>}
                       {m.kind === 'chat' && m.editedAt ? editedMark(m) : null}
                       {m.preview && !m.burn && <LinkPreviewCard messageId={m.id} preview={m.preview} canRemove={mineMsg(m)} onRemove={() => removePreview(m)} />}
                     </div>
