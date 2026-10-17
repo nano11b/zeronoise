@@ -6,6 +6,7 @@ import { WHISPER_MAX_MEMBERS } from '../../shared/whisper';
 import { Mesh, unlockAudio } from '../rtc';
 import { applyAudioOutputToDocument, audioConstraints, loadStoredDevices } from '../mediaDevices';
 import { LocalSpeakingMonitor, RemoteSpeakingMonitor } from '../speaking';
+import { LevelBadge } from './Level';
 import { call, getIceServers, socket } from '../socket';
 import { fmtTime, unreadBadge } from '../util';
 import { readRoomLocally } from '../mentions';
@@ -841,6 +842,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
       toast(by === me.nick ? 'You left the stage.' : `${by} moved you to the audience. Raise your hand to ask to speak.`);
     };
     socket.on('stage:demoted', onDemoted);
+    const onLevel = ({ level }: { level: number }) => toast(`⭐ Level up! You are now level ${level}.`);
+    socket.on('xp:levelup', onLevel);
     const onVoice = ({ on }: { on: boolean }) => setVoiceRoom(on);
     socket.on('room:voice', onVoice);
     const onForce = async () => {
@@ -938,6 +941,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
       socket.off('rtc:signal', onSignal);
       socket.off('mod:camoff', onCamOff);
       socket.off('stage:demoted', onDemoted);
+      socket.off('xp:levelup', onLevel);
       socket.off('room:voice', onVoice);
       socket.off('media:force', onForce);
       socket.off('mod:muted', onMuted);
@@ -1729,7 +1733,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                 <button className="user-row" onClick={(e) => { e.stopPropagation(); if (u.id !== me.id) setMenuFor(menuFor === u.id ? null : u.id); }} data-nick={u.nick}>
                   <UserAvatar nick={u.nick} accountId={u.accountId} chatColor={u.chatColor} hasAvatar={u.hasAvatar} size={28} />
                   <span className="user-id">
-                    <NickLabel nick={u.nick} chatColor={u.chatColor} chatEffect={u.chatEffect} className="nick" />
+                    <NickLabel nick={u.nick} chatColor={u.chatColor} chatEffect={u.chatEffect} className="nick" /><LevelBadge level={u.level} />
                     <span className="user-badges">
                       {!u.id.startsWith('bot:') && <BadgeIcons ids={u.badges} />}
                       {initial.ownerNick === u.nick && <span className="tag owner" title="Room owner">owner</span>}
@@ -2015,11 +2019,11 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     <div className="msg-body">
                     <span className="msg-meta">
                     {m.from.toLowerCase() === me.nick.toLowerCase() ? (
-                      <NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" />
+                      <><NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} /></>
                     ) : (
                       <span className="name-block">
                         <button type="button" className="name-btn" data-action="user-name" onClick={(e) => { e.stopPropagation(); if (m.accountId != null && !m.fromId.startsWith('bot:')) openProfile(m.from); else setBlockFor(blockFor === m.id ? null : m.id); }}>
-                          <NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" />
+                          <NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} />
                         </button>
                         {blockFor === m.id && (
                           <span className="menu name-menu" onClick={(e) => e.stopPropagation()}>
@@ -2151,11 +2155,11 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     <div key={m.id} className={`msg${jumpHit === m.id ? ' jump-hit' : ''}`} data-msg={m.id}>
                       <span className="ts">{fmtTime(m.ts)}</span>{' '}
                       {m.from.toLowerCase() === me.nick.toLowerCase() ? (
-                        <NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" />
+                        <><NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} /></>
                       ) : (
                         <span className="name-block">
                           <button type="button" className="name-btn" data-action="user-name" onClick={(e) => { e.stopPropagation(); if (m.accountId != null && !m.fromId.startsWith('bot:')) openProfile(m.from); else setBlockFor(blockFor === `t:${m.id}` ? null : `t:${m.id}`); }}>
-                            <NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" />
+                            <NickLabel nick={m.from} chatColor={m.chatColor} chatEffect={m.chatEffect} className="from" /><LevelBadge level={m.level} />
                           </button>
                           {blockFor === `t:${m.id}` && (
                             <span className="menu name-menu" onClick={(e) => e.stopPropagation()}>

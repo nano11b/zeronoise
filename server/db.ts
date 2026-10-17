@@ -720,6 +720,15 @@ const MIGRATIONS: string[] = [
   ALTER TABLE users ADD COLUMN now_playing TEXT;
   ALTER TABLE users ADD COLUMN now_playing_at INTEGER
   `,
+  // 42: batch D - XP and levels.
+  `
+  ALTER TABLE users ADD COLUMN xp INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN xp_hidden INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN xp_day INTEGER;
+  ALTER TABLE users ADD COLUMN xp_today INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE users ADD COLUMN xp_last_at INTEGER;
+  ALTER TABLE users ADD COLUMN xp_last_key TEXT
+  `,
 ];
 
 /**

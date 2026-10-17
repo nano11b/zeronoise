@@ -24,6 +24,8 @@ interface UserRow {
   tiktok_open_id: string | null;
   created_at: number; last_login_at: number | null; chat_color: string | null; chat_effect: string | null; has_avatar: number;
   email: string | null; email_lower: string | null; email_verified_at: number | null;
+  /** batch D (migration 42) */
+  xp?: number; xp_hidden?: number;
 }
 /** Saved camera quality preset, or null. */
 export function videoQualityOf(id: number): string | null {

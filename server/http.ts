@@ -61,6 +61,8 @@ import { deleteEmoteFile, emoteFileExists, emotePath, newEmoteId, processEmote, 
 import { ART_ID_RE, radioArt } from './radio';
 import * as invites from './invites';
 import * as repo7 from './repo7';
+import * as repo8 from './repo8';
+import { levelProgress, XP_COOLDOWN_MS, XP_DAILY_CAP, XP_PER_MESSAGE } from '../shared/xp';
 import { BANNER_ID_RE, bannerPath, bannerUrl, newBannerId, processBanner, retireBanner, writeBanner } from './banners';
 import { BANNER_MAX_BYTES, checkProfileLinks, cleanNowPlaying, NOW_PLAYING_MAX } from '../shared/profile2';
 import { INVITE_CODE_RE, INVITE_EXPIRY, INVITE_MAX_USES, INVITE_PATH_RE, INVITES_PER_ROOM, type InviteExpiry, type InvitePublic } from '../shared/invites';
@@ -1789,6 +1791,7 @@ export function createApp(roomList: () => unknown) {
           const p2 = repo7.profile2Of(row.id);
           return {
             bannerUrl: p2.bannerId ? bannerUrl(p2.bannerId) : null, links: p2.links, nowPlaying: p2.nowPlaying,
+            level: repo8.shownLevel(repo.userById(row.id)) ?? null,
             mutualFriends: row.id === viewer.id ? [] : repo7.mutualFriends(viewer.id, row.id),
             mutualRooms: row.id === viewer.id ? [] : repo7.mutualRooms(viewer.id, row.id),
           };
@@ -1873,6 +1876,24 @@ export function createApp(roomList: () => unknown) {
     const text = cleanNowPlaying(raw ?? '');
     repo7.setNowPlaying(a.id, text ? maskWords(text) : null);
     res.json({ ok: true, nowPlaying: text ? maskWords(text) : null });
+  });
+  // ---- XP and levels (batch D) ----
+  app.get('/api/me/xp', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    const x = repo8.xpOf(a.id);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, xp: x.xp, ...levelProgress(x.xp), hidden: x.hidden, today: x.today, dailyCap: XP_DAILY_CAP, perMessage: XP_PER_MESSAGE, cooldownSec: Math.round(Math.max(0, Number(process.env.XP_COOLDOWN_MS ?? XP_COOLDOWN_MS)) / 1000) });
+  });
+  app.patch('/api/me/xp', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const hidden = (req.body as { hidden?: unknown })?.hidden;
+    if (typeof hidden !== 'boolean') return fail(res, 400, 'hidden must be true or false');
+    repo8.setXpHidden(a.id, hidden);
+    live.levelChanged(a.id);
+    res.json({ ok: true, hidden });
   });
   app.patch('/api/me/bio', (req, res) => {
     const a = reqAccount(req);

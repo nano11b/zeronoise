@@ -6,6 +6,7 @@ import { renderBioMarkdown } from '../markdown';
 import { call, socket } from '../socket';
 import { BadgeCard } from './Badges';
 import { Profile2Banner, Profile2Blocks } from './Profile2';
+import { LevelBadge } from './Level';
 import { RoleTag } from './RoleTag';
 import { NickLabel, UserAvatar } from './UserAvatar';
 
@@ -57,6 +58,7 @@ export function ProfileCard({ nick, onClose, toast, isIgnored, toggleIgnore, ope
                 <NickLabel nick={p.username} chatColor={p.chatColor} chatEffect={p.chatEffect} className="pc-name" />
                 <span className="pc-tags">
                   <RoleTag role={p.role} />
+                  <LevelBadge level={p.level} />
                   {roomMod && <span className="tag room-mod" title="Room moderator">mod</span>}
                   <span className={`pc-online${p.online ? ' on' : ''}`}>{p.online ? 'online' : 'offline'}</span>
                 </span>

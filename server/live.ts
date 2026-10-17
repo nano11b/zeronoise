@@ -62,6 +62,8 @@ export const live = {
   profileChanged: (_userId: number) => {},
   /** shown badges changed: refresh live UserInfo.badges + broadcast user:updated */
   badgesChanged: (_userId: number) => {},
+  /** batch D: XP level shown / hidden changed */
+  levelChanged: (_userId: number) => {},
   /** is this nick currently used by a guest from a different device? */
   nickHeldByOther: (_nick: string, _deviceIds: string[]) => false as boolean,
   stats: () => ({ rooms: 0, users: 0 }),

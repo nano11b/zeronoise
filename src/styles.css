@@ -2348,3 +2348,13 @@ html[data-ui-theme="dark-orange"] {
 .disc-join { align-self: flex-start; }
 @media (max-width: 600px) { .disc-grid { grid-template-columns: 1fr; } }
 .disc-top button.tag { background: transparent; color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }
+
+/* ---- batch D: XP levels ---- */
+.lvl-badge { display: inline-flex; align-items: center; margin-left: 5px; padding: 0 5px; border-radius: 6px; font-size: 10.5px; font-weight: 700; line-height: 16px; border: 1px solid var(--line); color: var(--text); vertical-align: middle; white-space: nowrap; }
+.lvl-bronze { border-color: #c98a4b; color: #f0b27a; }
+.lvl-silver { border-color: #b8c2cc; color: #e3e8ee; }
+.lvl-gold { border-color: #e6b800; color: #ffd84d; }
+.lvl-row { display: flex; align-items: center; gap: 6px; margin: 4px 0; flex-wrap: wrap; }
+.lvl-row .lvl-badge { margin-left: 0; }
+.lvl-bar { height: 8px; border-radius: 4px; background: var(--bg-2); overflow: hidden; border: 1px solid var(--line); }
+.lvl-bar > span { display: block; height: 100%; background: var(--accent); }

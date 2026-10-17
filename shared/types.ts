@@ -28,6 +28,8 @@ export interface UserInfo {
   modBot?: boolean;
   /** up to 3 shown badge ids (registered accounts only) */
   badges?: string[];
+  /** batch D: XP level (omitted when the account hides it or has no XP yet) */
+  level?: number;
 }
 
 /** GET /api/me/badges */
@@ -189,6 +191,8 @@ export type ChatMessage =
   | {
       kind: 'chat'; id: string; ts: number; fromId: string; from: string; role?: Role; text: string;
       accountId?: number; chatColor?: string | null; chatEffect?: string | null; hasAvatar?: boolean; reactions?: ReactionCount[];
+      /** batch D: author's XP level (omitted when hidden) */
+      level?: number;
       /** set on a thread reply; omitted on top-level lines */
       parentId?: string;
       /** ms timestamp once the author edits; omitted until then */
@@ -434,6 +438,8 @@ export interface ServerToClient {
   'stage:state': (p: StageState) => void;
   /** you were moved to the audience: stop camera / mic / screen */
   'stage:demoted': (p: { by: string }) => void;
+  /** batch D: you reached a new level */
+  'xp:levelup': (p: { level: number; xp: number }) => void;
   /** batch C: the room became a voice room; stop camera and screen share (mic stays) */
   'media:force': (p: { cam: false; screen: false }) => void;
   'chat:reactions': (p: { messageId: string; reactions: { emoji: string; count: number }[] }) => void;
@@ -673,6 +679,8 @@ export interface PublicProfile {
   online: boolean;
   /** socket id when online, for private messages */
   socketId?: string;
+  /** batch D: XP level, null when hidden or none yet */
+  level?: number | null;
   /** batch C: profiles 2.0 */
   bannerUrl?: string | null;
   links?: { label: string; url: string }[];

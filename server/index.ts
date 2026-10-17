@@ -7,6 +7,8 @@ import * as repo4 from './repo4';
 import * as repo5 from './repo5';
 import * as repo6 from './repo6';
 import * as repo7 from './repo7';
+import * as repo8 from './repo8';
+import { dupKey, XP_COOLDOWN_MS, XP_MIN_CHARS, XP_PER_MESSAGE } from '../shared/xp';
 import { isDiscoverSort, trendingScore, type DiscoverRoom } from '../shared/discover';
 import { blockedLink, cleanDomains, cleanWords, isLinkMode, matchWord } from '../shared/filters';
 import { EMOTE_NAME_RE } from '../shared/batch3';
@@ -267,8 +269,39 @@ function profileOf(account: repo.Account | null): Pick<UserInfo, 'accountId' | '
 }
 function makeUser(socketId: string, nick: string, role: Role, registered: boolean, account: repo.Account | null): UserInfo {
   const u: UserInfo = { id: socketId, nick, cam: false, mic: false, screen: false, role, registered, ...profileOf(account) };
-  if (account) { const b = badgesShownFor(account.id); if (b.length) u.badges = b; }
+  if (account) { const b = badgesShownFor(account.id); if (b.length) u.badges = b; const lv = levelShownFor(account.id); if (lv) u.level = lv; }
   return u;
+}
+// ---------- XP and levels (batch D) ----------
+const XP_COOLDOWN = Math.max(0, Number(process.env.XP_COOLDOWN_MS ?? XP_COOLDOWN_MS));
+function levelShownFor(userId: number): number | undefined {
+  try { return repo8.shownLevel(repo.userById(userId)); } catch { return undefined; }
+}
+/** Push the shown level into every live session of this account. */
+function refreshLevel(userId: number) {
+  const lv = levelShownFor(userId);
+  for (const s of sessions.values()) {
+    if (s.account?.id !== userId || !s.user) continue;
+    if (lv) s.user.level = lv; else delete s.user.level;
+    if (s.roomId) io.to(`room:${s.roomId}`).emit('user:updated', s.user);
+  }
+}
+/** XP for a chat line, if the anti-spam rules allow it (see shared/xp.ts). */
+function maybeXp(socketId: string, s: Session, room: Room, text: string) {
+  const uid = badgeEarner(socketId, s);
+  if (uid == null) return;
+  const key = dupKey(text);
+  if (key.length < XP_MIN_CHARS) return;
+  // talking to yourself earns nothing: another person must be in the room
+  const others = [...room.members].filter((id) => id !== socketId && !id.startsWith('bot:') && sessions.get(id)?.user).length;
+  if (others === 0) return;
+  const r = repo8.tryAwardXp(uid, XP_PER_MESSAGE, repo8.hashKey(key), Math.max(XP_COOLDOWN, room.slowModeSec * 1000));
+  if ('reason' in r && r.reason) return;
+  const ok = r as { xp: number; level: number; leveledUp: boolean };
+  if (ok.leveledUp) {
+    refreshLevel(uid);
+    io.to(socketId).emit('xp:levelup', { level: ok.level, xp: ok.xp });
+  } else if (!s.user?.level && !repo.userById(uid)?.xp_hidden) refreshLevel(uid);
 }
 
 // ---------- badges (cosmetic; registered accounts only, never bots) ----------
@@ -474,6 +507,7 @@ function chatFromRowRaw(m: repo.MsgRow, reactions?: { emoji: string; count: numb
     chatColor: u?.chat_color ?? null,
     chatEffect: publicChatEffect(u?.chat_effect),
     hasAvatar: !!u?.has_avatar,
+    ...(repo8.shownLevel(u) ? { level: repo8.shownLevel(u) } : {}),
     reactions: reactions ?? [],
     parentId: m.parent_id || undefined,
     editedAt: m.edited_at || undefined,
@@ -1914,6 +1948,7 @@ live.profileChanged = (userId) => {
   }
 };
 live.badgesChanged = (userId) => { refreshBadges(userId); };
+live.levelChanged = (userId) => { refreshLevel(userId); };
 live.roleChanged = (userId, role) => {
   for (const [id, s] of sessions) {
     if (s.account?.id !== userId) continue;
@@ -2920,6 +2955,7 @@ function onConnection(socket: AppSocket) {
     const msg: ChatMessage = {
       kind: 'chat', id: randomUUID(), ts: Date.now(), fromId: socket.id, from: s.user.nick, role: s.user.role, text,
       ...profileOf(s.account), mentions: burnTtl ? [] : repo.mentionIds(text), parentId: parentId ?? undefined,
+      ...(s.user.level ? { level: s.user.level } : {}),
     };
     // burn: remember who was here to read it (people, not bots; not the sender)
     const burnRecipients = burnTtl ? [...new Set([...room.members].filter((id) => id !== socket.id && !id.startsWith('bot:'))
@@ -2935,6 +2971,7 @@ function onConnection(socket: AppSocket) {
       scheduleBurnCheck(msg.id, msg.ts + BURN_HARD);
     } else io.to(`room:${room.id}`).emit('chat:message', msg);
     statMsg(room, s);
+    if (!burnTtl) maybeXp(socket.id, s, room, text);
     {
       const uid = badgeEarner(socket.id, s);
       if (uid != null) {
