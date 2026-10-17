@@ -13,7 +13,10 @@ export function whisperLabel(info: WhisperInfo, selfId: string) {
   return info.members.filter((m) => m.id !== selfId).map((m) => m.nick).join(', ') || 'just you';
 }
 
-export function WhisperStrip({ convs, open, setOpen, selfId, isIgnored, toast, onReport }: {
+export function WhisperStrip({ convs, open, setOpen, selfId, isIgnored, toast, onReport, receiptsOn = false, setReceipts, seen = {} }: {
+  receiptsOn?: boolean;
+  setReceipts?: (on: boolean) => void;
+  seen?: Record<string, Record<string, { messageId: string; nick: string }>>;
   convs: Record<string, WhisperConv>;
   open: string | null;
   setOpen: (id: string | null) => void;
@@ -29,7 +32,30 @@ export function WhisperStrip({ convs, open, setOpen, selfId, isIgnored, toast, o
   const active = open && convs[open] ? convs[open] : null;
   const shown = active ? active.messages.filter((m) => m.fromId === selfId || !isIgnored(m.from)) : [];
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [shown.length, open]);
+  // batch G5: tell the others we've read their newest line (only while open and the tab is visible; only if our receipts are on)
+  const lastTheirs = [...shown].reverse().find((m) => m.fromId !== selfId);
+  useEffect(() => {
+    if (!receiptsOn || !open || !lastTheirs) return;
+    const send = () => { if (document.visibilityState === 'visible') socket.emit('whisper:seen', { whisperId: open, messageId: lastTheirs.id }); };
+    send();
+    document.addEventListener('visibilitychange', send);
+    return () => document.removeEventListener('visibilitychange', send);
+  }, [receiptsOn, open, lastTheirs?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   if (ids.length === 0) return null;
+  // newest line of mine that each other member has read up to
+  const seenUnder = new Map<string, string[]>();
+  if (receiptsOn && active && open) {
+    const idx = new Map(active.messages.map((m, i) => [m.id, i]));
+    const mine = active.messages.map((m, i) => [m, i] as const).filter(([m]) => m.fromId === selfId);
+    for (const [by, v] of Object.entries(seen[open] ?? {})) {
+      if (!active.info.members.some((x) => x.id === by)) continue;
+      const upTo = idx.get(v.messageId); if (upTo == null) continue;
+      // they saw a line after (or at) mine: mark my latest line before that point
+      const mark = [...mine].reverse().find(([, i]) => i <= upTo) ?? null;
+      // receipts arrive for their reading of *my* line's successors too: they read everything up to upTo
+      if (mark) seenUnder.set(mark[0].id, [...(seenUnder.get(mark[0].id) ?? []), v.nick]);
+    }
+  }
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -64,11 +90,17 @@ export function WhisperStrip({ convs, open, setOpen, selfId, isIgnored, toast, o
             {shown.map((m) => (
               <div key={m.id} className={`whisper-msg ${m.fromId === selfId ? 'mine' : ''}`}>
                 <span className="ts">{fmtTime(m.ts)}</span> <span className="from">{m.from}</span> <ChatText text={m.text} />
+                {seenUnder.has(m.id) && <span className="whisper-seen small muted" data-testid="whisper-seen">✓ Seen by {seenUnder.get(m.id)!.join(', ')}</span>}
                 {onReport && m.fromId !== selfId && <button type="button" className="icon-btn whisper-report" title="Report message" aria-label={`Report whisper from ${m.from}`} data-action="report-whisper" onClick={() => onReport(m)}>⚑</button>}
               </div>
             ))}
             <div ref={endRef} />
           </div>
+          {setReceipts && (
+            <label className="whisper-receipts small muted" title="Read receipts work both ways: turn yours off and you won't see anyone else's.">
+              <input type="checkbox" checked={receiptsOn} onChange={(e) => setReceipts(e.target.checked)} data-testid="whisper-receipts" /> Read receipts
+            </label>
+          )}
           <form onSubmit={submit} className="whisper-form">
             <input ref={inputRef} value={text} onChange={(e) => setText(e.target.value)} maxLength={LIMITS.messageMax} placeholder={`Whisper to ${whisperLabel(active.info, selfId)}`} aria-label="Whisper message" />
             <EmojiPicker value={text} onChange={setText} inputRef={inputRef} />

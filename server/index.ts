@@ -165,6 +165,8 @@ interface Room {
   voice: boolean;
 }
 interface Session {
+  /** batch G5: whisper read receipts (mutual); guests default on for the session */
+  whisperReceipts?: boolean;
   user: UserInfo | null;
   roomId: string | null;
   account: repo.Account | null;
@@ -2980,6 +2982,38 @@ function onConnection(socket: AppSocket) {
       if (sid === socket.id) continue;
       const acct = sessions.get(sid)?.account?.id;
       if (acct) pushIfAway(acct, { title: `Whisper from ${s.user!.nick} in #${room.name}`, body: 'New message', url: `/?room=${encodeURIComponent(room.id)}`, tag: `whisper-${id}` }, room.id);
+    }
+  });
+  // ---- batch G5: whisper read receipts (optional, mutual: turn yours off and you see nobody's) ----
+  const receiptsOn = (x: Session) => (x.whisperReceipts ??= x.account ? roles.whisperReceipts(x.account.id) : true);
+  const seenLast = new Map<string, string>();
+  socket.on('whisper:receipts', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (typeof p?.on === 'boolean') {
+      if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down' });
+      s.whisperReceipts = p.on;
+      if (s.account) roles.setWhisperReceipts(s.account.id, p.on);
+      // keep every tab of this account in step
+      if (s.account) for (const o of sessions.values()) if (o.account?.id === s.account.id) o.whisperReceipts = p.on;
+    }
+    ack({ ok: true, on: receiptsOn(s) });
+  });
+  socket.on('whisper:seen', (p) => {
+    const s = session();
+    if (!s.user || !s.roomId || !receiptsOn(s)) return;
+    const room = rooms.get(s.roomId);
+    const id = String(p?.whisperId ?? '');
+    const set = room?.whispers.get(id);
+    if (!room || !set?.has(socket.id)) return;
+    const e = whisperLog.get(String(p?.messageId ?? ''));
+    if (!e || e.m.whisperId !== id || e.m.fromId === socket.id || !e.members.has(socket.id)) return;
+    if (seenLast.get(id) === e.m.id) return;
+    seenLast.set(id, e.m.id);
+    for (const sid of set) {
+      if (sid === socket.id) continue;
+      const o = sessions.get(sid);
+      if (o && receiptsOn(o)) io.to(sid).emit('whisper:seen', { whisperId: id, messageId: e.m.id, by: socket.id, nick: s.user.nick });
     }
   });
   socket.on('whisper:leave', (p, ackRaw) => {

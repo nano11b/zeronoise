@@ -48,9 +48,10 @@ function jar(xff) {
   } };
 }
 const emit = (s, ev, ...a) => new Promise((res) => { const t = setTimeout(() => res({ ok: false, error: `timeout ${ev}` }), 8000); s.emit(ev, ...a, (r) => { clearTimeout(t); res(r); }); });
+let sockN = 0; // node sockets get their own client IPs so the browser pages (127.0.0.1) never share their action budget
 async function sock(j) {
   const me = await j.req('/api/me');
-  const s = ioClient(BASE, { transports: ['websocket'], forceNew: true, reconnection: false, extraHeaders: { cookie: j.header() }, auth: { deviceId: me.deviceId } });
+  const s = ioClient(BASE, { transports: ['websocket'], forceNew: true, reconnection: false, extraHeaders: { cookie: j.header(), 'x-forwarded-for': `10.88.${(++sockN >> 8) & 255}.${sockN & 255 || 1}` }, auth: { deviceId: me.deviceId } });
   await new Promise((res, rej) => { s.once('connect', res); s.once('connect_error', rej); });
   await emit(s, 'login', {});
   return s;
@@ -95,7 +96,7 @@ async function pageFor(u, width) {
 }
 async function enterRoom(page, roomId) {
   await page.goto(`${BASE}/?room=${encodeURIComponent(roomId)}`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('.chat-log', { timeout: 15000 });
+  await page.waitForSelector('.chat-log', { timeout: 15000 }).catch(async (e) => { await page.screenshot({ path: path.join(os.tmpdir(), 'g-enter-fail.png') }); console.log('[enter-fail]', page.url(), (await page.evaluate(() => document.body.innerText)).slice(0, 300)); throw e; });
   await page.evaluate(() => [...document.querySelectorAll('a,button')].find((e) => e.textContent.trim() === 'Dismiss')?.click());
   await sleep(500);
 }
@@ -249,6 +250,37 @@ try {
     ok(true, 'G3: all five templates apply cleanly');
     globalThis.__tplRoom = cr.roomId;
   }
+  // ---------- G5 whisper read receipts ----------
+  {
+    for (const u of [mem, other, admin]) await emit(u.s, 'room:join', { roomId: room });
+    ok((await emit(mem.s, 'whisper:receipts', {})).on === true, 'G5: receipts are on by default');
+    const w = await emit(mem.s, 'whisper:start', { userIds: [other.s.id] });
+    const wid = w.whisper.id;
+    const msgP = ev(other.s, 'whisper:message');
+    await emit(mem.s, 'whisper:send', { whisperId: wid, text: 'psst' });
+    const m = await msgP;
+    const seenP = ev(mem.s, 'whisper:seen');
+    other.s.emit('whisper:seen', { whisperId: wid, messageId: m.id });
+    const seen = await seenP;
+    ok(seen?.messageId === m.id && seen.nick === 'GgOther', 'G5: the sender gets a "seen" when the other person reads it', JSON.stringify(seen));
+    // outsiders can't fake it
+    const fakeP = ev(mem.s, 'whisper:seen');
+    admin.s.emit('whisper:seen', { whisperId: wid, messageId: m.id });
+    ok(!(await fakeP), 'G5: people outside the whisper cannot send receipts');
+    // reader turns theirs off: no receipt goes out
+    ok((await emit(other.s, 'whisper:receipts', { on: false })).on === false, 'G5: a user turns their receipts off');
+    const m2P = ev(other.s, 'whisper:message'); await emit(mem.s, 'whisper:send', { whisperId: wid, text: 'still there?' }); const m2 = await m2P;
+    const offP = ev(mem.s, 'whisper:seen'); other.s.emit('whisper:seen', { whisperId: wid, messageId: m2.id });
+    ok(!(await offP), 'G5: with receipts off you send none');
+    // ...and you see none (mutual)
+    const m3P = ev(mem.s, 'whisper:message'); await emit(other.s, 'whisper:send', { whisperId: wid, text: 'yes' }); const m3 = await m3P;
+    const mutP = ev(other.s, 'whisper:seen'); mem.s.emit('whisper:seen', { whisperId: wid, messageId: m3.id });
+    ok(!(await mutP), 'G5: with receipts off you see nobody else\'s (mutual)');
+    await fresh0(other);
+    ok((await emit(other.s, 'whisper:receipts', {})).on === false, 'G5: the off setting is saved on the account');
+    await emit(other.s, 'whisper:receipts', { on: true });
+    await emit(other.s, 'room:join', { roomId: room });
+  }
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
@@ -396,6 +428,39 @@ try {
       if (width < 800) { await o.page.evaluate(() => document.querySelector('[data-action="panel-close"], [data-action="collapse-panel"]')?.click()); await sleep(300); }
       await shot(o.page, `g3-template-applied-${width}`);
       await o.ctx.close(); await fresh(other); await emit(other.s, 'room:join', { roomId: room });
+    }
+    // G5 UI: "Seen" under my whisper; the toggle
+    {
+      await fresh(mem);
+      const a = await pageFor(mem, width);
+      await enterRoom(a.page, room);
+      await a.page.evaluate(() => document.querySelector('[data-action="rec-ok"]')?.click());
+      await fresh(other);
+      const j = await emit(other.s, 'room:join', { roomId: room });
+      const memId = (j.room?.users ?? j.users ?? []).find((u) => u.nick === 'GgMember')?.id;
+      const w = await emit(other.s, 'whisper:start', { userIds: [memId] });
+      await a.page.waitForSelector('[data-action="whisper-tab"]', { timeout: 6000 });
+      await a.page.$eval('[data-action="whisper-tab"]', (b) => b.click());
+      await a.page.type('[aria-label="Whisper message"]', 'meet at 8?');
+      const mP = ev(other.s, 'whisper:message');
+      await a.page.$eval('[data-action="whisper-send"]', (b) => b.click());
+      const m = await mP;
+      other.s.emit('whisper:seen', { whisperId: w.whisper.id, messageId: m.id });
+      const seen = await a.page.waitForSelector('[data-testid="whisper-seen"]', { timeout: 5000 }).catch(() => null);
+      ok(!!seen && /Seen by GgOther/.test(await seen.evaluate((e) => e.textContent)), `${width}: G5: "Seen by" shows under my whisper`);
+      const back = ev(other.s, 'whisper:seen');
+      await emit(other.s, 'whisper:send', { whisperId: w.whisper.id, text: 'yes!' });
+      ok(!!(await back), `${width}: G5: reading in the open whisper sends my receipt`);
+      await a.page.$eval('[data-testid="whisper-strip"]', (e) => e.scrollIntoView({ block: 'center' }));
+      ok(await noSideScroll(a.page), `${width}: G5: no sideways scroll`);
+      await shot(a.page, `g5-whisper-seen-${width}`);
+      await a.page.$eval('[data-testid="whisper-receipts"]', (b) => b.click());
+      const gone = await a.page.waitForFunction(() => !document.querySelector('[data-testid="whisper-seen"]'), { timeout: 4000 }).catch(() => null);
+      await shot(a.page, `g5-whisper-receipts-off-${width}`);
+      await a.ctx.close(); await fresh(mem);
+      const saved = (await emit(mem.s, 'whisper:receipts', {})).on;
+      ok(!!gone && saved === false, `${width}: G5: turning receipts off hides others' receipts and saves`, JSON.stringify({ gone: !!gone, saved }));
+      await emit(mem.s, 'whisper:receipts', { on: true }); await emit(mem.s, 'room:join', { roomId: room }); await fresh(other); await emit(other.s, 'room:join', { roomId: room });
     }
     // @@UI-END
   }

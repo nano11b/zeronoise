@@ -2473,3 +2473,8 @@ html[data-ui-theme="dark-orange"] {
 .template-preview .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; }
 .template-pick { display: flex; flex-direction: column; gap: 4px; }
 .template-pick select { max-width: 100%; }
+/* batch G5 whisper receipts */
+.whisper-seen { display: block; text-align: right; font-size: .78em; }
+.whisper-receipts { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 6px; }
+.whisper-window .whisper-receipts { flex-direction: row; justify-content: flex-start; align-self: flex-start; width: auto; white-space: nowrap; }
+.whisper-window .whisper-receipts input { width: 18px; height: 18px; margin: 0; flex: none; }

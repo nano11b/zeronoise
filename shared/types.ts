@@ -319,6 +319,8 @@ export interface ClientToServer {
   /** Start a whisper with people in your room (2-5 participants including you). */
   'whisper:start': (p: { userIds: string[] }, ack: Ack<{ whisper: WhisperInfo }>) => void;
   /** Participant adds someone else from the room. */
+  'whisper:receipts': (p: { on?: boolean }, ack: Ack<{ on: boolean }>) => void;
+  'whisper:seen': (p: { whisperId: string; messageId: string }) => void;
   'whisper:add': (p: { whisperId: string; userId: string }, ack: Ack<{ whisper: WhisperInfo }>) => void;
   'whisper:send': (p: { whisperId: string; text: string }, ack: Ack<{ message: WhisperMessage }>) => void;
   'whisper:leave': (p: { whisperId: string }, ack: Ack) => void;
@@ -500,6 +502,7 @@ export interface ServerToClient {
   'whisper:update': (p: { whisper: WhisperInfo }) => void;
   /** Sent only to participants. */
   'whisper:message': (m: WhisperMessage) => void;
+  'whisper:seen': (p: { whisperId: string; messageId: string; by: string; nick: string }) => void;
   /** You are no longer in this whisper (it ended, or you left / left the room). */
   'whisper:ended': (p: { whisperId: string; reason: 'ended' | 'left' }) => void;
   'trivia:state': (s: TriviaState) => void;

@@ -79,3 +79,6 @@ export function assign(roomId: string, userId: number, roleId: number | null, by
 }
 export const rolesPayload = (roomId: string) => ({ roles: rolesOf(roomId), members: membersOf(roomId) });
 export const setRoomTemplate = (roomId: string, key: string) => q('UPDATE rooms SET template = ? WHERE id = ?').run(key, roomId);
+// batch G5: per-account whisper read receipts (default on)
+export const whisperReceipts = (userId: number) => ((q('SELECT whisper_receipts AS w FROM users WHERE id = ?').get(userId) as { w: number } | undefined)?.w ?? 1) === 1;
+export const setWhisperReceipts = (userId: number, on: boolean) => q('UPDATE users SET whisper_receipts = ? WHERE id = ?').run(on ? 1 : 0, userId);

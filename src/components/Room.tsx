@@ -281,6 +281,18 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
     socket.on('whisper:ended', onEnded);
     return () => { socket.off('whisper:update', onUpdate); socket.off('whisper:message', onMessage); socket.off('whisper:ended', onEnded); };
   }, [toast]);
+  // batch G5: whisper read receipts
+  const [receiptsOn, setReceiptsOn] = useState(true);
+  const [whisperSeen, setWhisperSeen] = useState<Record<string, Record<string, { messageId: string; nick: string }>>>({});
+  useEffect(() => {
+    const load = () => socket.emit('whisper:receipts', {}, (r) => { if (r.ok) setReceiptsOn(r.on); });
+    load();
+    const onSeen = (p: { whisperId: string; messageId: string; by: string; nick: string }) =>
+      setWhisperSeen((cur) => ({ ...cur, [p.whisperId]: { ...cur[p.whisperId], [p.by]: { messageId: p.messageId, nick: p.nick } } }));
+    socket.on('whisper:seen', onSeen); socket.on('connect', load);
+    return () => { socket.off('whisper:seen', onSeen); socket.off('connect', load); };
+  }, []);
+  const setReceipts = (on: boolean) => socket.emit('whisper:receipts', { on }, (r) => { if (r.ok) { setReceiptsOn(r.on); if (!r.on) setWhisperSeen({}); } else toast(r.error, 'error'); });
   useEffect(() => {
     if (openWhisper) setWhispers((cur) => (cur[openWhisper]?.unread ? { ...cur, [openWhisper]: { ...cur[openWhisper], unread: 0 } } : cur));
   }, [openWhisper, whispers]);
@@ -2033,7 +2045,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
         </div>
 
           <section className="chat">
-            <WhisperStrip convs={whispers} open={openWhisper} setOpen={setOpenWhisper} selfId={me.id} isIgnored={isIgnored} toast={toast} onReport={(m) => setReportTarget({ kind: 'whisper', messageId: m.id, from: m.from, preview: m.text })} />
+            <WhisperStrip convs={whispers} open={openWhisper} setOpen={setOpenWhisper} selfId={me.id} receiptsOn={receiptsOn} setReceipts={setReceipts} seen={whisperSeen} isIgnored={isIgnored} toast={toast} onReport={(m) => setReportTarget({ kind: 'whisper', messageId: m.id, from: m.from, preview: m.text })} />
             <RoomThemeHeader theme={theme && theme.welcome && welcomeHidden === theme.welcome ? { ...theme, welcome: null } : theme} onDismiss={() => { if (theme?.welcome) { setWelcomeHidden(theme.welcome); try { localStorage.setItem(welcomeKey, theme.welcome); } catch { /* private mode */ } } }} />
             <RecordingBanner rec={rec} onLeave={onLeave} joinNotice={!!initial.recording && !initial.isOwner} />
             {voiceRoom && <LiveCaptions roomId={initial.id} myNick={me.nick} />}
