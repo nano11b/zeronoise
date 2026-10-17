@@ -978,7 +978,7 @@ try {
   for (const s of seedSockets) s.close();
   await browser.close();
   server.kill();
-  fs.rmSync(DATA, { recursive: true, force: true });
+  fs.rmSync(DATA, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
 for (const n of notes) console.log(`note  ${n}`);

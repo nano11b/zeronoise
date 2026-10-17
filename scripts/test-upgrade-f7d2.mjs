@@ -287,7 +287,7 @@ try {
   sockets.forEach((s) => { try { s.close(); } catch {} });
   await stopServer();
   fixture.close();
-  fs.rmSync(DATA, { recursive: true, force: true });
+  fs.rmSync(DATA, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

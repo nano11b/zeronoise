@@ -1009,7 +1009,7 @@ try {
     ok(bad.status === 302 && /authError=/.test(bad.headers.get('location') || ''), 'Discord callback rejects state mismatch');
     child.kill('SIGTERM');
     await new Promise((r) => child.once('exit', r));
-    fs.rmSync(data2, { recursive: true, force: true });
+    fs.rmSync(data2, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 
   // ---------- TikTok Login Kit (mocked token + user info) ----------
@@ -1226,7 +1226,7 @@ try {
       child.kill('SIGTERM');
       await new Promise((r) => child.once('exit', r));
       await new Promise((r) => mock.close(r));
-      fs.rmSync(dataT, { recursive: true, force: true });
+      fs.rmSync(dataT, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   }
 
@@ -1902,7 +1902,7 @@ try {
       ok(has(1, 'social') && !has(2, 'social') && out.stats.some((x) => x.user_id === 1 && x.stat === 'friends' && x.value === 10), 'migration backfills Social from existing friends (10 -> badge)');
       ok(has(2, 'host') && !has(1, 'host'), 'migration backfills Host from existing owned rooms (5 -> badge)');
       ok(out.newOne === 0, 'accounts created after the upgrade do not get Early Bird');
-      fs.rmSync(mdir, { recursive: true, force: true });
+      fs.rmSync(mdir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
 
     // live: find a zone where it is 1–5 AM right now, and one where it is not
@@ -2751,7 +2751,7 @@ try {
     su.close(); sa.close();
     child.kill('SIGTERM');
     await sleep(200);
-    fs.rmSync(dataG, { recursive: true, force: true });
+    fs.rmSync(dataG, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
   {
     const smtpPort = await new Promise((r) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
@@ -2866,7 +2866,7 @@ try {
     tlsServer.close();
     ok(/SENT/.test(out) && seen.auth && seen.from.includes('<no-reply@mail.example.com>') && seen.data.includes('hello from zeronoise') && seen.data.includes('zeronoise') && seen.data.includes('text/html'), 'SMTP on 465 uses implicit TLS and sends text plus HTML');
     ok(!out.includes('smtp-secret'), 'implicit TLS send does not log the password');
-    fs.rmSync(certDir, { recursive: true, force: true });
+    fs.rmSync(certDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 
   // =====================================================================
@@ -3842,7 +3842,7 @@ try {
       ok(count('room-emotes') > 0 && count('room-thumbs') > 0, `${label}: there were real uploads to back up`);
       ok(count('room-icons') > 0 && countX('room-icons') === count('room-icons'), `${label}: room icons are in the backup`);
       ok(fs.existsSync(path.join(DATA, 'vapid.json')) === fs.existsSync(path.join(X, 'vapid.json')) && !fs.existsSync(path.join(X, '.session_secret')) && !fs.existsSync(path.join(X, 'backups')), `${label}: vapid.json in, session secret and older backups out`);
-      fs.rmSync(tmp, { recursive: true, force: true });
+      fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
       return man;
     };
     const man1 = await verify(newest, 'system tar');
@@ -5245,7 +5245,7 @@ try {
   sockets.forEach((s) => s.close());
   await stopServer();
   fixture.close();
-  fs.rmSync(DATA, { recursive: true, force: true });
+  fs.rmSync(DATA, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 }

@@ -218,7 +218,7 @@ try {
 } finally {
   await browser.close().catch(() => {});
   server.kill();
-  fs.rmSync(DATA, { recursive: true, force: true });
+  fs.rmSync(DATA, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 console.log(`\n${passed} passed, ${failures.length} failed`);
 process.exit(failures.length ? 1 : 0);

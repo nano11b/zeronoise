@@ -155,7 +155,7 @@ try {
 } finally {
   await browser.close().catch(() => {});
   server.kill('SIGTERM');
-  fs.rmSync(DATA, { recursive: true, force: true });
+  fs.rmSync(DATA, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   console.log(`\nscreenshots: ${OUT} (${shots.length})`);
   console.log(`${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
