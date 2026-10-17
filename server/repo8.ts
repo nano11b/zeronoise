@@ -142,3 +142,19 @@ export function exportData(userId: number) {
     FROM whisper_messages w JOIN whisper_members wm ON wm.message_id = w.id AND wm.user_id = ? LEFT JOIN rooms r ON r.id = w.room_id ORDER BY w.ts LIMIT ?`, userId, userId, EXPORT_MAX_MESSAGES);
   return { profile, settings, messages, whispers, truncated: messages.length >= EXPORT_MAX_MESSAGES || whispers.length >= EXPORT_MAX_MESSAGES };
 }
+
+// ---------------- passkeys (migration 43) ----------------
+export interface PasskeyRow { id: number; user_id: number; cred_id: string; public_jwk: string; alg: number; sign_count: number; name: string; created_at: number; last_used_at: number | null; removed_at: number | null }
+export const passkeysOf = (userId: number) => q('SELECT * FROM user_passkeys WHERE user_id = ? AND removed_at IS NULL ORDER BY created_at').all(userId) as unknown as PasskeyRow[];
+export const passkeyByCred = (credId: string) => q('SELECT * FROM user_passkeys WHERE cred_id = ? AND removed_at IS NULL').get(credId) as PasskeyRow | undefined;
+export function addPasskey(userId: number, credId: string, jwk: object, alg: number, signCount: number, name: string): number {
+  return (q('INSERT INTO user_passkeys (user_id, cred_id, public_jwk, alg, sign_count, name, created_at) VALUES (?,?,?,?,?,?,?) RETURNING id').get(userId, credId, JSON.stringify(jwk), alg, signCount, name, now()) as { id: number }).id;
+}
+export const touchPasskey = (id: number, signCount: number) => q('UPDATE user_passkeys SET sign_count = ?, last_used_at = ? WHERE id = ?').run(signCount, now(), id);
+/** removed, not deleted */
+export const removePasskey = (userId: number, id: number) => Number(q('UPDATE user_passkeys SET removed_at = ? WHERE id = ? AND user_id = ? AND removed_at IS NULL').run(now(), id, userId).changes) > 0;
+export const hasPasskey = (userId: number) => !!q('SELECT 1 AS x FROM user_passkeys WHERE user_id = ? AND removed_at IS NULL').get(userId);
+/** any second factor: TOTP on or at least one passkey */
+export const secondFactorOn = (userId: number) => mfaEnabled(userId) || hasPasskey(userId);
+/** the TOTP secret in the clear (batch E3 replaces this with the decrypting version) */
+export const totpSecret = (t: TotpRow) => t.secret;

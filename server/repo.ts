@@ -140,11 +140,12 @@ export function searchUsers(term: string, limit = 50): AdminUser[] {
 
 // ---------------- sessions ----------------
 const tokenId = (token: string) => createHmac('sha256', SESSION_SECRET).update(token).digest('hex');
-export function createSession(userId: number, ip: string, ua: string): { token: string; maxAgeSec: number } {
+export function createSession(userId: number, ip: string, ua: string, passkeyVerified = false): { token: string; maxAgeSec: number } {
   const token = randomBytes(32).toString('base64url');
   const maxAgeSec = SESSION_DAYS * 86400;
   // batch D: an account with two-factor turned on gets a session that is not signed in until the code step passes.
-  const mfa = q('SELECT 1 AS x FROM user_totp WHERE user_id = ? AND enabled_at IS NOT NULL').get(userId) ? 1 : 0;
+  const mfa = !passkeyVerified && (q('SELECT 1 AS x FROM user_totp WHERE user_id = ? AND enabled_at IS NOT NULL').get(userId)
+    || q('SELECT 1 AS x FROM user_passkeys WHERE user_id = ? AND removed_at IS NULL').get(userId)) ? 1 : 0;
   q('INSERT INTO sessions (id, user_id, created_at, expires_at, ip, user_agent, mfa_pending) VALUES (?,?,?,?,?,?,?)')
     .run(tokenId(token), userId, now(), mfa ? now() + 10 * 60_000 : now() + maxAgeSec * 1000, ip, ua.slice(0, 200), mfa);
   return { token, maxAgeSec };

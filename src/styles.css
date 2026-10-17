@@ -2383,3 +2383,12 @@ html[data-ui-theme="dark-orange"] {
   .pc-room { min-height: 40px; min-width: 40px; padding: 4px 12px; display: inline-flex; align-items: center; }
   .pc-room-list { gap: 6px; }
 }
+
+/* ---- batch E: passkeys + TOTP QR ---- */
+.tfa-qr-li { list-style: none; margin-left: -1.2em; }
+.tfa-qr { display: inline-block; padding: 6px; background: #fff; border-radius: 6px; line-height: 0; }
+.tfa-qr svg { width: 180px; height: 180px; }
+.tfa-passkeys { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border, #333); padding-top: 8px; }
+.pk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pk-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pk-list li .btn { margin-left: auto; }

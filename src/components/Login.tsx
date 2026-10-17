@@ -1,3 +1,4 @@
+import { getPasskey, passkeyError, passkeysSupported } from '../passkey';
 import { FormEvent, useEffect, useState } from 'react';
 import { ThemePicker } from './ThemePicker';
 import { LIMITS, TAGLINE } from '../../shared/config';
@@ -33,6 +34,15 @@ export function Login({ onAccount, mode, setMode, google, discord, tiktok }: {
   };
   useEffect(() => { if (mode === 'register') loadCaptcha(); }, [mode]);
 
+  const passkeyLogin = async () => {
+    setBusy(true); setError('');
+    try {
+      const o = await api<{ ticket: string; options: any }>('/api/auth/passkey/options', {});
+      const credential = await getPasskey(o.options);
+      const r = await api<{ account: Account }>('/api/auth/passkey', { ticket: o.ticket, credential });
+      onAccount(r.account);
+    } catch (e) { setError(passkeyError(e)); } finally { setBusy(false); }
+  };
   const submitAccount = async (e: FormEvent) => {
     e.preventDefault();
     const u = username.trim();
@@ -139,6 +149,7 @@ export function Login({ onAccount, mode, setMode, google, discord, tiktok }: {
                 )}
               </>
             )}
+            {mode === 'signin' && !forgotOpen && passkeysSupported() && <button type="button" className="btn ghost big center" data-action="passkey-login" disabled={busy} onClick={() => void passkeyLogin()}>Sign in with a passkey</button>}
             {google && !forgotOpen && <a className="btn ghost big center" href="/api/auth/google" data-action="oauth-google">Continue with Google</a>}
             {discord && !forgotOpen && <a className="btn big center discord-btn" href="/api/auth/discord" data-action="oauth-discord">Continue with Discord</a>}
             {tiktok && !forgotOpen && <a className="btn big center tiktok-btn" href={/zeronoise\//.test(navigator.userAgent) ? '/api/auth/google?provider=tiktok' : '/api/auth/tiktok'} data-action="oauth-tiktok">Sign in with TikTok</a>}

@@ -759,6 +759,22 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS user_recovery_codes_user ON user_recovery_codes(user_id);
   ALTER TABLE sessions ADD COLUMN mfa_pending INTEGER NOT NULL DEFAULT 0
   `,
+  // 43: batch E - passkeys, room-ban appeals, encrypted TOTP secrets, synced drafts.
+  `
+  CREATE TABLE IF NOT EXISTS user_passkeys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    cred_id TEXT NOT NULL UNIQUE,
+    public_jwk TEXT NOT NULL,
+    alg INTEGER NOT NULL,
+    sign_count INTEGER NOT NULL DEFAULT 0,
+    name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER,
+    removed_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS user_passkeys_user ON user_passkeys(user_id)
+  `,
 ];
 
 /**

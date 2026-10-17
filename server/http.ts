@@ -23,6 +23,7 @@ import { emailVerifyRequiredEffective, roomEntryError } from './gate';
 import { clientIp, DEVICE_RE, isHttps, originAllowed, parseCookies, trustSetting } from './net';
 import { KeyedLimiter } from './rateLimit';
 import { makeZip } from './zip';
+import { b64u, newChallenge, verifyAssertion, verifyRegistration } from './webauthn';
 import { newRecoveryCodes, newTotpSecret, normalizeRecovery, otpauthUrl, verifyTotp } from './totp';
 import { APPEAL_MIN, APPEAL_MAX, type AppealInfo } from '../shared/appeals';
 import * as repo from './repo';
@@ -1042,8 +1043,8 @@ export function createApp(roomList: () => unknown) {
   });
 
   // ---------- accounts ----------
-  function startSession(req: Request, res: Response, userId: number) {
-    const s = repo.createSession(userId, clientIp(req), String(req.headers['user-agent'] ?? ''));
+  function startSession(req: Request, res: Response, userId: number, passkeyVerified = false) {
+    const s = repo.createSession(userId, clientIp(req), String(req.headers['user-agent'] ?? ''), passkeyVerified);
     setCookie(req, res, COOKIE_SID, s.token, s.maxAgeSec);
   }
   function banCheck(req: Request, userId: number | null, staff = false) {
@@ -1123,7 +1124,7 @@ export function createApp(roomList: () => unknown) {
     if (ban) return fail(res, 403, repo.banMessage(ban));
     const account = repo.touchLogin(u.id, ip)!;
     startSession(req, res, u.id);
-    if (repo8.mfaEnabled(u.id)) return res.json({ ok: true, account: null, twoFactor: true });
+    if (repo8.secondFactorOn(u.id)) return res.json({ ok: true, account: null, twoFactor: true });
     res.json({ ok: true, account });
   });
 
@@ -1136,8 +1137,7 @@ export function createApp(roomList: () => unknown) {
   /** true when the code is a fresh TOTP or an unused recovery code */
   const checkSecondFactor = (userId: number, code: string): 'totp' | 'recovery' | null => {
     const t = repo8.totpOf(userId);
-    if (!t) return null;
-    const step = verifyTotp(t.secret, code);
+    const step = t?.enabled_at ? verifyTotp(repo8.totpSecret(t), code) : null;
     if (step != null) return repo8.useStep(userId, step) ? 'totp' : null;
     if (normalizeRecovery(code).length === 8 && repo8.useRecoveryCode(userId, hashRecovery(userId, code))) return 'recovery';
     return null;
@@ -1154,6 +1154,123 @@ export function createApp(roomList: () => unknown) {
     repo.logAction(p.username, p.id, how === 'recovery' ? '2fa-login-recovery' : '2fa-login', p.username, null, `ip ${clientIp(req)}`);
     res.json({ ok: true, account: repo.accountById(p.id), recoveryLeft: repo8.recoveryLeft(p.id) });
   });
+  // ---------- passkeys (batch E): a second factor, and passwordless sign-in ----------
+  const pkChallenges = new Map<string, { challenge: string; userId: number | null; kind: 'register' | 'login' | 'mfa'; exp: number }>();
+  const pkTicket = (challenge: string, userId: number | null, kind: 'register' | 'login' | 'mfa') => {
+    const now = Date.now();
+    for (const [k, v] of pkChallenges) if (v.exp < now) pkChallenges.delete(k);
+    if (pkChallenges.size > 5000) return null;
+    const t = randomBytes(18).toString('base64url'); pkChallenges.set(t, { challenge, userId, kind, exp: now + 5 * 60_000 }); return t;
+  };
+  const takeTicket = (t: unknown, kind: 'register' | 'login' | 'mfa') => {
+    if (typeof t !== 'string') return null;
+    const v = pkChallenges.get(t); pkChallenges.delete(t);
+    return v && v.kind === kind && v.exp > Date.now() ? v : null;
+  };
+  const rpOf = (req: Request) => {
+    const pub = PUBLIC_URL ? new URL(PUBLIC_URL) : null;
+    const host = String(req.headers.host || '').replace(/:\d+$/, '');
+    const rpId = pub?.hostname || host;
+    const origins = [...new Set([PUBLIC_URL && new URL(PUBLIC_URL).origin, `${isHttps(req) ? 'https' : 'http'}://${req.headers.host}`].filter(Boolean) as string[])];
+    return { rpId, origins };
+  };
+  const pkLimiter = new KeyedLimiter(30, 10 * 60_000);
+  const pkError = (res: Response, e: unknown) => fail(res, 400, `Passkey check failed: ${(e as Error).message}`);
+  const assertWith = (req: Request, cred: any, challenge: string, requireUv: boolean) => {
+    const id = typeof cred?.id === 'string' ? cred.id : '';
+    const row = id ? repo8.passkeyByCred(id) : undefined;
+    if (!row) throw new Error('unknown passkey');
+    const { rpId, origins } = rpOf(req);
+    const r = verifyAssertion(cred, { jwk: JSON.parse(row.public_jwk), alg: row.alg, signCount: row.sign_count }, challenge, rpId, origins, requireUv);
+    repo8.touchPasskey(row.id, r.signCount);
+    return row;
+  };
+  const allowList = (userId: number) => repo8.passkeysOf(userId).map((p) => ({ type: 'public-key', id: p.cred_id }));
+  app.post('/api/me/passkeys/options', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!pkLimiter.take(`u:${a.id}`)) return fail(res, 429, 'Too many attempts. Try again later.');
+    if (repo8.passkeysOf(a.id).length >= 10) return fail(res, 409, 'You can have up to 10 passkeys.');
+    const challenge = newChallenge();
+    const ticket = pkTicket(challenge, a.id, 'register');
+    if (!ticket) return fail(res, 503, 'Busy. Try again.');
+    const { rpId } = rpOf(req);
+    res.json({ ok: true, ticket, options: {
+      challenge, rp: { id: rpId, name: BRAND_NAME }, user: { id: b64u(Buffer.from(`zn-user-${a.id}`)), name: a.username, displayName: a.username },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], timeout: 120_000, attestation: 'none',
+      authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'preferred' }, excludeCredentials: allowList(a.id),
+    } });
+  });
+  app.post('/api/me/passkeys', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    const t = takeTicket(req.body?.ticket, 'register');
+    if (!t || t.userId !== a.id) return fail(res, 400, 'That passkey request expired. Try again.');
+    const name = String(req.body?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 40) || 'Passkey';
+    let key;
+    try { const { rpId, origins } = rpOf(req); key = verifyRegistration(req.body?.credential ?? {}, t.challenge, rpId, origins); } catch (e) { return pkError(res, e); }
+    if (repo8.passkeyByCred(key.credId)) return fail(res, 409, 'That passkey is already registered.');
+    const first = !repo8.secondFactorOn(a.id);
+    repo8.addPasskey(a.id, key.credId, key.jwk, key.alg, key.signCount, name);
+    let recoveryCodes: string[] | undefined;
+    if (first || repo8.recoveryLeft(a.id) === 0) { const f = freshRecovery(a.id); repo8.replaceRecoveryCodes(a.id, f.hashes); recoveryCodes = f.codes; }
+    repo.logAction(a.username, a.id, 'passkey-add', a.username, null, name);
+    res.json({ ok: true, ...(recoveryCodes ? { recoveryCodes } : {}), ...mfaStatus(a) });
+  });
+  app.post('/api/me/passkeys/:id/remove', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    const id = Number(req.params.id);
+    const others = repo8.passkeysOf(a.id).filter((p) => p.id !== id).length;
+    if (a.role === 'admin' && others === 0 && !repo8.mfaEnabled(a.id)) return fail(res, 403, 'Admins keep at least one second factor. Add another passkey or an authenticator app first.');
+    if (!repo8.removePasskey(a.id, id)) return fail(res, 404, 'No such passkey');
+    repo.logAction(a.username, a.id, 'passkey-remove', a.username, null, `#${id}`);
+    res.json({ ok: true, ...mfaStatus(a) });
+  });
+  // pending (password/OAuth done) -> passkey as the second factor
+  app.post('/api/auth/2fa/passkey/options', (req, res) => {
+    const p = repo.pendingMfaUser(cookiesOf(req)[COOKIE_SID]);
+    if (!p) return fail(res, 401, 'That sign-in expired. Please sign in again.');
+    const allow = allowList(p.id);
+    if (!allow.length) return fail(res, 404, 'No passkey on this account.');
+    const challenge = newChallenge(); const ticket = pkTicket(challenge, p.id, 'mfa');
+    if (!ticket) return fail(res, 503, 'Busy. Try again.');
+    res.json({ ok: true, ticket, options: { challenge, rpId: rpOf(req).rpId, allowCredentials: allow, userVerification: 'preferred', timeout: 120_000 } });
+  });
+  app.post('/api/auth/2fa/passkey', (req, res) => {
+    const token = cookiesOf(req)[COOKIE_SID];
+    const p = repo.pendingMfaUser(token);
+    if (!p) return fail(res, 401, 'That sign-in expired. Please sign in again.');
+    if (!authLimiter.take(clientIp(req)) || !mfaUserLimiter.take(`u:${p.id}`)) return fail(res, 429, 'Too many attempts. Try again later.');
+    const t = takeTicket(req.body?.ticket, 'mfa');
+    if (!t || t.userId !== p.id) return fail(res, 400, 'That passkey request expired. Try again.');
+    let row; try { row = assertWith(req, req.body?.credential, t.challenge, false); } catch (e) { return pkError(res, e); }
+    if (row.user_id !== p.id) return fail(res, 400, 'That passkey belongs to another account.');
+    repo.completeMfa(token!);
+    repo.logAction(p.username, p.id, '2fa-login-passkey', p.username, null, `ip ${clientIp(req)}`);
+    res.json({ ok: true, account: repo.accountById(p.id) });
+  });
+  // passwordless: a discoverable passkey with user verification signs straight in
+  app.post('/api/auth/passkey/options', (req, res) => {
+    if (!authLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const challenge = newChallenge(); const ticket = pkTicket(challenge, null, 'login');
+    if (!ticket) return fail(res, 503, 'Busy. Try again.');
+    res.json({ ok: true, ticket, options: { challenge, rpId: rpOf(req).rpId, allowCredentials: [], userVerification: 'required', timeout: 120_000 } });
+  });
+  app.post('/api/auth/passkey', (req, res) => {
+    if (!authLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const t = takeTicket(req.body?.ticket, 'login');
+    if (!t) return fail(res, 400, 'That passkey request expired. Try again.');
+    let row; try { row = assertWith(req, req.body?.credential, t.challenge, true); } catch (e) { return pkError(res, e); }
+    const u = repo.userById(row.user_id);
+    if (!u) return fail(res, 400, 'Sign-in failed.');
+    const ban = banCheck(req, u.id, isStaffRole(u.role));
+    if (ban) return fail(res, 403, repo.banMessage(ban));
+    const account = repo.touchLogin(u.id, clientIp(req))!;
+    startSession(req, res, u.id, true); // passkey + user verification = both factors
+    repo.logAction(u.username, u.id, 'passkey-login', u.username, null, `ip ${clientIp(req)}`);
+    res.json({ ok: true, account });
+  });
   app.post('/api/auth/2fa/cancel', (req, res) => {
     const token = cookiesOf(req)[COOKIE_SID];
     if (repo.pendingMfaUser(token)) { repo.deleteSession(token); setCookie(req, res, COOKIE_SID, '', 0); }
@@ -1161,7 +1278,9 @@ export function createApp(roomList: () => unknown) {
   });
   const mfaStatus = (a: repo.Account) => {
     const t = repo8.totpOf(a.id);
-    return { enabled: !!t?.enabled_at, enabledAt: t?.enabled_at ?? null, recoveryLeft: t?.enabled_at ? repo8.recoveryLeft(a.id) : 0, required: a.role === 'admin' && !!t?.enabled_at, canDisable: a.role !== 'admin' };
+    const passkeys = repo8.passkeysOf(a.id).map((p) => ({ id: p.id, name: p.name, createdAt: p.created_at, lastUsedAt: p.last_used_at }));
+    const any = !!t?.enabled_at || passkeys.length > 0;
+    return { enabled: !!t?.enabled_at, enabledAt: t?.enabled_at ?? null, recoveryLeft: any ? repo8.recoveryLeft(a.id) : 0, required: a.role === 'admin' && any, canDisable: a.role !== 'admin' || passkeys.length > 0, passkeys };
   };
   app.get('/api/me/2fa', (req, res) => {
     const a = reqAccount(req);
@@ -1183,7 +1302,7 @@ export function createApp(roomList: () => unknown) {
     const t = repo8.totpOf(a.id);
     if (!t || t.enabled_at) return fail(res, 409, t ? 'Two-factor is already on.' : 'Start setup first.');
     if (Date.now() - t.created_at > 30 * 60_000) return fail(res, 410, 'Setup expired. Start again.');
-    const step = verifyTotp(t.secret, String(req.body?.code ?? ''));
+    const step = verifyTotp(repo8.totpSecret(t), String(req.body?.code ?? ''));
     if (step == null) return fail(res, 400, 'That code does not match. Check the time on your phone and try the next code.');
     const { codes, hashes } = freshRecovery(a.id);
     repo8.enableTotp(a.id, step, hashes);
@@ -1361,7 +1480,7 @@ export function createApp(roomList: () => unknown) {
     repo.setPasswordHash(userId, hash);
     repo.logAction(u.username, u.id, 'password-reset', u.username, null, `ip ${ip}`);
     startSession(req, res, userId);
-    if (repo8.mfaEnabled(userId)) return res.json({ ok: true, account: null, twoFactor: true });
+    if (repo8.secondFactorOn(userId)) return res.json({ ok: true, account: null, twoFactor: true });
     res.json({ ok: true, account: repo.accountById(userId) });
   });
 

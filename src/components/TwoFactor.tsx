@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { qrSvg } from '../../shared/qr';
+import { createPasskey, getPasskey, passkeyError, passkeysSupported } from '../passkey';
 
-interface Status { enabled: boolean; enabledAt: number | null; recoveryLeft: number; required: boolean; canDisable: boolean }
+interface PasskeyInfo { id: number; name: string; createdAt: number; lastUsedAt: number | null }
+interface Status { enabled: boolean; enabledAt: number | null; recoveryLeft: number; required: boolean; canDisable: boolean; passkeys?: PasskeyInfo[] }
 
 /** The code step after password / Discord / Google sign-in for an account with two-factor on. */
 export function TwoFactorGate() {
@@ -12,6 +15,15 @@ export function TwoFactorGate() {
     e.preventDefault(); setBusy(true); setErr('');
     try { await api('/api/auth/2fa', { code }); location.replace('/' + location.search); }
     catch (e2) { setErr((e2 as Error).message); setBusy(false); }
+  };
+  const usePasskey = async () => {
+    setBusy(true); setErr('');
+    try {
+      const o = await api<{ ticket: string; options: any }>('/api/auth/2fa/passkey/options', {});
+      const credential = await getPasskey(o.options);
+      await api('/api/auth/2fa/passkey', { ticket: o.ticket, credential });
+      location.replace('/' + location.search);
+    } catch (e2) { setErr(passkeyError(e2)); setBusy(false); }
   };
   const cancel = async () => { try { await api('/api/auth/2fa/cancel', {}); } catch { /* */ } location.replace('/'); };
   return (
@@ -25,6 +37,7 @@ export function TwoFactorGate() {
             value={code} onChange={(e) => setCode(e.target.value)} data-testid="tfa-code" />
           {err && <p className="form-error" role="alert">{err}</p>}
           <button className="btn" type="submit" disabled={busy || code.trim().length < 6} data-action="tfa-verify">Verify</button>
+          {passkeysSupported() && <button className="btn ghost" type="button" disabled={busy} data-action="tfa-passkey" onClick={() => void usePasskey()}>Use a passkey</button>}
           <button className="btn ghost" type="button" onClick={() => void cancel()} data-action="tfa-cancel">Cancel and sign out</button>
         </form>
       </section>
@@ -73,7 +86,8 @@ export function TwoFactorSection({ adminView = false }: { adminView?: boolean })
       ) : setup ? (
         <>
           <ol className="small tfa-steps">
-            <li>In your authenticator app (Google Authenticator, Aegis, 1Password, Authy…), add an account with this key, or <a href={setup.otpauthUrl} data-testid="tfa-otpauth">open it in the app</a> on this phone.</li>
+            <li>In your authenticator app (Google Authenticator, Aegis, 1Password, Authy…), scan this code, type the key below, or <a href={setup.otpauthUrl} data-testid="tfa-otpauth">open it in the app</a> on this phone.</li>
+            <li className="tfa-qr-li"><span className="tfa-qr" data-testid="tfa-qr" role="img" aria-label="QR code for your authenticator app" dangerouslySetInnerHTML={{ __html: qrSvg(setup.otpauthUrl, 4) }} /></li>
             <li><code className="tfa-secret" data-testid="tfa-secret">{setup.secret.replace(/(.{4})/g, '$1 ').trim()}</code></li>
             <li>Type the 6-digit code it shows.</li>
           </ol>
@@ -92,7 +106,42 @@ export function TwoFactorSection({ adminView = false }: { adminView?: boolean })
             onClick={() => void run(async () => { setSetup(await api('/api/me/2fa/setup', {})); })}>Set up two-factor</button>
         </>
       )}
+      <PasskeyList st={st} setSt={setSt} setCodes={setCodes} run={run} busy={busy} />
       {err && <p className="form-error small" role="alert">{err}</p>}
+    </div>
+  );
+}
+
+function PasskeyList({ st, setSt, setCodes, run, busy }: { st: Status; setSt: (s: Status) => void; setCodes: (c: string[]) => void; run: (fn: () => Promise<void>) => Promise<void>; busy: boolean }) {
+  const [name, setName] = useState('');
+  const list = st.passkeys ?? [];
+  return (
+    <div className="tfa-passkeys" data-testid="passkeys" data-count={list.length}>
+      <div className="muted small">Passkeys {list.length ? `(${list.length})` : ''}</div>
+      {list.length > 0 && (
+        <ul className="pk-list">
+          {list.map((p) => (
+            <li key={p.id} data-passkey={p.id}>
+              <span>🔑 {p.name}</span> <span className="muted small">added {new Date(p.createdAt).toLocaleDateString()}{p.lastUsedAt ? ` · used ${new Date(p.lastUsedAt).toLocaleDateString()}` : ''}</span>
+              <button type="button" className="btn ghost small-btn" disabled={busy} data-action="passkey-remove"
+                onClick={() => void run(async () => { setSt(await api<Status>(`/api/me/passkeys/${p.id}/remove`, {})); })}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {passkeysSupported() ? (
+        <div className="tfa-row">
+          <input className="input" placeholder="Name (e.g. Phone)" maxLength={40} value={name} onChange={(e) => setName(e.target.value)} aria-label="Passkey name" data-testid="passkey-name" />
+          <button type="button" className="btn small-btn" disabled={busy} data-action="passkey-add"
+            onClick={() => void run(async () => {
+              const o = await api<{ ticket: string; options: any }>('/api/me/passkeys/options', {});
+              let credential; try { credential = await createPasskey(o.options); } catch (e) { throw new Error(passkeyError(e)); }
+              const r = await api<Status & { recoveryCodes?: string[] }>('/api/me/passkeys', { ticket: o.ticket, name, credential });
+              setSt(r); setName(''); if (r.recoveryCodes) setCodes(r.recoveryCodes);
+            })}>Add a passkey</button>
+        </div>
+      ) : <p className="small muted">This browser does not support passkeys.</p>}
+      <p className="small muted">A passkey works as your second step, and on its own to sign in without a password.</p>
     </div>
   );
 }
