@@ -225,6 +225,30 @@ try {
   ok(!mr.includes(pw.roomId), 'password rooms never show as mutual rooms');
   const self = (await mem.j.req('/api/users/CcMember/profile')).profile;
   ok(self.mutualFriends.length === 0 && self.mutualRooms.length === 0, 'no mutuals on your own profile');
+  // ---------- 5. room discovery ----------
+  const priv = await emit(other.s, 'room:create', { name: 'cc-music-hall', category: 'music', tags: ['lofi', 'chill'] });
+  await emit(other.s, 'room:join', { roomId: priv.roomId });
+  for (let i = 0; i < 3; i++) { await emit(other.s, 'chat:send', { text: `hello music ${i}` }); await sleep(1100); }
+  await emit(mem.s, 'room:join', { roomId: troom });
+  const d = await emit(mem.s, 'rooms:discover', { sort: 'trending' });
+  ok(d.ok && d.rooms.length >= 3, 'browse lists open rooms', d.error);
+  const ids = d.rooms.map((r) => r.id);
+  ok(!ids.includes(pw.roomId), 'password rooms hidden from browse');
+  ok(d.rooms.every((r) => typeof r.members === 'number' && typeof r.users === 'number'), 'member + online counts on each room');
+  const tt = d.rooms.find((r) => r.id === troom);
+  ok(tt && tt.members >= 3, 'members = accounts that visited in 30 days', JSON.stringify(tt));
+  ok(d.trending.length > 0 && d.trending[0].trending >= d.trending[d.trending.length - 1].trending, 'trending list sorted by score');
+  ok(d.categories.some((c) => c.category === 'music') && d.tags.some((t) => t.tag === 'lofi'), 'category and tag counts for chips / cloud');
+  const dm = await emit(mem.s, 'rooms:discover', { category: 'music' });
+  ok(dm.rooms.length > 0 && dm.rooms.every((r) => r.category === 'music'), 'filter by category');
+  const dt = await emit(mem.s, 'rooms:discover', { tag: 'lofi' });
+  ok(dt.rooms.length === 1 && dt.rooms[0].id === priv.roomId, 'filter by tag');
+  const ds = await emit(mem.s, 'rooms:discover', { q: 'speedrun' });
+  ok(ds.rooms.some((r) => r.id === troom), 'search matches tags');
+  const dmem = await emit(mem.s, 'rooms:discover', { sort: 'members' });
+  ok(dmem.rooms.every((r, i, a) => i === 0 || a[i - 1].members >= r.members), 'sort by members');
+  // a private call (PM call room) never shows up
+  ok(!d.rooms.some((r) => /^call-|^dm-/.test(r.id)), 'no private call rooms listed');
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -317,6 +341,28 @@ try {
       await shot(m.page, `c4-profile-editor-${width}`);
       await m.ctx.close();
       await fresh(other); await fresh(mem);
+    }
+    // 5. browse page
+    {
+      const m = await pageFor(mem, width);
+      await m.page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+      await m.page.waitForSelector('[data-action="open-browse"]', { timeout: 15000 });
+      ok(!!(await m.page.$('[data-action="open-browse"]')), `${width}: lobby has a Browse link`);
+      await shot(m.page, `c5-lobby-browse-link-${width}`);
+      await m.page.$eval('[data-action="open-browse"]', (a) => a.click());
+      await m.page.waitForSelector('[data-page="browse"] [data-discover-room]', { timeout: 8000 }).catch(() => {});
+      ok(!!(await m.page.$('[data-page="browse"] [data-testid="trending"]')), `${width}: trending now section`);
+      ok(!(await m.page.$(`[data-discover-room="${pw.roomId}"]`)), `${width}: password room not on the browse page`);
+      ok(await noSideScroll(m.page), `${width}: browse page has no sideways scroll`);
+      await shot(m.page, `c5-browse-${width}`);
+      await m.page.$eval('[data-browse-cat="music"]', (b) => b.click()).catch(() => {});
+      await sleep(600);
+      ok((await m.page.$$('[data-discover-room]')).length >= 1 && !!(await m.page.$(`[data-discover-room="${priv.roomId}"]`)), `${width}: category filter on the browse page`);
+      await shot(m.page, `c5-browse-music-${width}`);
+      await m.page.$eval(`[data-discover-room="${priv.roomId}"] [data-action="discover-join"]`, (b) => b.click()).catch(() => {});
+      ok(!!(await m.page.waitForSelector('.chat-log', { timeout: 8000 }).catch(() => null)), `${width}: Join from browse enters the room`);
+      await m.ctx.close();
+      await fresh(mem);
     }
     // @@UI-END
   }

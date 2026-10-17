@@ -27,6 +27,7 @@ import { INVITE_PATH_RE } from '../shared/inviteCode';
 const loadRoom = () => import('./components/Room');
 const Room = lazyNamed(loadRoom, 'Room');
 const AdminPanel = lazyNamed(() => import('./components/AdminPanel'), 'AdminPanel');
+const Browse = lazyNamed(() => import('./components/Browse'), 'Browse');
 const PmDock = lazyNamed(() => import('./components/PmDock'), 'PmDock');
 const loadGames = () => import('./components/GamesPanel');
 const GamesDock = lazyNamed(loadGames, 'GamesDock');
@@ -706,6 +707,8 @@ export default function App() {
         )
       ) : room ? (
         <Lazy fallback={roomFallback}><Room key={`${room.id}:${roomEpoch}`} me={me} initial={room} onLeave={onLeave} toast={toast} ignored={ignored} toggleIgnore={toggleIgnore} openPm={openPm} gifs={!!boot?.gifs} onPasswordChange={onRoomPassword} account={account} onAccount={patchAccount} onGames={openGames} unread={roomUnread[room.id]} unreadMap={roomUnread} onJoined={onJoined} signOut={signOut} openAdmin={() => navigate('/admin')} wantAccount={wantAccount} /></Lazy>
+      ) : path === '/browse' ? (
+        <Lazy fallback={screenFallback}><Browse onJoined={(r) => { navigate('/'); onJoined(r); }} onBack={() => navigate('/')} toast={toast} /></Lazy>
       ) : (
         <Lobby me={me} account={account} onJoined={onJoined} toast={toast} signOut={signOut} wantAccount={wantAccount} openAdmin={() => navigate('/admin')} onAccount={patchAccount} onGames={openGames} roomUnread={roomUnread} openPm={openPm} ignored={ignored} toggleIgnore={toggleIgnore} askRoom={inviteAskPw} />
       )}

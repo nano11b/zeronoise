@@ -37,3 +37,20 @@ export function mutualRooms(a: number, b: number, limit = 8): { id: string; name
     JOIN rooms r ON r.id = x.room_id WHERE x.user_id = ? AND r.is_private = 0 AND (r.password_hash IS NULL OR r.password_hash = '')
     ORDER BY MAX(x.visited_at, y.visited_at) DESC LIMIT ?`).all(b, a, limit) as { id: string; name: string }[];
 }
+
+// ---------------- room discovery ----------------
+const HOUR = 3_600_000;
+/** accounts that visited each room in the last 30 days (the "members" count on the browse page) */
+export function roomMemberCounts(): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const r of q('SELECT room_id, COUNT(*) AS n FROM recent_rooms WHERE visited_at >= ? GROUP BY room_id').all(now() - 30 * 24 * HOUR) as { room_id: string; n: number }[]) out.set(r.room_id, r.n);
+  return out;
+}
+/** messages per room in the last 24 h and the 24 h before that (trend) */
+export function roomMessageTrend(): Map<string, { day: number; prev: number }> {
+  const h = Math.floor(now() / HOUR);
+  const out = new Map<string, { day: number; prev: number }>();
+  for (const r of q('SELECT room_id, SUM(CASE WHEN hour > ? THEN messages ELSE 0 END) AS d, SUM(CASE WHEN hour <= ? THEN messages ELSE 0 END) AS p FROM room_stats_hourly WHERE hour > ? GROUP BY room_id')
+    .all(h - 24, h - 24, h - 48) as { room_id: string; d: number; p: number }[]) out.set(r.room_id, { day: r.d, prev: r.p });
+  return out;
+}

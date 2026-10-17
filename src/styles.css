@@ -2324,3 +2324,27 @@ html[data-ui-theme="dark-orange"] {
 .pc-np { margin: 6px 0; }
 .pc-links { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .pc-links a { overflow-wrap: anywhere; }
+
+/* ---- batch C: browse rooms ---- */
+.browse { width: min(1100px, 100%); margin: 0 auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.browse-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.browse-head h1 { font-size: 20px; margin: 0; flex: 1 1 auto; }
+.browse-head .search { flex: 1 1 220px; min-width: 0; }
+.disc-cloud { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-btn { cursor: pointer; background: transparent; color: inherit; font: inherit; }
+.tag-btn.on { border-color: var(--accent); color: var(--accent); }
+.disc-trending h2 { font-size: 15px; margin: 4px 0; }
+.disc-trend-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
+.disc-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.disc-card { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; min-width: 0; }
+.disc-thumb { display: block; height: 80px; margin: -12px -12px 0; background-size: cover; background-position: center; }
+.disc-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.disc-top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.disc-name { overflow-wrap: anywhere; }
+.disc-topic { margin: 0; overflow-wrap: anywhere; }
+.disc-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; }
+.disc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+.disc-join { align-self: flex-start; }
+@media (max-width: 600px) { .disc-grid { grid-template-columns: 1fr; } }
+.disc-top button.tag { background: transparent; color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }

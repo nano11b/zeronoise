@@ -169,6 +169,7 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
           <div className="section-head">
             <h2>Rooms</h2>
             <button type="button" className="btn primary small-btn start-room-btn" data-action="create-room" onClick={() => setSheet('create')}><Icon name="plus" /> Start a room</button>
+            <a href="/browse" className="btn ghost small-btn browse-link" data-action="open-browse" onClick={(e) => { e.preventDefault(); history.pushState(null, '', '/browse'); dispatchEvent(new PopStateEvent('popstate')); }}>🧭 Browse</a>
             <input className="search" placeholder="Search rooms or #tags" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Search rooms or tags" data-field="room-filter" />
           </div>
           <div className="cat-chips" role="group" aria-label="Filter by category">

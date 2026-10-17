@@ -375,6 +375,8 @@ export interface ClientToServer {
   'poll:vote': (p: { pollId: string; option: number }, ack: Ack<{ poll: PollInfo }>) => void;
   'poll:close': (p: { pollId: string }, ack: Ack<{ poll: PollInfo }>) => void;
   // ---- batch 3 ----
+  /** batch C: browse page (open rooms only) */
+  'rooms:discover': (p: { sort?: import('./discover').DiscoverSort; category?: string; tag?: string; q?: string }, ack: Ack<{ rooms: import('./discover').DiscoverRoom[]; sort: string; trending: import('./discover').DiscoverRoom[]; categories: { category: string; count: number }[]; tags: { tag: string; count: number }[] }>) => void;
   /** batch C: owner / staff toggles audio-only voice room mode */
   'room:voice': (p: { on: boolean }, ack: Ack<{ on: boolean }>) => void;
   'room:meta': (p: { category?: string | null; tags?: string[] | string }, ack: Ack<{ category: string | null; tags: string[] }>) => void;

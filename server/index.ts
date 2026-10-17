@@ -6,6 +6,8 @@ import { readReleaseInfo } from './release';
 import * as repo4 from './repo4';
 import * as repo5 from './repo5';
 import * as repo6 from './repo6';
+import * as repo7 from './repo7';
+import { isDiscoverSort, trendingScore, type DiscoverRoom } from '../shared/discover';
 import { blockedLink, cleanDomains, cleanWords, isLinkMode, matchWord } from '../shared/filters';
 import { EMOTE_NAME_RE } from '../shared/batch3';
 import { accentReadable, roomBannerUrl, THEME_ACCENT_RE, THEME_WELCOME_MAX, type RoomThemeInfo } from '../shared/theme';
@@ -160,6 +162,8 @@ const nicksInUse = new Map<string, string>(); // lowercase nick -> socket id
 const botUsers = new Map<string, UserInfo>();
 const botRooms = new Map<number, Set<string>>();
 const botPostRl = new KeyedLimiter(LIMITS.chatBurst, LIMITS.chatWindowMs);
+/** batch C: browse page queries per IP */
+const discoverRl = new KeyedLimiter(30, 10_000);
 /** watch-party control: ~5 actions per second per user */
 const watchRl = new KeyedLimiter(5, 1000);
 const accountSockets = new Map<number, string>(); // account id -> socket id
@@ -4296,6 +4300,46 @@ function onConnection(socket: AppSocket) {
 
   // ================= batch 3 =================
   // ---- 1. category + tags (owner / site staff) ----
+  /** batch C: browse page. Only open rooms: never private calls or password rooms. */
+  socket.on('rooms:discover', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (!s.user) return ack({ ok: false, error: 'Sign in first' });
+    if (!discoverRl.take(s.ip)) return ack({ ok: false, error: 'Slow down' });
+    const sort = isDiscoverSort(p?.sort) ? p!.sort! : 'trending';
+    const cat = typeof p?.category === 'string' && p.category ? p.category : null;
+    const tag = typeof p?.tag === 'string' && p.tag ? p.tag.toLowerCase().slice(0, 24) : null;
+    const needle = typeof p?.q === 'string' ? p.q.trim().toLowerCase().slice(0, 40) : '';
+    const members = repo7.roomMemberCounts();
+    const trend = repo7.roomMessageTrend();
+    const created = new Map(repo.allRooms().map((r) => [r.id, r.created_at]));
+    const open = [...rooms.values()].filter((r) => !r.isPrivate && !r.passwordHash && !r.callPeers && (r.persistent || r.members.size > 0));
+    const all: DiscoverRoom[] = open.map((r) => {
+      const sm = summary(r);
+      const t = trend.get(r.id) ?? { day: 0, prev: 0 };
+      return {
+        id: r.id, name: r.name, topic: r.topic, category: r.category, tags: r.tags, users: sm.users, members: members.get(r.id) ?? 0,
+        messages24h: t.day, trending: trendingScore(sm.users, t.day, t.prev), ...(r.voice ? { voice: true } : {}),
+        ...(sm.thumbUrl ? { thumbUrl: sm.thumbUrl } : {}), ...(sm.iconUrl ? { iconUrl: sm.iconUrl } : {}), createdAt: created.get(r.id) ?? 0,
+      };
+    });
+    const categories = new Map<string, number>(); const tags = new Map<string, number>();
+    for (const r of all) { if (r.category) categories.set(r.category, (categories.get(r.category) ?? 0) + 1); for (const t of r.tags) tags.set(t, (tags.get(t) ?? 0) + 1); }
+    let list = all.filter((r) => (!cat || r.category === cat) && (!tag || r.tags.includes(tag)) && (!needle || r.name.toLowerCase().includes(needle) || r.topic.toLowerCase().includes(needle) || r.tags.some((t) => t.includes(needle))));
+    const by: Record<string, (a: DiscoverRoom, b: DiscoverRoom) => number> = {
+      trending: (a, b) => b.trending - a.trending || b.users - a.users,
+      members: (a, b) => b.members - a.members || b.users - a.users,
+      active: (a, b) => b.users - a.users || b.messages24h - a.messages24h,
+      new: (a, b) => b.createdAt - a.createdAt,
+    };
+    list = list.sort((a, b) => by[sort](a, b) || a.name.localeCompare(b.name)).slice(0, 60);
+    ack({
+      ok: true, rooms: list, sort,
+      trending: [...all].sort(by.trending).filter((r) => r.trending > 0).slice(0, 5),
+      categories: [...categories].map(([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count),
+      tags: [...tags].map(([t, count]) => ({ tag: t, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)).slice(0, 30),
+    });
+  });
   socket.on('room:voice', (p, ackRaw) => {
     const ack = safeAck(ackRaw);
     const c = roomCtx();
