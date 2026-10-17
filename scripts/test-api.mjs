@@ -5169,7 +5169,7 @@ try {
     const sj = await fetch(BASE + '/api/status');
     const sb = await sj.json();
     ok(sj.status === 200 && sb.ok === true && sb.db === true && Number.isInteger(sb.uptimeSec) && 'package' in sb && 'commit' in sb && 'lastBackupAt' in sb, '/api/status: health, uptime, package, commit, last backup');
-    const allowed = ['ok', 'db', 'uptimeSec', 'startedAt', 'package', 'commit', 'releasedAt', 'lastBackupAt', 'lastBackupOk', 'checkedAt'];
+    const allowed = ['ok', 'db', 'uptimeSec', 'startedAt', 'package', 'commit', 'releasedAt', 'lastBackupAt', 'lastBackupOk', 'checkedAt', 'lastRestoreCheckAt', 'lastRestoreCheckOk'];
     ok(Object.keys(sb).every((k) => allowed.includes(k)), '/api/status has only public fields (no users, rooms, mail, env)');
     const sh = await fetch(BASE + '/status');
     const html = await sh.text();
