@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Profile2Section } from './Profile2';
 import { LevelSection } from './Level';
+import { TwoFactorSection } from './TwoFactor';
 import type { Account } from '../App';
 import { api } from '../api';
 import { NickLabel, UserAvatar } from './UserAvatar';
@@ -146,6 +147,10 @@ export function ProfileDialogBody({ account, onAccount, toast }: { account: Acco
       <Profile2Section toast={toast} />
       <BioSection username={account.username} toast={toast} />
       <PrivacySection toast={toast} />
+      <div className="profile-section" data-section="security">
+        <div className="muted small">Two-factor sign-in</div>
+        <TwoFactorSection />
+      </div>
       <div className="profile-section previews-section">
         <div className="muted small">Chat</div>
         <label className="push-toggle">

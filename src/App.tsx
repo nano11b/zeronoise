@@ -1,4 +1,5 @@
 import { BanAppeal } from './components/BanAppeal';
+import { TwoFactorGate } from './components/TwoFactor';
 import { badgeLabel, clientTimeZone } from './components/Badges';
 import { isUiTheme } from '../shared/uiTheme';
 import { applyUiTheme, currentUiTheme } from './uiTheme';
@@ -251,6 +252,7 @@ export default function App() {
     });
     fetchMe().then((m) => {
       setBoot(m);
+      if (m.twoFactorPending) return; // code step first; no socket until then
       setAccount(m.account);
       session.current.account = m.account;
       applyReturn();
@@ -668,6 +670,8 @@ export default function App() {
       </Lazy>
     );
   }
+
+  if (boot?.twoFactorPending) return <TwoFactorGate />;
 
   if (blocked && !adminRoute) {
     return (

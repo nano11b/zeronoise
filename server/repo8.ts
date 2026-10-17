@@ -63,3 +63,44 @@ export function listAppeals(status: 'open' | 'approved' | 'denied' | 'all' = 'op
   return q(`SELECT a.*, b.reason, b.expires_at, b.kind AS ban_kind FROM ban_appeals a LEFT JOIN bans b ON b.id = a.ban_id
     ${status === 'all' ? '' : 'WHERE a.status = ?'} ORDER BY a.created_at DESC LIMIT ?`).all(...(status === 'all' ? [limit] : [status, limit])) as never;
 }
+
+// ---------------- two-factor (migration 42) ----------------
+export interface TotpRow { user_id: number; secret: string; enabled_at: number | null; last_step: number; created_at: number }
+export const totpOf = (userId: number) => q('SELECT * FROM user_totp WHERE user_id = ?').get(userId) as TotpRow | undefined;
+export const mfaEnabled = (userId: number) => !!totpOf(userId)?.enabled_at;
+/** Start (or restart) enrolment with a fresh secret. Never touches an enabled one. */
+export function startTotp(userId: number, secret: string): boolean {
+  const cur = totpOf(userId);
+  if (cur?.enabled_at) return false;
+  q('INSERT INTO user_totp (user_id, secret, enabled_at, last_step, created_at) VALUES (?,?,NULL,0,?) ON CONFLICT(user_id) DO UPDATE SET secret = excluded.secret, created_at = excluded.created_at, last_step = 0')
+    .run(userId, secret, now());
+  return true;
+}
+export function enableTotp(userId: number, step: number, codeHashes: string[]) {
+  tx(() => {
+    q('UPDATE user_totp SET enabled_at = ?, last_step = ? WHERE user_id = ?').run(now(), step, userId);
+    q('UPDATE user_recovery_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(now(), userId);
+    for (const h of codeHashes) q('INSERT INTO user_recovery_codes (user_id, code_hash) VALUES (?,?)').run(userId, h);
+  });
+}
+/** Replay guard: a step is good only once and only moving forward. */
+export function useStep(userId: number, step: number): boolean {
+  return Number(q('UPDATE user_totp SET last_step = ? WHERE user_id = ? AND last_step < ?').run(step, userId, step).changes) > 0;
+}
+export function useRecoveryCode(userId: number, hash: string): boolean {
+  return Number(q('UPDATE user_recovery_codes SET used_at = ? WHERE id = (SELECT id FROM user_recovery_codes WHERE user_id = ? AND code_hash = ? AND used_at IS NULL LIMIT 1)').run(now(), userId, hash).changes) > 0;
+}
+export const recoveryLeft = (userId: number) => (q('SELECT COUNT(*) AS n FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL').get(userId) as { n: number }).n;
+export function replaceRecoveryCodes(userId: number, hashes: string[]) {
+  tx(() => {
+    q('UPDATE user_recovery_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(now(), userId);
+    for (const h of hashes) q('INSERT INTO user_recovery_codes (user_id, code_hash) VALUES (?,?)').run(userId, h);
+  });
+}
+/** Turn off (non-admins only; checked by the caller). Rows are kept as disabled, codes marked used: nothing deleted. */
+export function disableTotp(userId: number) {
+  tx(() => {
+    q('UPDATE user_totp SET enabled_at = NULL WHERE user_id = ?').run(userId);
+    q('UPDATE user_recovery_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(now(), userId);
+  });
+}

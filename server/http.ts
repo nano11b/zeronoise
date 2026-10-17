@@ -22,6 +22,7 @@ import { brandedHtml, sendMail } from './mail';
 import { emailVerifyRequiredEffective, roomEntryError } from './gate';
 import { clientIp, DEVICE_RE, isHttps, originAllowed, parseCookies, trustSetting } from './net';
 import { KeyedLimiter } from './rateLimit';
+import { newRecoveryCodes, newTotpSecret, normalizeRecovery, otpauthUrl, verifyTotp } from './totp';
 import { APPEAL_MIN, APPEAL_MAX, type AppealInfo } from '../shared/appeals';
 import * as repo from './repo';
 import { backupHealth, backupPath, backupRunning, backupStatus, listBackups, runBackup } from './backup';
@@ -257,6 +258,7 @@ export function createApp(roomList: () => unknown) {
       account, deviceId, google: googleEnabled, discord: discordEnabled, tiktok: tiktokEnabled, gifs: gifsEnabled, guestCamAfterMinutes: GUEST_CAM_AFTER_MINUTES,
       captchaMode, captchaSiteKey: captchaMode === 'turnstile' ? TURNSTILE_SITE_KEY : captchaMode === 'hcaptcha' ? HCAPTCHA_SITE_KEY : null,
       emailVerifyRequired: emailVerifyRequiredEffective(), mailConfigured,
+      ...(!acct && repo.pendingMfaUser(cookiesOf(req)[COOKIE_SID]) ? { twoFactorPending: true } : {}),
     };
     res.json(body);
   });
@@ -1119,7 +1121,94 @@ export function createApp(roomList: () => unknown) {
     if (ban) return fail(res, 403, repo.banMessage(ban));
     const account = repo.touchLogin(u.id, ip)!;
     startSession(req, res, u.id);
+    if (repo8.mfaEnabled(u.id)) return res.json({ ok: true, account: null, twoFactor: true });
     res.json({ ok: true, account });
+  });
+
+  // ---------- two-factor sign-in (batch D) ----------
+  // Any sign-in (password, Google, Discord, TikTok, native hand-off, reset link) for an enrolled account
+  // creates a pending session; it becomes a real one only after a TOTP or recovery code here.
+  const mfaUserLimiter = new KeyedLimiter(8, 15 * 60_000);
+  const hashRecovery = (userId: number, code: string) => createHash('sha256').update(`zn-rc:${userId}:${normalizeRecovery(code)}`).digest('hex');
+  const freshRecovery = (userId: number) => { const codes = newRecoveryCodes(); return { codes, hashes: codes.map((c) => hashRecovery(userId, c)) }; };
+  /** true when the code is a fresh TOTP or an unused recovery code */
+  const checkSecondFactor = (userId: number, code: string): 'totp' | 'recovery' | null => {
+    const t = repo8.totpOf(userId);
+    if (!t) return null;
+    const step = verifyTotp(t.secret, code);
+    if (step != null) return repo8.useStep(userId, step) ? 'totp' : null;
+    if (normalizeRecovery(code).length === 8 && repo8.useRecoveryCode(userId, hashRecovery(userId, code))) return 'recovery';
+    return null;
+  };
+  app.post('/api/auth/2fa', (req, res) => {
+    const token = cookiesOf(req)[COOKIE_SID];
+    const p = repo.pendingMfaUser(token);
+    if (!p) return fail(res, 401, 'That sign-in expired. Please sign in again.');
+    if (!authLimiter.take(clientIp(req)) || !mfaUserLimiter.take(`u:${p.id}`)) return fail(res, 429, 'Too many attempts. Try again later.');
+    const code = typeof req.body?.code === 'string' ? req.body.code.trim().slice(0, 20) : '';
+    const how = code ? checkSecondFactor(p.id, code) : null;
+    if (!how) return fail(res, 401, 'That code is not right. Try the current one from your app, or a recovery code.');
+    repo.completeMfa(token!);
+    repo.logAction(p.username, p.id, how === 'recovery' ? '2fa-login-recovery' : '2fa-login', p.username, null, `ip ${clientIp(req)}`);
+    res.json({ ok: true, account: repo.accountById(p.id), recoveryLeft: repo8.recoveryLeft(p.id) });
+  });
+  app.post('/api/auth/2fa/cancel', (req, res) => {
+    const token = cookiesOf(req)[COOKIE_SID];
+    if (repo.pendingMfaUser(token)) { repo.deleteSession(token); setCookie(req, res, COOKIE_SID, '', 0); }
+    res.json({ ok: true });
+  });
+  const mfaStatus = (a: repo.Account) => {
+    const t = repo8.totpOf(a.id);
+    return { enabled: !!t?.enabled_at, enabledAt: t?.enabled_at ?? null, recoveryLeft: t?.enabled_at ? repo8.recoveryLeft(a.id) : 0, required: a.role === 'admin' && !!t?.enabled_at, canDisable: a.role !== 'admin' };
+  };
+  app.get('/api/me/2fa', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    res.json({ ok: true, ...mfaStatus(a) });
+  });
+  app.post('/api/me/2fa/setup', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!mfaUserLimiter.take(`setup:${a.id}`)) return fail(res, 429, 'Too many attempts. Try again later.');
+    const secret = newTotpSecret();
+    if (!repo8.startTotp(a.id, secret)) return fail(res, 409, 'Two-factor is already on.');
+    res.json({ ok: true, secret, otpauthUrl: otpauthUrl(secret, a.username, APP_NAME) });
+  });
+  app.post('/api/me/2fa/enable', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!mfaUserLimiter.take(`m:${a.id}`)) return fail(res, 429, 'Too many attempts. Try again later.');
+    const t = repo8.totpOf(a.id);
+    if (!t || t.enabled_at) return fail(res, 409, t ? 'Two-factor is already on.' : 'Start setup first.');
+    if (Date.now() - t.created_at > 30 * 60_000) return fail(res, 410, 'Setup expired. Start again.');
+    const step = verifyTotp(t.secret, String(req.body?.code ?? ''));
+    if (step == null) return fail(res, 400, 'That code does not match. Check the time on your phone and try the next code.');
+    const { codes, hashes } = freshRecovery(a.id);
+    repo8.enableTotp(a.id, step, hashes);
+    repo.logAction(a.username, a.id, '2fa-enable', a.username, null);
+    res.json({ ok: true, recoveryCodes: codes, ...mfaStatus(a) });
+  });
+  app.post('/api/me/2fa/recovery', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!mfaUserLimiter.take(`m:${a.id}`)) return fail(res, 429, 'Too many attempts. Try again later.');
+    if (!repo8.mfaEnabled(a.id)) return fail(res, 409, 'Two-factor is off.');
+    if (!checkSecondFactor(a.id, String(req.body?.code ?? ''))) return fail(res, 400, 'That code is not right.');
+    const { codes, hashes } = freshRecovery(a.id);
+    repo8.replaceRecoveryCodes(a.id, hashes);
+    repo.logAction(a.username, a.id, '2fa-new-recovery-codes', a.username, null);
+    res.json({ ok: true, recoveryCodes: codes, ...mfaStatus(a) });
+  });
+  app.post('/api/me/2fa/disable', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (a.role === 'admin') return fail(res, 403, 'Two-factor stays on for admins once enabled. The server owner can reset it with scripts/reset-2fa.mjs.');
+    if (!mfaUserLimiter.take(`m:${a.id}`)) return fail(res, 429, 'Too many attempts. Try again later.');
+    if (!repo8.mfaEnabled(a.id)) return fail(res, 409, 'Two-factor is off.');
+    if (!checkSecondFactor(a.id, String(req.body?.code ?? ''))) return fail(res, 400, 'That code is not right.');
+    repo8.disableTotp(a.id);
+    repo.logAction(a.username, a.id, '2fa-disable', a.username, null);
+    res.json({ ok: true, ...mfaStatus(a) });
   });
 
   app.post('/api/auth/logout', (req, res) => {
@@ -1270,6 +1359,7 @@ export function createApp(roomList: () => unknown) {
     repo.setPasswordHash(userId, hash);
     repo.logAction(u.username, u.id, 'password-reset', u.username, null, `ip ${ip}`);
     startSession(req, res, userId);
+    if (repo8.mfaEnabled(userId)) return res.json({ ok: true, account: null, twoFactor: true });
     res.json({ ok: true, account: repo.accountById(userId) });
   });
 

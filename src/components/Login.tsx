@@ -53,7 +53,8 @@ export function Login({ onAccount, mode, setMode, google, discord, tiktok }: {
         if (captcha.mode === 'builtin') { body.captchaId = captcha.id || ''; body.captchaAnswer = captchaAnswer; }
         else body.captchaToken = captchaAnswer; // site widget token stored in answer field for third-party
       }
-      const r = await api<{ account: Account }>(mode === 'register' ? '/api/auth/register' : '/api/auth/login', body);
+      const r = await api<{ account: Account | null; twoFactor?: boolean }>(mode === 'register' ? '/api/auth/register' : '/api/auth/login', body);
+      if (r.twoFactor || !r.account) { location.reload(); return; }
       onAccount(r.account);
     } catch (err) {
       setError((err as Error).message);

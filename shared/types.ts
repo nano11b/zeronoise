@@ -73,6 +73,8 @@ export interface MeResponse {
   /** True only when EMAIL_VERIFY_REQUIRED is on and a mail sender is configured. */
   emailVerifyRequired: boolean;
   mailConfigured: boolean;
+  /** batch D: signed in with a password/OAuth but the two-factor code step is still due */
+  twoFactorPending?: boolean;
 }
 
 export interface RoomSummary {

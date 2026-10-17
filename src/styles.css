@@ -2366,3 +2366,15 @@ html[data-ui-theme="dark-orange"] {
 .appeal-box blockquote { margin: 0; padding: 6px 10px; border-left: 3px solid var(--border, #555); overflow-wrap: anywhere; }
 .queue-appeal { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
 .queue-appeal .input { flex: 1 1 180px; min-width: 0; }
+
+/* ---- batch D: two-factor ---- */
+.tfa-gate { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.tfa-gate h2 { font-size: 1.05rem; margin: 0; }
+.tfa-code { font-family: ui-monospace, monospace; letter-spacing: .12em; }
+.tfa { display: flex; flex-direction: column; gap: 8px; }
+.tfa-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tfa-row .input { flex: 1 1 140px; min-width: 0; }
+.tfa-steps { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
+.tfa-secret { font-size: .95rem; overflow-wrap: anywhere; user-select: all; }
+.tfa-codes ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 4px; list-style: none; padding: 0; margin: 6px 0; }
+.tfa-codes code { font-size: .95rem; }

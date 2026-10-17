@@ -742,7 +742,22 @@ const MIGRATIONS: string[] = [
     decided_at INTEGER,
     decision_note TEXT
   );
-  CREATE INDEX IF NOT EXISTS ban_appeals_status ON ban_appeals(status, created_at)
+  CREATE INDEX IF NOT EXISTS ban_appeals_status ON ban_appeals(status, created_at);
+  CREATE TABLE IF NOT EXISTS user_totp (
+    user_id INTEGER PRIMARY KEY,
+    secret TEXT NOT NULL,
+    enabled_at INTEGER,
+    last_step INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS user_recovery_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    code_hash TEXT NOT NULL,
+    used_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS user_recovery_codes_user ON user_recovery_codes(user_id);
+  ALTER TABLE sessions ADD COLUMN mfa_pending INTEGER NOT NULL DEFAULT 0
   `,
 ];
 

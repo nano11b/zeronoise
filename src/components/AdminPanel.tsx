@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { APP_NAME, LIMITS } from '../../shared/config';
 import type { AdminBan, AdminLogEntry, AdminUser, BanKind, Role } from '../../shared/types';
 import { ModQueue } from './ModQueue';
+import { TwoFactorSection } from './TwoFactor';
 import { useStaffCounts } from '../modq';
 import { api } from '../api';
 import type { Account } from '../App';
@@ -13,7 +14,7 @@ import { GamesButton, GamesSlot } from './GamesSlot';
 import { AdminBackups } from './AdminBackups';
 import { AdminStats } from './AdminStats';
 
-type Tab = 'reports' | 'stats' | 'bans' | 'users' | 'log' | 'backups';
+type Tab = 'reports' | 'stats' | 'bans' | 'users' | 'log' | 'backups' | 'security';
 const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '-');
 
 export function AdminPanel({ account, onBack, onGames }: { account: Account | null; onBack: () => void; onGames: () => void }) {
@@ -100,9 +101,9 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
       <header className="topbar">
         <div className="brand"><Logo /> <img className="wordmark" src="/logo-wordmark.png" alt="zeronoise" width={512} height={80} /> <span className="muted">· Mod panel</span></div>
         <nav className="tabs admin-tabs">
-          {(['reports', 'stats', 'bans', 'users', 'log', ...(isAdmin ? ['backups'] : [])] as Tab[]).map((t) => (
+          {(['reports', 'stats', 'bans', 'users', 'log', ...(isAdmin ? ['backups', 'security'] : [])] as Tab[]).map((t) => (
             <button key={t} className={`tab ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)} data-tab={t}>
-              {t === 'reports' ? <>Reports{waiting > 0 && <span className="admin-badge inline" data-testid="modq-tab-badge"> {waiting}</span>}</> : t === 'stats' ? 'Stats' : t === 'bans' ? 'Active bans' : t === 'users' ? 'Users' : t === 'log' ? 'Action log' : 'Backups'}
+              {t === 'reports' ? <>Reports{waiting > 0 && <span className="admin-badge inline" data-testid="modq-tab-badge"> {waiting}</span>}</> : t === 'stats' ? 'Stats' : t === 'bans' ? 'Active bans' : t === 'users' ? 'Users' : t === 'log' ? 'Action log' : t === 'security' ? 'Security' : 'Backups'}
             </button>
           ))}
         </nav>
@@ -229,6 +230,12 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
         )}
 
         {tab === 'stats' && <AdminStats onError={setError} />}
+        {tab === 'security' && isAdmin && (
+          <section className="admin-security" data-testid="admin-security">
+            <h2>Your two-factor sign-in</h2>
+            <TwoFactorSection adminView />
+          </section>
+        )}
         {tab === 'backups' && isAdmin && <AdminBackups onError={setError} onNotice={(m) => { setNotice(m); setTimeout(() => setNotice(''), 3000); }} />}
 
         {tab === 'log' && (

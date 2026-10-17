@@ -143,14 +143,25 @@ const tokenId = (token: string) => createHmac('sha256', SESSION_SECRET).update(t
 export function createSession(userId: number, ip: string, ua: string): { token: string; maxAgeSec: number } {
   const token = randomBytes(32).toString('base64url');
   const maxAgeSec = SESSION_DAYS * 86400;
-  q('INSERT INTO sessions (id, user_id, created_at, expires_at, ip, user_agent) VALUES (?,?,?,?,?,?)')
-    .run(tokenId(token), userId, now(), now() + maxAgeSec * 1000, ip, ua.slice(0, 200));
+  // batch D: an account with two-factor turned on gets a session that is not signed in until the code step passes.
+  const mfa = q('SELECT 1 AS x FROM user_totp WHERE user_id = ? AND enabled_at IS NOT NULL').get(userId) ? 1 : 0;
+  q('INSERT INTO sessions (id, user_id, created_at, expires_at, ip, user_agent, mfa_pending) VALUES (?,?,?,?,?,?,?)')
+    .run(tokenId(token), userId, now(), mfa ? now() + 10 * 60_000 : now() + maxAgeSec * 1000, ip, ua.slice(0, 200), mfa);
   return { token, maxAgeSec };
 }
 export function sessionAccount(token: string | undefined): Account | null {
   if (!token || token.length > 100) return null;
-  const r = q('SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ?').get(tokenId(token), now()) as UserRow | undefined;
+  const r = q('SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ? AND s.mfa_pending = 0').get(tokenId(token), now()) as UserRow | undefined;
   return r ? toAccount(r) : null;
+}
+/** A session still waiting for its two-factor code (10-minute window). */
+export function pendingMfaUser(token: string | undefined): { id: number; username: string; role: Role } | null {
+  if (!token || token.length > 100) return null;
+  return (q('SELECT u.id, u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ? AND s.expires_at > ? AND s.mfa_pending = 1').get(tokenId(token), now()) as { id: number; username: string; role: Role } | undefined) ?? null;
+}
+/** Code accepted: the session becomes a normal, full-length one. */
+export function completeMfa(token: string) {
+  q('UPDATE sessions SET mfa_pending = 0, expires_at = ? WHERE id = ? AND mfa_pending = 1').run(now() + SESSION_DAYS * 86400 * 1000, tokenId(token));
 }
 export function deleteSession(token: string | undefined) {
   if (token) q('DELETE FROM sessions WHERE id = ?').run(tokenId(token));

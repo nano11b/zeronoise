@@ -177,6 +177,9 @@ npm run test:browser -- http://localhost:3000
      npm run make-admin -- <username>                       # local, DATA_DIR=./data
      sudo -u camchat env DATA_DIR=/var/lib/camchat node /opt/camchat/scripts/make-admin.mjs <username>
      node scripts/make-admin.mjs <username> --role moderator   # or --role user to demote
+     # Two-factor (TOTP) is opt-in for everyone and required for an admin once that admin turns it on.
+     # Lost phone and no recovery codes: the server owner turns it off from the shell:
+     sudo -u camchat env DATA_DIR=/var/lib/camchat node /opt/camchat/scripts/reset-2fa.mjs <username>
      ```
    Reload the page afterwards (roles are read when the socket connects).
 3. Promote moderators from the mod panel (`/admin` -> Users -> role). Changes apply live.

@@ -16,7 +16,8 @@ export function ResetPassword({ token, onDone }: { token: string; onDone: (a: Ac
     if (password !== password2) { setError('Passwords do not match.'); return; }
     setBusy(true); setError('');
     try {
-      const r = await api<{ account: Account }>('/api/auth/reset', { token, password });
+      const r = await api<{ account: Account | null; twoFactor?: boolean }>('/api/auth/reset', { token, password });
+      if (r.twoFactor || !r.account) { location.replace('/'); return; }
       onDone(r.account);
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }

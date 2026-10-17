@@ -19,6 +19,7 @@ const sharp = require('sharp');
 const { io: ioClient } = require('socket.io-client');
 const OUT = path.resolve(process.argv[2] || path.join(os.tmpdir(), 'zn-batch-d'));
 fs.mkdirSync(OUT, { recursive: true });
+import crypto from 'node:crypto';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let passed = 0, failed = 0;
 const ok = (c, n, extra = '') => { c ? passed++ : failed++; console.log(`${c ? 'PASS' : 'FAIL'}  ${n}${!c && extra ? ` (${extra})` : ''}`); };
@@ -33,12 +34,12 @@ let log = ''; server.stdout.on('data', (d) => { log += d; }); server.stderr.on('
 for (let i = 0; i < 200 && !log.includes('listening'); i++) await sleep(100);
 for (let i = 0; i < 200 && !log.includes('listening'); i++) await sleep(100);
 
-function jar() {
+function jar(xff) {
   const m = new Map();
   const header = () => [...m].map(([k, v]) => `${k}=${v}`).join('; ');
   const take = (r) => { for (const c of r.headers.getSetCookie()) { const [kv] = c.split(';'); const i = kv.indexOf('='); m.set(kv.slice(0, i), kv.slice(i + 1)); } };
   return { header, async req(p, body, method) {
-    const r = await fetch(BASE + p, { method: method ?? (body ? 'POST' : 'GET'), headers: { 'x-csrf': '1', cookie: header(), ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    const r = await fetch(BASE + p, { method: method ?? (body ? 'POST' : 'GET'), headers: { 'x-csrf': '1', cookie: header(), ...(xff ? { 'x-forwarded-for': xff } : {}), ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
     take(r); const j = await r.json().catch(() => ({})); j.status = r.status; return j;
   }, async form(p, fd) {
     const r = await fetch(BASE + p, { method: 'POST', headers: { 'x-csrf': '1', cookie: header() }, body: fd });
@@ -71,6 +72,17 @@ async function uploadEmote(j, roomId, name, buf, type = 'image/png', file = 'e.p
 const sockets = [];
 let browser;
 const shot = async (page, name) => { await sleep(450); await page.screenshot({ path: path.join(OUT, `${name}.png`) }); };
+
+// RFC 6238 test helper (independent of server/totp.ts)
+const b32d = (str) => { const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = 0, v = 0; const out = []; for (const c of str.replace(/[^A-Z2-7]/g, '')) { v = (v << 5) | A.indexOf(c); bits += 5; if (bits >= 8) { out.push((v >>> (bits - 8)) & 255); bits -= 8; } } return Buffer.from(out); };
+const totpAt = (secret, step) => { const m = Buffer.alloc(8); m.writeBigUInt64BE(BigInt(step)); const h = crypto.createHmac('sha1', b32d(secret)).update(m).digest(); const o = h[h.length - 1] & 15; return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1e6).padStart(6, '0'); };
+const stepNow = () => Math.floor(Date.now() / 30000);
+let loginN = 0;
+async function login(nick) {
+  const j = jar(`10.77.${Math.floor(++loginN / 200)}.${loginN % 200 + 1}`); await j.req('/api/me');
+  const r = await j.req('/api/auth/login', { username: nick, password: `pw-${nick}-secret-1` });
+  return { j, r };
+}
 async function pageFor(u, width) {
   const ctx = await browser.createBrowserContext();
   const page = await ctx.newPage();
@@ -186,6 +198,77 @@ try {
   const dec2 = await admin.j.req(`/api/admin/appeals/${ap2.appeal.id}`, { decision: 'approve' });
   ok(dec2.ok && (await banU.j.req('/api/appeal')).banned === false, 'approving lifts the ban');
   ok((await admin.j.req('/api/admin/log')).log?.some((l) => l.action === 'appeal-approve'), 'approval is logged');
+
+  // ---------- 8. two-factor ----------
+  ok((await mem.j.req('/api/me/2fa')).enabled === false, 'two-factor is off by default');
+  ok((await (await login('DdMember')).r).account?.username === 'DdMember', 'password login without 2FA signs straight in');
+  const su = await mem.j.req('/api/me/2fa/setup', {});
+  ok(su.ok && /^[A-Z2-7]{32}$/.test(su.secret) && su.otpauthUrl.startsWith('otpauth://totp/'), 'setup returns a base32 secret and otpauth link');
+  ok((await mem.j.req('/api/me/2fa/enable', { code: '000000' })).status === 400, 'wrong code does not enable');
+  ok(!(await mem.j.req('/api/me/2fa')).enabled, 'still off after a wrong code');
+  const en = await mem.j.req('/api/me/2fa/enable', { code: totpAt(su.secret, stepNow()) });
+  ok(en.ok && en.enabled && en.recoveryCodes?.length === 10 && en.recoveryLeft === 10, 'right code enables, 10 recovery codes shown once', JSON.stringify(en).slice(0, 200));
+  ok((await mem.j.req('/api/me')).account?.username === 'DdMember', 'the current session stays signed in after enabling');
+  ok((await mem.j.req('/api/me/2fa/setup', {})).status === 409, 'setup cannot replace an enabled secret');
+  // sign in again -> pending
+  let L = await login('DdMember');
+  ok(L.r.ok && L.r.twoFactor === true && L.r.account === null, 'password login now asks for the code');
+  let me2 = await L.j.req('/api/me');
+  ok(me2.account === null && me2.twoFactorPending === true, 'pending session is not signed in (/api/me)');
+  ok((await L.j.req('/api/me/xp')).status === 401, 'pending session cannot use account APIs');
+  const ps = ioClient(BASE, { transports: ['websocket'], forceNew: true, reconnection: false, extraHeaders: { cookie: L.j.header() }, auth: { deviceId: me2.deviceId } });
+  await new Promise((res) => { ps.once('connect', res); ps.once('connect_error', res); }); sockets.push(ps);
+  const pl = await emit(ps, 'login', {});
+  ok(!pl?.account || pl.account.username !== 'DdMember', 'pending session socket is not the account', JSON.stringify(pl).slice(0, 120));
+  ok((await L.j.req('/api/auth/2fa', { code: '123456' })).status === 401, 'wrong code refused');
+  const used = totpAt(su.secret, stepNow() + 1); // the enrol code used this step already (replay guard)
+  const v1 = await L.j.req('/api/auth/2fa', { code: used });
+  ok(v1.ok && v1.account?.username === 'DdMember', 'TOTP code completes sign-in');
+  ok((await L.j.req('/api/me')).account?.username === 'DdMember', 'session is signed in after the code');
+  L = await login('DdMember');
+  ok((await L.j.req('/api/auth/2fa', { code: used })).status === 401, 'a code cannot be replayed');
+  const rc = en.recoveryCodes[0];
+  const v2 = await L.j.req('/api/auth/2fa', { code: rc.toUpperCase() });
+  ok(v2.ok && v2.recoveryLeft === 9, 'a recovery code works once (case-insensitive)');
+  L = await login('DdMember');
+  ok((await L.j.req('/api/auth/2fa', { code: rc })).status === 401, 'a used recovery code is refused');
+  await L.j.req('/api/auth/2fa/cancel', {});
+  ok((await L.j.req('/api/me')).twoFactorPending === undefined, 'cancel signs the pending session out');
+  // brute-force cap
+  L = await login('DdMember');
+  let capped = false;
+  for (let i = 0; i < 10; i++) { const r = await L.j.req('/api/auth/2fa', { code: String(100000 + i) }); if (r.status === 429) { capped = true; break; } }
+  ok(capped, 'code guessing is rate limited');
+  // reset link must not skip 2FA: covered by the same startSession path; turn off as a non-admin
+  await sleep(31000);
+  const dis = await mem.j.req('/api/me/2fa/disable', { code: totpAt(su.secret, stepNow() + 1) });
+  ok(dis.ok && dis.enabled === false, 'a regular user can turn 2FA off with a code', JSON.stringify(dis));
+  L = await login('DdMember');
+  ok(L.r.account?.username === 'DdMember', 'after turning off, password login is direct again');
+  // admin: optional until enrolled, then required and cannot be turned off
+  L = await login('DdAdmin');
+  ok(L.r.account?.role === 'admin', 'admin without 2FA still signs in normally (no lockout)');
+  const asu = await admin.j.req('/api/me/2fa/setup', {});
+  const aen = await admin.j.req('/api/me/2fa/enable', { code: totpAt(asu.secret, stepNow()) });
+  ok(aen.ok && aen.required === true && aen.canDisable === false, 'admin enrols; 2FA is then required');
+  ok((await admin.j.req('/api/me/2fa/disable', { code: aen.recoveryCodes[0] })).status === 403, 'admins cannot turn 2FA off from the site');
+  L = await login('DdAdmin');
+  ok(L.r.twoFactor === true && (await L.j.req('/api/admin/bans')).status === 401, 'admin login needs the code before the mod panel works');
+  const av = await L.j.req('/api/auth/2fa', { code: aen.recoveryCodes[1] });
+  ok(av.ok && (await L.j.req('/api/admin/bans')).ok, 'admin finishes with a recovery code and the panel works');
+  const lg2 = (await admin.j.req('/api/admin/log')).log || [];
+  ok(['2fa-enable', '2fa-login', '2fa-login-recovery', '2fa-disable'].every((a) => lg2.some((l) => l.action === a)), '2FA events are in the action log');
+  // owner escape hatch
+  const rs = spawn(process.execPath, ['scripts/reset-2fa.mjs', 'DdAdmin'], { cwd: ROOT, env: { ...process.env, DATA_DIR: DATA } });
+  let rsOut = ''; rs.stdout.on('data', (d) => { rsOut += d; }); rs.stderr.on('data', (d) => { rsOut += d; });
+  await new Promise((r) => rs.on('close', r));
+  L = await login('DdAdmin');
+  ok(/turned off/.test(rsOut) && L.r.account?.role === 'admin', 'server owner can reset an admin\'s 2FA with scripts/reset-2fa.mjs', rsOut);
+  // re-enrol the admin for the UI shots of the gate
+  const asu2 = await admin.j.req('/api/me/2fa/setup', {});
+  await sleep(31000);
+  const aen2 = await admin.j.req('/api/me/2fa/enable', { code: totpAt(asu2.secret, stepNow()) });
+  globalThis.__adminCodes = aen2.recoveryCodes || [];
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -238,6 +321,40 @@ try {
       await a.ctx.close();
       await fresh(admin);
       void b;
+    }
+    // 8. two-factor: Profile setup, admin Security tab, sign-in code step
+    {
+      const m = await pageFor(mem, width);
+      await m.page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+      await m.page.waitForSelector('[data-action="profile"]', { timeout: 15000 });
+      await m.page.$eval('[data-action="profile"]', (b) => b.click()); await sleep(400);
+      await m.page.evaluate(() => [...document.querySelectorAll('[role="menu"] button, .profile-actions button')].find((b) => /^\s*Profile\s*$/.test(b.textContent))?.click());
+      const sec = await m.page.waitForSelector('[data-section="security"] [data-action="tfa-setup"]', { timeout: 8000 }).catch(() => null);
+      ok(!!sec, `${width}: Profile dialog has the two-factor setup`);
+      if (sec) {
+        await sec.click();
+        const sc = await m.page.waitForSelector('[data-testid="tfa-secret"]', { timeout: 5000 }).catch(() => null);
+        ok(!!sc, `${width}: setup shows the key and the otpauth link`);
+        if (sc) { await sc.evaluate((e) => e.closest('.profile-section').scrollIntoView({ block: 'start' })); await shot(m.page, `d8-2fa-setup-${width}`); }
+        await m.page.evaluate(() => [...document.querySelectorAll('.tfa button')].find((b) => b.textContent === 'Cancel')?.click());
+      }
+      await m.ctx.close();
+      const a = await pageFor({ j: (await (async () => { const L2 = await login('DdAdmin'); await L2.j.req('/api/auth/2fa', { code: globalThis.__adminCodes.shift() }).catch(() => null); return L2.j; })()) }, width);
+      await a.page.goto(BASE + '/admin', { waitUntil: 'domcontentloaded' });
+      await a.page.waitForSelector('.admin-tabs [data-tab="security"]', { timeout: 15000 }).catch(() => null);
+      await a.page.evaluate(() => document.querySelector('.admin-tabs [data-tab="security"]')?.click());
+      const asec = await a.page.waitForSelector('[data-testid="admin-security"] [data-testid="tfa-section"][data-enabled="1"]', { timeout: 6000 }).catch(() => null);
+      ok(!!asec, `${width}: admin Security tab shows 2FA on (required)`);
+      await shot(a.page, `d8-2fa-admin-${width}`);
+      await a.ctx.close();
+      const L3 = await login('DdAdmin');
+      const g = await pageFor({ j: L3.j }, width);
+      await g.page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+      const gate = await g.page.waitForSelector('[data-testid="tfa-gate"]', { timeout: 10000 }).catch(() => null);
+      ok(!!gate && await noSideScroll(g.page), `${width}: sign-in shows the code step`);
+      await shot(g.page, `d8-2fa-gate-${width}`);
+      await g.ctx.close();
+      await fresh(mem); await emit(mem.s, 'room:join', { roomId: room });
     }
     // @@UI-END
   }
