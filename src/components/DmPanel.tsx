@@ -171,6 +171,10 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [c.id]);
+  const startCall = async (video: boolean) => {
+    try { const r = await dmCall<{ room: RoomState; rang: number }>('dm:call', { convoId: c.id, video }); onJoinCall?.(r.room); }
+    catch (e) { toast((e as Error).message, 'error'); }
+  };
   const dmLast = () => s.messages[s.messages.length - 1];
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -198,6 +202,10 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
           <strong data-testid="dm-title">{convoTitle(c, myId)}</strong>
           <span className="muted small">{c.kind === 'group' ? `${c.members.filter((m) => !m.left).length} people` : others[0]?.online ? 'online' : ''}{c.disappearSec > 0 && <> · ⏱ {disappearLabel(c.disappearSec)}</>}</span>
         </div>
+        {c.state === 'active' && onJoinCall && <>
+          <button type="button" className="icon-btn" onClick={() => void startCall(false)} aria-label="Voice call" title="Voice call" data-action="dm-call">📞</button>
+          <button type="button" className="icon-btn" onClick={() => void startCall(true)} aria-label="Video call" title="Video call" data-action="dm-video">📹</button>
+        </>}
         <button type="button" className="icon-btn" onClick={() => setManage((v) => !v)} aria-label="Conversation options" title="Options" aria-expanded={manage} data-action="dm-manage">⋯</button>
       </header>
       {manage && <Manage c={c} myId={myId} toast={toast} onClose={() => setManage(false)} />}

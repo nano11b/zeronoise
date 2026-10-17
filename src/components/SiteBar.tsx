@@ -14,6 +14,7 @@ import { useMentions } from '../mentions';
 import { useDm, totalUnread, requestCount } from '../dmStore';
 import type { RoomState } from '../../shared/types';
 import { useEffect } from 'react';
+import { DmCallHost } from './DmCallHost';
 
 const loadProfile = () => import('./ProfilePanel');
 const ProfilePanel = lazyNamed(loadProfile, 'ProfilePanel');
@@ -185,6 +186,7 @@ export function SiteBar({
           </>
         )}
       </div>
+      {account && <DmCallHost onJoinCall={onJoinCall} toast={toast} />}
       {dialog && account && onAccount && (
         <Sheet name={dialog} title={DIALOG_TITLE[dialog]} onClose={() => setDialog(null)} wide={dialog === 'whispers'}>
           <Lazy fallback={<p className="muted">Loading…</p>}>

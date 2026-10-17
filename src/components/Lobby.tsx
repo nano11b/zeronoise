@@ -173,6 +173,7 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
         onAudioVideo={() => setAvOpen(true)}
         onFriends={account ? () => setSheet('friends') : undefined}
         onStartRoom={() => setSheet('create')}
+        onJoinCall={(r) => onJoined(r)}
         friendRequests={friendRequests}
         extras={<><GamesButton onOpen={onGames} /><span className="muted small top-count">{total} online now</span></>}
       >

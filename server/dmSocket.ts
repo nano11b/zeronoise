@@ -24,6 +24,8 @@ export interface DmDeps {
   push: (userId: number, title: string, body: string, tag: string) => void;
   reportOk: (key: string) => boolean;
   afterReport: (id: number) => void;
+  /** W1-2: create a private call room for these accounts, put the caller in it and ring the rest. */
+  startCall?: (inviteIds: number[], info: { convoId: string; title: string; video: boolean; group: boolean }) => { error: string } | { roomId: string; room: unknown; rang: number };
 }
 type Ack = (r: unknown) => void;
 const safe = (a: unknown): Ack => (typeof a === 'function' ? (a as Ack) : () => {});
@@ -436,6 +438,25 @@ export function registerDm(socket: { on: (ev: string, fn: (...a: any[]) => void)
     const row = systemLine(x.c.id, sec ? `${x.a.username} turned on disappearing messages: new messages vanish after ${disappearLabel(sec).toLowerCase()}` : `${x.a.username} turned off disappearing messages`);
     deliver(row);
     ack({ ok: true });
+  });
+
+  // ---- W1-2: one-tap voice / video call from a conversation ----
+  socket.on('dm:call', (p: { convoId?: string; video?: unknown }, ackRaw: unknown) => {
+    const ack = safe(ackRaw);
+    const x = ctx(p?.convoId, ack, { act: true });
+    if (!x) return;
+    if (!d.startCall) return fail(ack, 'Calls are not available');
+    if (x.mr.state !== 'active') return fail(ack, 'Accept the request first');
+    const rows = dm.membersOf(x.c.id).filter((m) => m.user_id !== x.a.id && m.left_at == null);
+    if (rows.some((m) => m.state === 'request') && x.c.kind === 'direct') return fail(ack, 'They have not accepted your whisper yet');
+    const targets = rows.filter((m) => m.state === 'active' && !lobby.blockedEitherWay(x.a.id, m.user_id) && d.online(m.user_id)).map((m) => m.user_id);
+    if (!targets.length) return fail(ack, x.c.kind === 'group' ? 'Nobody in this group is online' : 'They are offline');
+    const video = !!p?.video;
+    const title = x.c.kind === 'group' ? (x.c.name ?? 'Group') : x.a.username;
+    const r = d.startCall(targets, { convoId: x.c.id, title, video, group: x.c.kind === 'group' });
+    if ('error' in r) return fail(ack, r.error);
+    deliver(systemLine(x.c.id, `${x.a.username} started a ${video ? 'video' : 'voice'} call`, x.c.disappear_sec));
+    ack({ ok: true, roomId: r.roomId, room: r.room, rang: r.rang });
   });
 
   // ---- W8: pin / archive (per person) ----

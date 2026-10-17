@@ -34,7 +34,7 @@ export function FriendsPanel({ onJoinCall, toast, open = true, onClose, onPendin
   useEffect(() => {
     refresh();
     const onUp = () => refresh();
-    const onCall = (p: { from: FriendEntry; roomId: string }) => setIncoming(p);
+    const onCall = (p: { from: FriendEntry; roomId: string; convoId?: string }) => { if (!p.convoId) setIncoming(p); }; // whisper calls ring in the top bar (W1-2)
     socket.on('friend:update', onUp);
     socket.on('call:incoming', onCall);
     return () => { socket.off('friend:update', onUp); socket.off('call:incoming', onCall); };

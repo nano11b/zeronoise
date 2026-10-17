@@ -513,7 +513,7 @@ export interface ServerToClient {
   'friend:update': (p: { type: 'request' | 'accepted' | 'removed' | 'declined'; entry: FriendEntry }) => void;
   /** a friend's lobby presence as this account may see it; entry null = hide them */
   'lobby:friend': (p: { userId: number; entry: FriendOnline | null }) => void;
-  'call:incoming': (p: { from: FriendEntry; roomId: string }) => void;
+  'call:incoming': (p: { from: FriendEntry; roomId: string; video?: boolean; convoId?: string; group?: string | null }) => void;
   'call:ended': (p: { roomId: string; reason: string }) => void;
   'session:ended': (p: { reason: string }) => void;
   'account:role': (p: { role: Role }) => void;

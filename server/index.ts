@@ -138,6 +138,8 @@ interface Room {
   announcement: RoomAnnouncement | null;
   /** for private call rooms: the two account ids allowed to join */
   callPeers: [number, number] | null;
+  /** W1-2: whisper group calls — every account allowed in (callPeers keeps the first two for older checks) */
+  callGroup?: number[] | null;
   members: Set<string>; // socket ids
   /** recent join/leave/moderation notices (not persisted) */
   notices: ChatMessage[];
@@ -2630,7 +2632,7 @@ function onConnection(socket: AppSocket) {
       const room = rooms.get(String(p?.roomId ?? ''));
       if (!room) return ack({ ok: false, error: 'Room not found' });
       if (room.isPrivate) {
-        if (!s.account || !room.callPeers || !room.callPeers.includes(s.account.id))
+        if (!s.account || !room.callPeers || !(room.callGroup ?? room.callPeers).includes(s.account.id))
           return ack({ ok: false, error: 'This is a private call.' });
       }
       if (room.locked && !isStaff(s) && !isOwner(s, room) && !room.members.has(socket.id)) {
@@ -3073,6 +3075,33 @@ function onConnection(socket: AppSocket) {
     prepareText: (raw) => prepareChatText(session(), raw),
     push: (uid, title, body, tag) => pushIfAway(uid, { title, body, url: '/?whispers=1', tag }, undefined, 'message'),
     reportOk: (k) => reportUserRl.take(k) && ipReport.take(session().ip),
+    startCall: (inviteIds, info) => {
+      const s = session();
+      if (!s.account || !s.user) return { error: 'Sign in with an account' };
+      const fresh = repo.accountById(s.account.id);
+      if (fresh) s.account = fresh;
+      const gate = roomEntryError(s.account);
+      if (gate) return { error: gate };
+      const id = `call-${s.account.id}-dm-${randomUUID().slice(0, 8)}`;
+      const row = {
+        id, name: `Call ${info.title}`.slice(0, 60), topic: info.group ? 'Group whisper call' : 'Private call', owner_user_id: s.account.id, owner_nick: s.user.nick,
+        permanent: 0, persistent: 0, locked: 0, slow_mode_sec: 0, is_private: 1,
+      };
+      repo.insertRoom(row);
+      const room = loadRoom({ ...row, created_at: Date.now() } as repo.RoomRow);
+      const all = [s.account.id, ...inviteIds];
+      room.callPeers = [all[0], all[1]].sort((a, b) => a - b) as [number, number];
+      room.callGroup = all;
+      for (const uid of inviteIds) {
+        emitToAllTabs(uid, 'call:incoming', { from: friendEntryFor(uid, s.account.id, 'accepted'), roomId: room.id, video: info.video, convoId: info.convoId, group: info.group ? info.title : null });
+      }
+      if (s.roomId) leaveRoom(socket);
+      socket.leave('lobby');
+      socket.join(`room:${room.id}`);
+      room.members.add(socket.id);
+      s.roomId = room.id;
+      return { roomId: room.id, room: roomState(room, s), rang: inviteIds.length };
+    },
     afterReport: (id) => { const r = modq.reportById(id); if (r) afterNewReport(r); },
   });
 
@@ -4175,13 +4204,18 @@ function onConnection(socket: AppSocket) {
     const s = session();
     if (!s.account || !s.user) return ack({ ok: false, error: 'Sign in with an account' });
     const room = rooms.get(String(p?.roomId ?? ''));
-    if (!room || !room.isPrivate || !room.callPeers || !room.callPeers.includes(s.account.id))
+    if (!room || !room.isPrivate || !room.callPeers || !(room.callGroup ?? room.callPeers).includes(s.account.id))
       return ack({ ok: false, error: 'Call not found' });
     if (p?.accept) {
       const fresh = repo.accountById(s.account.id);
       if (fresh) s.account = fresh;
       const gate = roomEntryError(s.account);
       if (gate) return ack({ ok: false, error: gate });
+    }
+    if (!p?.accept && room.callGroup && room.callGroup.length > 2) {
+      // W1-2: in a group call one person saying no leaves the call going for everyone else
+      for (const id of room.members) (io.sockets.sockets.get(id) as unknown as { emit: (e: string, p: unknown) => void } | undefined)?.emit('call:declined', { roomId: room.id, by: s.user!.nick });
+      return ack({ ok: true });
     }
     if (!p?.accept) {
       for (const id of [...room.members]) {

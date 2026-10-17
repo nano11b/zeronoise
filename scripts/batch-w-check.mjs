@@ -96,6 +96,7 @@ async function pageFor(u, width) {
   await page.setCookie(...u.j.header().split('; ').filter(Boolean).map((kv) => { const i = kv.indexOf('='); return { name: kv.slice(0, i), value: kv.slice(i + 1), url: BASE }; }));
   return { ctx, page };
 }
+const dismiss = async (page) => { await page.evaluate(() => [...document.querySelectorAll('a,button')].filter((e) => /^(Skip tour|Dismiss)$/.test(e.textContent.trim())).forEach((e) => e.click())); await sleep(300); };
 const befriend = async (a, b) => { await emit(a.s, 'friends:request', { username: b.nick }); await emit(b.s, 'friends:respond', { userId: a.id, accept: true }); };
 const events = (s, ev) => { const got = []; s.on(ev, (x) => got.push(x)); return got; };
 const waitFor = async (fn, ms = 4000) => { for (let i = 0; i < ms / 50; i++) { if (fn()) return true; await sleep(50); } return !!fn(); };
@@ -149,6 +150,30 @@ try {
     const ex = await A.j.req('/api/me/export', { format: 'json' });
     ok(Array.isArray(ex.conversations) && ex.conversations.length >= 2, 'W1-1: data export includes conversations', JSON.stringify(Object.keys(ex)).slice(0, 120));
   }
+  // @@W1-2
+  {
+    const g2 = await emit(A.s, 'dm:start', { usernames: [B.nick, C.nick], name: `Call crew ${R}` });
+    globalThis.GROUP2 = g2.convo.id;
+    const bRing = events(B.s, 'call:incoming'), cRing = events(C.s, 'call:incoming'), dRing = events(D.s, 'call:incoming');
+    const c1 = await emit(A.s, 'dm:call', { convoId: g2.convo.id, video: true });
+    ok(c1.ok && c1.rang === 2 && c1.room?.id, 'W1-2: one tap rings everyone in the group', c1.error);
+    ok(await waitFor(() => bRing.length && cRing.length) && bRing[0].convoId === g2.convo.id && bRing[0].video === true && !!bRing[0].group, 'W1-2: ring says who, which group and video');
+    ok(dRing.length === 0, 'W1-2: people outside the conversation are not rung');
+    const dec = await emit(C.s, 'call:respond', { roomId: c1.roomId, accept: false });
+    const acc = await emit(B.s, 'call:respond', { roomId: c1.roomId, accept: true });
+    ok(dec.ok && acc.ok && acc.room?.id === c1.roomId, 'W1-2: one person declining keeps the group call going for the rest', acc.error);
+    const dj = await emit(D.s, 'room:join', { roomId: c1.roomId });
+    ok(!dj.ok, 'W1-2: outsiders cannot join the call room');
+    const late = await emit(C.s, 'room:join', { roomId: c1.roomId });
+    ok(late.ok, 'W1-2: a group member can still join after declining', late.error);
+    for (const u of [A, B, C]) await emit(u.s, 'room:leave', {});
+    const op = await emit(B.s, 'dm:open', { convoId: g2.convo.id });
+    ok(op.messages.some((m) => m.kind === 'system' && /started a video call/.test(m.text)), 'W1-2: the call shows in the conversation');
+    const d1 = await emit(B.s, 'dm:call', { convoId: globalThis.DIRECT, video: false });
+    ok(d1.ok && d1.rang === 1, 'W1-2: 1:1 voice call from a whisper', d1.error);
+    await emit(A.s, 'call:respond', { roomId: d1.roomId, accept: false });
+    await emit(B.s, 'room:leave', {});
+  }
   // @@API-END
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
   for (const width of [1366, 390]) {
@@ -174,6 +199,24 @@ try {
     await a.page.type('[data-field="dm-text"]', `from the browser ${width}`);
     await a.page.keyboard.press('Enter');
     ok(await a.page.waitForFunction((w) => document.querySelector('[data-testid="dm-log"]').innerText.includes(`from the browser ${w}`), { timeout: 5000 }, width).then(() => true, () => false), `${width}: W1-1: send from the composer`);
+    if (!phone) {
+      const b = await pageFor(B, width);
+      await b.page.goto(BASE + '/', { waitUntil: 'networkidle0' });
+      await b.page.waitForSelector('[data-action="dm-open"]', { timeout: 15000 }); await sleep(600); await dismiss(b.page);
+      await a.page.click(`[data-convo="${globalThis.GROUP}"]`).catch(() => {});
+      await a.page.click('[data-action="dm-back"]').catch(() => {});
+      await a.page.click(`[data-convo="${globalThis.DIRECT}"]`); await sleep(400);
+      await a.page.click('[data-action="dm-call"]');
+      const rang = await b.page.waitForSelector('[data-testid="dm-ring"]', { timeout: 8000 }).then(() => true, () => false);
+      ok(rang, `${width}: W1-2: the other side sees the ring in the top bar`);
+      await shot(b.page, `w2-ring-${width}`);
+      await b.page.click('[data-action="dm-ring-accept"]').catch(() => {});
+      ok(await b.page.waitForSelector('.chat-log', { timeout: 10000 }).then(() => true, () => false), `${width}: W1-2: Join puts both in the call room`);
+      await shot(b.page, `w2-call-${width}`);
+      await b.ctx.close();
+      await a.page.goto(BASE + '/', { waitUntil: 'networkidle0' }); await sleep(600);
+      await a.page.click('[data-action="dm-open"]'); await sleep(500);
+    }
     // @@UI-W
     await a.ctx.close();
   }
