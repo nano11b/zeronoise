@@ -36,7 +36,7 @@ export function searchRoomMessages(roomId: string, tokens: string[], offset: num
       .all(roomId, ...f.args, limit + 1, offset) as unknown as MsgRow[];
   } else if (ftsAvailable) {
     const match = tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(' AND ');
-    rows = q(`SELECT m.* FROM messages_fts f JOIN messages m ON m.rowid = f.rowid
+    rows = q(`SELECT m.* FROM messages_fts f CROSS JOIN messages m ON m.rowid = f.rowid
       WHERE messages_fts MATCH ? AND f.room_id = ? AND ${base}${f.sql}
       ORDER BY m.ts DESC, m.rowid DESC LIMIT ? OFFSET ?`).all(match, roomId, roomId, ...f.args, limit + 1, offset) as unknown as MsgRow[];
   } else {

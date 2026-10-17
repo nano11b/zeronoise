@@ -54,6 +54,16 @@ export function advanceSchedule(id: string, nextAt: number, postedAt: number | n
 export function markAnnounce(messageId: string, roomId: string, scheduleId: string | null, by: string) {
   q('INSERT OR IGNORE INTO announce_messages (message_id, room_id, schedule_id, by_nick) VALUES (?,?,?,?)').run(messageId, roomId, scheduleId, by);
 }
+/** batch H7: one query for a whole history page instead of one per line */
+export function announceForMany(ids: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 400) {
+    const part = ids.slice(i, i + 400);
+    if (!part.length) continue;
+    for (const r of q(`SELECT message_id, by_nick FROM announce_messages WHERE message_id IN (${part.map(() => '?').join(',')})`).all(...part) as { message_id: string; by_nick: string }[]) out.set(r.message_id, r.by_nick);
+  }
+  return out;
+}
 export function announceFor(messageId: string): string | null {
   const r = q('SELECT by_nick FROM announce_messages WHERE message_id = ?').get(messageId) as { by_nick: string } | undefined;
   return r?.by_nick ?? null;

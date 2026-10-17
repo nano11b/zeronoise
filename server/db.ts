@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { DATA_DIR } from './env';
@@ -877,7 +878,9 @@ const MIGRATIONS: string[] = [
   );
   ALTER TABLE users ADD COLUMN whisper_receipts INTEGER NOT NULL DEFAULT 1;
   ALTER TABLE users ADD COLUMN onboarded_at INTEGER;
-  ALTER TABLE users ADD COLUMN interests TEXT
+  ALTER TABLE users ADD COLUMN interests TEXT;
+  CREATE INDEX IF NOT EXISTS mutes_expires ON mutes(expires_at);
+  CREATE INDEX IF NOT EXISTS room_visitors_day ON room_visitors(day)
   `,
 ];
 
@@ -967,9 +970,33 @@ const cache = new Map<string, StatementSync>();
 /** Cached prepared statement. */
 export function q(sql: string): StatementSync {
   let s = cache.get(sql);
-  if (!s) { s = db.prepare(sql); cache.set(sql, s); }
+  if (!s) { s = db.prepare(sql); if (SQL_PROFILE) s = profiled(sql, s); cache.set(sql, s); }
   return s;
 }
+// ---- batch H7: opt-in query profiler (SQL_PROFILE=<file>): total time and calls per statement, written on exit/SIGUSR2 ----
+const SQL_PROFILE = process.env.SQL_PROFILE || '';
+const sqlStats = new Map<string, { n: number; ms: number; max: number; rows: number }>();
+function profiled(sql: string, st: StatementSync): StatementSync {
+  const wrap = <K extends 'run' | 'get' | 'all'>(k: K) => {
+    const orig = (st[k] as (...a: unknown[]) => unknown).bind(st);
+    return (...a: unknown[]) => {
+      const t0 = process.hrtime.bigint();
+      const out = orig(...a);
+      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+      const e = sqlStats.get(sql) ?? { n: 0, ms: 0, max: 0, rows: 0 };
+      e.n++; e.ms += ms; e.max = Math.max(e.max, ms); e.rows += Array.isArray(out) ? out.length : out ? 1 : 0;
+      sqlStats.set(sql, e);
+      return out;
+    };
+  };
+  return new Proxy(st, { get(t, prop) { if (prop === 'run' || prop === 'get' || prop === 'all') return wrap(prop); const v = (t as unknown as Record<string | symbol, unknown>)[prop]; return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(t) : v; } });
+}
+export function dumpSqlProfile() {
+  if (!SQL_PROFILE) return;
+  const rows = [...sqlStats].map(([sql, e]) => ({ sql: sql.replace(/\s+/g, ' ').trim().slice(0, 300), ...e, ms: Math.round(e.ms * 100) / 100, max: Math.round(e.max * 100) / 100 })).sort((a, b) => b.ms - a.ms);
+  try { fs.writeFileSync(SQL_PROFILE, JSON.stringify(rows, null, 1)); } catch { /* best effort */ }
+}
+if (SQL_PROFILE) { process.on('SIGUSR2', dumpSqlProfile); process.on('exit', dumpSqlProfile); }
 export function tx<T>(fn: () => T): T {
   db.exec('BEGIN IMMEDIATE');
   try { const r = fn(); db.exec('COMMIT'); return r; } catch (err) { db.exec('ROLLBACK'); throw err; }

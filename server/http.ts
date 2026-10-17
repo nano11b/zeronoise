@@ -2016,7 +2016,13 @@ export function createApp(roomList: () => unknown) {
     live.roleChanged(u.id, role);
     res.json({ ok: true });
   });
-  admin.get('/log', (_req, res) => res.json({ ok: true, log: repo.listLog() }));
+  // batch H7: paged (100 per page, older pages by ?before=<id>) instead of 200 at once
+  admin.get('/log', (req, res) => {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+    const before = Number(req.query.before) || null;
+    const log = repo.listLog(limit + 1, before);
+    res.json({ ok: true, log: log.slice(0, limit), hasMore: log.length > limit });
+  });
   admin.get('/moderator-bot', (req, res) => {
     if (actor(req).role !== 'admin') return fail(res, 403, 'Admins only');
     res.json({ ok: true, botId: repo.moderatorBotId(), bots: repo.listAllBots() });

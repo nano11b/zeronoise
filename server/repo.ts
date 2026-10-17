@@ -19,7 +19,7 @@ const ROLES: AccountRole[] = ['admin', 'moderator', 'user'];
 export const isRole = (r: unknown): r is AccountRole => ROLES.includes(r as AccountRole);
 
 // ---------------- users ----------------
-interface UserRow {
+export interface UserRow {
   id: number; username: string; role: AccountRole; password_hash: string | null; google_sub: string | null; discord_id: string | null;
   tiktok_open_id: string | null;
   created_at: number; last_login_at: number | null; chat_color: string | null; chat_effect: string | null; has_avatar: number;
@@ -50,6 +50,17 @@ const toAccount = (r: UserRow): Account => ({
 
 export function userByName(name: string): UserRow | undefined {
   return q('SELECT * FROM users WHERE username_lower = ?').get(name.toLowerCase()) as UserRow | undefined;
+}
+/** batch H7: fetch many users at once (history pages) */
+export function usersByIds(ids: number[]): Map<number, UserRow> {
+  const out = new Map<number, UserRow>();
+  const uniq = [...new Set(ids)];
+  for (let i = 0; i < uniq.length; i += 400) {
+    const part = uniq.slice(i, i + 400);
+    if (!part.length) continue;
+    for (const r of q(`SELECT * FROM users WHERE id IN (${part.map(() => '?').join(',')})`).all(...part) as unknown as UserRow[]) out.set(r.id, r);
+  }
+  return out;
 }
 export function userById(id: number): UserRow | undefined {
   return q('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
@@ -497,8 +508,9 @@ export function logAction(actor: string, actorUserId: number | null, action: str
   q('INSERT INTO mod_log (ts, actor, actor_user_id, action, target, room_id, details) VALUES (?,?,?,?,?,?,?)')
     .run(now(), actor, actorUserId, action, target, roomId, details ?? null);
 }
-export function listLog(limit = 200): AdminLogEntry[] {
-  return (q('SELECT id, ts, actor, action, target, room_id, details FROM mod_log ORDER BY ts DESC, id DESC LIMIT ?').all(limit) as unknown as
+export function listLog(limit = 200, beforeId: number | null = null): AdminLogEntry[] {
+  return ((beforeId ? q('SELECT id, ts, actor, action, target, room_id, details FROM mod_log WHERE id < ? ORDER BY id DESC LIMIT ?').all(beforeId, limit)
+    : q('SELECT id, ts, actor, action, target, room_id, details FROM mod_log ORDER BY id DESC LIMIT ?').all(limit)) as unknown as
     { id: number; ts: number; actor: string; action: string; target: string | null; room_id: string | null; details: string | null }[])
     .map((r) => ({ id: r.id, ts: r.ts, actor: r.actor, action: r.action, target: r.target, roomId: r.room_id, details: r.details }));
 }

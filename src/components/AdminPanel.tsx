@@ -25,6 +25,7 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
   const [bans, setBans] = useState<AdminBan[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [log, setLog] = useState<AdminLogEntry[]>([]);
+  const [logMore, setLogMore] = useState(false);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -44,7 +45,7 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
     try {
       if (tab === 'bans') setBans((await api<{ bans: AdminBan[] }>('/api/admin/bans')).bans);
       if (tab === 'users') setUsers((await api<{ users: AdminUser[] }>(`/api/admin/users?q=${encodeURIComponent(search)}`)).users);
-      if (tab === 'log') setLog((await api<{ log: AdminLogEntry[] }>('/api/admin/log')).log);
+      if (tab === 'log') { const j = await api<{ log: AdminLogEntry[]; hasMore?: boolean }>('/api/admin/log'); setLog(j.log); setLogMore(!!j.hasMore); }
     } catch (e) { setError((e as Error).message); }
   }, [tab, search, staff]);
   useEffect(() => { load(); }, [load]);
@@ -257,6 +258,10 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
                 {log.length === 0 && <tr><td colSpan={6} className="muted">Nothing yet.</td></tr>}
               </tbody>
             </table>
+            {logMore && <button type="button" className="btn ghost small-btn" data-action="log-older" onClick={async () => {
+              try { const j = await api<{ log: AdminLogEntry[]; hasMore?: boolean }>(`/api/admin/log?before=${log[log.length - 1]?.id ?? ''}`); setLog((cur) => [...cur, ...j.log]); setLogMore(!!j.hasMore); }
+              catch (e) { setError((e as Error).message); }
+            }}>Load older</button>}
           </section>
         )}
       </main>

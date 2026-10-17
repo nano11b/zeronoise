@@ -528,8 +528,17 @@ function chatFromRow(m: repo.MsgRow, reactions?: { emoji: string; count: number;
     chatColor: msg.chatColor, chatEffect: msg.chatEffect, hasAvatar: msg.hasAvatar, reactions: [], parentId: msg.parentId, mentions: [], hidden: true,
   };
 }
+/** batch H7: when a whole page of lines is built at once, its users/previews/polls/announcements are fetched in a few queries */
+let pagePrefetch: { users: Map<number, repo.UserRow>; ann: Map<string, string>; pv: ReturnType<typeof repo2.previewsForMessages>; polls: ReturnType<typeof repo2.pollsForMessages> } | null = null;
+function withPrefetch<T>(rows: repo.MsgRow[], fn: () => T): T {
+  const ids = rows.map((m) => m.id);
+  try {
+    pagePrefetch = { users: repo.usersByIds(rows.map((m) => m.user_id).filter((x): x is number => x != null)), ann: repo3.announceForMany(ids), pv: repo2.previewsForMessages(ids), polls: repo2.pollsForMessages(ids) };
+  } catch (err) { console.error('[prefetch]', (err as Error).message); pagePrefetch = null; }
+  try { return fn(); } finally { pagePrefetch = null; }
+}
 function chatFromRowRaw(m: repo.MsgRow, reactions?: { emoji: string; count: number; mine: boolean }[], replyCount = 0, viewer?: Session): ChatMessage {
-  const u = m.user_id ? repo.userById(m.user_id) : undefined;
+  const u = m.user_id ? (pagePrefetch ? pagePrefetch.users.get(m.user_id) : repo.userById(m.user_id)) : undefined;
   if (m.burn_ttl != null) {
     // burn-after-reading: content only for its sender (until wiped); everyone else must chat:reveal
     const burned = m.burned_at != null;
@@ -562,11 +571,12 @@ function chatFromRowRaw(m: repo.MsgRow, reactions?: { emoji: string; count: numb
 function extrasFor(m: repo.MsgRow, viewer?: Session): { preview?: LinkPreviewInfo; poll?: PollInfo; announce?: { by: string } } {
   const out: { preview?: LinkPreviewInfo; poll?: PollInfo; announce?: { by: string } } = {};
   try {
-    const ann = repo3.announceFor(m.id);
+    const pf = pagePrefetch;
+    const ann = pf ? pf.ann.get(m.id) ?? null : repo3.announceFor(m.id);
     if (ann) out.announce = { by: ann };
-    const pv = repo2.previewsForMessages([m.id]).get(m.id);
+    const pv = pf ? pf.pv.get(m.id) : repo2.previewsForMessages([m.id]).get(m.id);
     if (pv) out.preview = previewInfo(pv);
-    const poll = repo2.pollsForMessages([m.id]).get(m.id);
+    const poll = pf ? pf.polls.get(m.id) : repo2.pollsForMessages([m.id]).get(m.id);
     if (poll) out.poll = pollInfo(poll, viewer);
   } catch (err) { console.error('[extras]', (err as Error).message); }
   return out;
@@ -601,11 +611,20 @@ function pinsOf(roomId: string, viewerKey: string): ChatMessage[] {
   const counts = repo.replyCounts(rows.map((m) => m.id));
   return rows.map((m) => chatFromRow(m, rx.get(m.id), counts.get(m.id) ?? 0));
 }
+/** batch H7: drop empty defaults from history lines (the client treats missing as empty); ~20-30% smaller join payloads */
+function compactMsg(m: ChatMessage): ChatMessage {
+  const o = { ...m } as Record<string, unknown>;
+  for (const k of ['reactions', 'mentions']) if (Array.isArray(o[k]) && (o[k] as unknown[]).length === 0) delete o[k];
+  for (const k of ['chatColor', 'chatEffect']) if (o[k] == null) delete o[k];
+  if (o.hasAvatar === false) delete o.hasAvatar;
+  if (o.fromId === '') delete o.fromId;
+  return o as unknown as ChatMessage;
+}
 function history(room: Room, viewerKey: string, viewer?: Session): ChatMessage[] {
   const rows = repo.recentMessages(room.id, LIMITS.historySize, false, true);
   const rx = repo.reactionsFor(rows.map((m) => m.id), viewerKey);
   const counts = repo.replyCounts(rows.map((m) => m.id));
-  const chat = rows.map((m) => chatFromRow(m, rx.get(m.id), counts.get(m.id) ?? 0, viewer));
+  const chat = withPrefetch(rows, () => rows.map((m) => compactMsg(chatFromRow(m, rx.get(m.id), counts.get(m.id) ?? 0, viewer))));
   return [...chat, ...room.notices].sort((a, b) => a.ts - b.ts);
 }
 
