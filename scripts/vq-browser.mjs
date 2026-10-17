@@ -13,6 +13,7 @@
  * leaving the stage stops his send transceivers.
  */
 import './lib/reap.mjs';
+import { signUp } from './lib/signup.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -62,20 +63,7 @@ async function user(nick) {
   });
   if (process.env.VQ_TURN) await page.evaluateOnNewDocument(() => localStorage.setItem('camchat.relay', '1'));
   page.on('pageerror', (e) => console.log(`[${nick} pageerror]`, e.message));
-  await page.goto(URL, { waitUntil: 'networkidle0' });
-  await page.click('[data-tab="register"]');
-  await page.type('input[name="username"]', nick);
-  await page.type('input[name="email"]', `${nick.toLowerCase()}@example.com`);
-  await page.type('input[name="password"]', `pw-${nick}-secret-1`);
-  await page.type('input[name="password2"]', `pw-${nick}-secret-1`);
-  const cap = await page.$('input[name="captcha"]');
-  if (cap) {
-    const m = /What is (\d+) \+ (\d+)/.exec(await page.evaluate(() => [...document.querySelectorAll('label')].map((l) => l.textContent || '').find((t) => /What is/.test(t)) || ''));
-    if (m) await cap.type(String(+m[1] + +m[2]));
-  }
-  await page.waitForSelector('[data-action="account-submit"]:not([disabled])');
-  await page.$eval('[data-action="account-submit"]', (b) => b.click());
-  await page.waitForSelector('.room-card[data-room="lobby"]', { timeout: 15000 });
+  await signUp(page, URL, nick);
   await page.click('.room-card[data-room="lobby"]');
   await page.waitForSelector('.composer, [data-action="composer-plus"]', { timeout: 15000 });
   return page;

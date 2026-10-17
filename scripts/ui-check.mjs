@@ -35,6 +35,7 @@
 // every size. --b4a-shots <dir> writes <dir>/b4a-bg-settings-desktop.png, b4a-stage-{desktop,phone}.png,
 // b4a-thread-{desktop,phone}.png and b4a-pins-desktop.png.
 import './lib/reap.mjs';
+import { signUp } from './lib/signup.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -262,33 +263,7 @@ async function openAudit(page, where, sel, { escape = true, pre = [] } = {}) {
   return true;
 }
 
-async function register(page, nick) {
-  const netlog = [];
-  page.on('response', async (r) => { if (/\/api\/auth\/(captcha|register)/.test(r.url())) netlog.push(`${r.request().method()} ${r.url().replace(/^.*\/api/, '')} ${r.status()} ${await r.text().catch(() => '').then((t) => t.slice(0, 120))}`); });
-  await page.goto(URL, { waitUntil: 'networkidle0' });
-  await page.click('[data-tab="register"]');
-  await page.type('input[name="username"]', nick);
-  await page.type('input[name="email"]', `${nick.toLowerCase()}@example.com`);
-  await page.type('input[name="password"]', `pw-${nick}-secret-1`);
-  await page.type('input[name="password2"]', `pw-${nick}-secret-1`);
-  const cap = await page.$('input[name="captcha"]');
-  if (cap) {
-    // batch H9 (real cause of the "lobby after sign-up" timeout): the CAPTCHA question loads asynchronously; typing
-    // before it arrives sent no challenge id ("CAPTCHA expired") or got the answer wiped. Wait for the question first.
-    await page.waitForFunction(() => [...document.querySelectorAll('label')].some((l) => /What is \d+ \+ \d+/.test(l.textContent || '')), { timeout: 10000 });
-    const m = /What is (\d+) \+ (\d+)/.exec(await page.evaluate(() => [...document.querySelectorAll('label')].map((l) => l.textContent || '').find((t) => /What is/.test(t)) || ''));
-    if (m) { await cap.click({ clickCount: 3 }); await cap.type(String(+m[1] + +m[2])); }
-    await page.waitForFunction((v) => document.querySelector('input[name="captcha"]')?.value === v, { timeout: 3000 }, m ? String(+m[1] + +m[2]) : '');
-  }
-  await page.waitForSelector('[data-action="account-submit"]:not([disabled])');
-  await page.$eval('[data-action="account-submit"]', (b) => b.click());
-  // batch H9: on a busy box the first lobby render after sign-up can be slow; reload once instead of failing the run.
-  await page.waitForSelector('.room-card[data-room="lobby"]', { timeout: 20000 }).catch(async (e) => {
-    console.log(`  (retrying lobby after sign-up: ${String(e.message).slice(0, 100)}) — page says: ${(await page.evaluate(() => document.body.innerText.slice(0, 300)).catch(() => '?')).replace(/\s+/g, ' ')}\n    net: ${netlog.join('\n    ')}`);
-    await page.goto(URL, { waitUntil: 'networkidle0', timeout: 30000 });
-    await page.waitForSelector('.room-card[data-room="lobby"]', { timeout: 20000 });
-  });
-}
+async function register(page, nick) { await signUp(page, URL, nick); }
 
 // batch H9: one slow first load (cold cache, busy box) used to fail the whole script; retry once with a reload.
 async function retryOnce(page, step, label) {
