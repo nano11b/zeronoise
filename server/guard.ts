@@ -11,6 +11,10 @@ export const crashTestHooks = process.env.CAMCHAT_TEST_CRASH_HOOKS === '1';
 
 export const GENERIC_ERROR = 'Something went wrong. Try again.';
 
+/** batch F9: alerting hooks (set once at startup; guard.ts stays dependency-free) */
+export const guardHooks: { error: (source: string) => void; fatal: (text: string) => void } = { error: () => {}, fatal: () => {} };
+const hook = (source: string) => { try { guardHooks.error(source); } catch { /* never let alerting throw */ } };
+
 const RESERVED = new Set(['disconnect', 'disconnecting', 'error', 'newListener', 'removeListener']);
 
 function errText(err: unknown): unknown {
@@ -27,6 +31,7 @@ export function guardSocketHandlers(socket: Socket): void {
   const rawOn = socket.on.bind(socket) as (ev: string, fn: (...args: unknown[]) => unknown) => Socket;
   const fail = (event: string, args: unknown[], err: unknown) => {
     console.error(`[socket] ${event} failed`, errText(err));
+    hook(`socket ${event}`);
     if (RESERVED.has(event)) return;
     const ack = args[args.length - 1];
     if (typeof ack === 'function') {
@@ -51,9 +56,10 @@ export function guardTimer<A extends unknown[]>(label: string, fn: (...args: A) 
   return (...args: A) => {
     try {
       const r = fn(...args);
-      if (r && typeof (r as Promise<unknown>).then === 'function') (r as Promise<unknown>).then(undefined, (err) => console.error(`[timer] ${label} failed`, errText(err)));
+      if (r && typeof (r as Promise<unknown>).then === 'function') (r as Promise<unknown>).then(undefined, (err) => { console.error(`[timer] ${label} failed`, errText(err)); hook(`timer ${label}`); });
     } catch (err) {
       console.error(`[timer] ${label} failed`, errText(err));
+      hook(`timer ${label}`);
     }
   };
 }
@@ -97,7 +103,7 @@ export function jsonErrorHandler(err: unknown, req: Request, res: Response, next
   const e = err as { status?: unknown; statusCode?: unknown };
   const st = Number(e?.status ?? e?.statusCode);
   const status = Number.isInteger(st) && st >= 400 && st < 600 ? st : 500;
-  if (status >= 500) console.error(`[http] ${req.method} ${req.originalUrl.split('?')[0]} failed`, errText(err));
+  if (status >= 500) { console.error(`[http] ${req.method} ${req.originalUrl.split('?')[0]} failed`, errText(err)); hook(`http ${req.method} ${req.originalUrl.split('?')[0]}`); }
   if (res.headersSent) { next(err); return; }
   const message = status === 413 ? 'Request too large' : status < 500 ? 'Bad request' : 'Server error';
   res.status(status).json({ ok: false, error: message });
@@ -114,9 +120,11 @@ export function installProcessGuards(): void {
   processGuardsInstalled = true;
   process.on('unhandledRejection', (reason) => {
     console.error('[process] unhandledRejection', errText(reason));
+    hook('unhandledRejection');
   });
   process.on('uncaughtException', (err, origin) => {
     console.error(`[process] uncaughtException (${origin}); exiting so the service manager restarts cleanly`, errText(err));
+    try { guardHooks.fatal(String(err instanceof Error ? err.message : err)); } catch { /* */ }
     process.exit(1);
   });
 }

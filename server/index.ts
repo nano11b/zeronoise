@@ -31,6 +31,8 @@ import {
 import { gifById } from './gifs';
 import { COOKIE_SID, checkSecret, createApp, deviceIdsOf, hashSecret, iceServers, isStaffRole } from './http';
 import * as recs from './recordings';
+import * as alerts from './alerts';
+import { initRestoreChecks } from './restoreCheck';
 import { live, type BotFeedQuery, type BotIdentity, type BotModBody, type BotModMessage, type BotResult, type BotRoomLine } from './live';
 import { deleteRoomSoundFiles, soundPlayAllowed } from './sounds';
 import { deleteVoiceForMessages, deleteVoiceForRoom, isVoiceUploader, sweepVoiceNotes } from './voiceNotes';
@@ -47,7 +49,7 @@ import { KeyedLimiter, RateLimiter } from './rateLimit';
 import * as repo from './repo';
 import { cleanText, isValidNick, isValidRoomName } from './validate';
 import { roomEntryError } from './gate';
-import { crashTestHooks, guardSocketHandlers, guardTimer, installProcessGuards } from './guard';
+import { crashTestHooks, guardSocketHandlers, guardTimer, installProcessGuards, guardHooks } from './guard';
 import { initBackups } from './backup';
 import * as repo2 from './repo2';
 import { EVENT_KEEP_PAST_MS, EVENT_MAX_UPCOMING, EVENT_REMIND_LEAD_MS, EVENT_SOON_MS, isRsvp, reminderStages, validateEvent } from '../shared/events';
@@ -80,6 +82,10 @@ installProcessGuards();
 // ---------- startup: database ----------
 migrate();
 repo.promoteBootstrapAdmins();
+// batch F9: alerts on error spikes and crash restarts
+guardHooks.error = alerts.noteError;
+guardHooks.fatal = alerts.noteFatal;
+alerts.bootCheck(Date.now() - Math.round(process.uptime() * 1000));
 {
   // batch E: rollback-safe two-factor storage
   const moved = repo.hardenPendingSessions();
@@ -4859,6 +4865,7 @@ guardTimer('event tick', eventTick)();
 setInterval(guardTimer('event tick', eventTick), EVENT_TICK).unref();
 guardTimer('poll sweep', sweepPolls)();
 initBackups();
+initRestoreChecks();
 setInterval(guardTimer('poll sweep', sweepPolls), 10 * 60_000).unref();
 guardTimer('schedule tick', scheduleTick)();
 setInterval(guardTimer('schedule tick', scheduleTick), SCHEDULE_TICK).unref();
@@ -4873,6 +4880,7 @@ httpServer.listen(PORT, HOST as string, () => {
 });
 
 function shutdown() {
+  alerts.markCleanExit();
   io.close();
   httpServer.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();

@@ -4,6 +4,7 @@ import type { AdminBan, AdminLogEntry, AdminUser, BanKind, Role } from '../../sh
 import { ModQueue } from './ModQueue';
 import { TwoFactorSection } from './TwoFactor';
 import { SecretKeyStatus, SecretKeyBanner } from './SecretKeyStatus';
+import { AdminOps } from './AdminOps';
 import { useStaffCounts } from '../modq';
 import { api } from '../api';
 import type { Account } from '../App';
@@ -240,6 +241,7 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
           </section>
         )}
         {tab === 'backups' && isAdmin && <AdminBackups onError={setError} onNotice={(m) => { setNotice(m); setTimeout(() => setNotice(''), 3000); }} />}
+        {tab === 'backups' && isAdmin && <AdminOps onError={setError} onNotice={(m) => { setNotice(m); setTimeout(() => setNotice(''), 3000); }} />}
 
         {tab === 'log' && (
           <section>

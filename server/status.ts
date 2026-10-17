@@ -12,6 +12,9 @@ export interface PublicStatus {
   releasedAt: string | null;
   lastBackupAt: number | null;
   lastBackupOk: boolean | null;
+  /** batch F10: daily restore check of the newest backup */
+  lastRestoreCheckAt: number | null;
+  lastRestoreCheckOk: boolean | null;
   checkedAt: number;
 }
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -42,6 +45,7 @@ ${row('Live package', s.package ? `<code data-package>${esc(s.package)}</code>` 
 ${row('Commit', s.commit ? `<code data-commit>${esc(s.commit)}</code>` : 'unknown')}
 ${row('Released', esc(s.releasedAt ?? 'unknown'))}
 ${row('Last backup', esc(iso(s.lastBackupAt)) + (s.lastBackupOk === false ? ' (failed)' : ''), s.lastBackupOk === false ? 'bad' : backupOld ? 'warn' : 'ok')}
+${row('Backup restore check', s.lastRestoreCheckAt == null ? 'not run yet' : `${s.lastRestoreCheckOk ? 'OK' : 'FAILED'} <span style="color:var(--muted)">(${esc(iso(s.lastRestoreCheckAt))})</span>`, s.lastRestoreCheckAt == null ? 'warn' : s.lastRestoreCheckOk ? 'ok' : 'bad')}
 ${row('Checked', esc(iso(s.checkedAt)))}
 </table>
 <p style="color:var(--muted)">Times are UTC. Machine-readable: <a href="/api/status">/api/status</a>. Back to <a href="/">${esc(BRAND_NAME)}</a>.</p>

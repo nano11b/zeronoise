@@ -29,6 +29,8 @@ import { APPEAL_MIN, APPEAL_MAX, type AppealInfo } from '../shared/appeals';
 import * as repo from './repo';
 import { backupHealth, backupPath, backupRunning, backupStatus, listBackups, runBackup } from './backup';
 import * as recs from './recordings';
+import * as alerts from './alerts';
+import * as restore from './restoreCheck';
 import { live, type BotIdentity, type BotModAction, type BotModBody } from './live';
 import { consumeNativeHandoff, issueNativeHandoff } from './nativeHandoff';
 import { registerDownloads } from './downloads';
@@ -234,8 +236,21 @@ export function createApp(roomList: () => unknown) {
       ok: db, db, uptimeSec: Math.floor(process.uptime()), startedAt: PROCESS_STARTED_AT,
       package: live.release.packageSha256, commit: live.release.commit, releasedAt: live.release.releasedAt,
       lastBackupAt: b.lastBackupAt ?? null, lastBackupOk: b.lastBackupOk ?? null, checkedAt: Date.now(),
+      ...(() => { const c = restore.lastCheck(); return { lastRestoreCheckAt: c?.at ?? null, lastRestoreCheckOk: c ? !!c.ok : null }; })(),
     };
   };
+  // batch F9: for outside pingers (UptimeRobot etc.): tiny, no auth, no caching. 200 "OK" or 503 "DOWN".
+  const uptimeProbe = (req: Request, res: Response) => {
+    let db = true;
+    try { repo.listActiveBans(); } catch { db = false; }
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.status(db ? 200 : 503);
+    if (req.method === 'HEAD') return res.end();
+    res.send(db ? 'OK' : 'DOWN database');
+  };
+  app.get('/api/uptime', uptimeProbe);
+  app.head('/api/uptime', uptimeProbe);
   app.get('/api/status', (_req, res) => {
     const st = publicStatus();
     res.setHeader('Cache-Control', 'no-store');
@@ -2001,6 +2016,30 @@ export function createApp(roomList: () => unknown) {
   admin.use('/backups', (req, res, next) => {
     if (actor(req).role !== 'admin') return fail(res, 403, 'Admins only');
     next();
+  });
+  // ---------- batch F9/F10: alerts and restore checks ----------
+  let lastOpsRun = 0; let lastTestAlert = 0;
+  admin.get('/ops', (req, res) => {
+    if (actor(req).role !== 'admin') return fail(res, 403, 'Admins only');
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, alerts: alerts.recentAlerts(20), checks: restore.recentChecks(10).map((c) => ({ ...c, detail: JSON.parse(c.detail || '{}') })), schedule: restore.restoreSchedule(), running: restore.restoreCheckRunning(),
+      errors: { inWindow: alerts.errorsInWindow(), threshold: alerts.ERROR_THRESHOLD, windowMs: alerts.ERROR_WINDOW_MS }, recipients: alerts.recipientCount(), mail: mailConfigured });
+  });
+  admin.post('/ops/restore-check', async (req, res) => {
+    if (actor(req).role !== 'admin') return fail(res, 403, 'Admins only');
+    if (Date.now() - lastOpsRun < (Number(process.env.OPS_RUN_GAP_MS) || 60_000)) return fail(res, 429, 'One check a minute');
+    lastOpsRun = Date.now();
+    repo.logAction(actor(req).username, actor(req).id, 'restore-check:run', null, null, null);
+    const row = await restore.runRestoreCheck('manual');
+    res.json({ ok: true, check: { ...row, detail: JSON.parse(row.detail || '{}') } });
+  });
+  admin.post('/ops/test-alert', (req, res) => {
+    if (actor(req).role !== 'admin') return fail(res, 403, 'Admins only');
+    if (Date.now() - lastTestAlert < 10 * 60_000) return fail(res, 429, 'One test alert per 10 minutes');
+    lastTestAlert = Date.now();
+    repo.logAction(actor(req).username, actor(req).id, 'alert:test', null, null, null);
+    alerts.raise('test', 'Test alert', `This is a test alert sent by ${actor(req).username} from the admin panel. Alerts go to every admin with a verified email${process.env.ALERT_EMAILS ? ' plus ALERT_EMAILS' : ''}.`);
+    res.json({ ok: true, recipients: alerts.recipientCount() });
   });
   admin.get('/backups', (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');

@@ -818,6 +818,24 @@ const MIGRATIONS: string[] = [
   CREATE TABLE IF NOT EXISTS room_recording_settings (
     room_id TEXT PRIMARY KEY,
     retention_days INTEGER NOT NULL DEFAULT 30
+  );
+  CREATE TABLE IF NOT EXISTS ops_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    subject TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    recipients INTEGER NOT NULL DEFAULT 0,
+    sent INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS backup_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    backup TEXT,
+    ok INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    ms INTEGER NOT NULL DEFAULT 0,
+    detail TEXT NOT NULL DEFAULT '{}'
   )
   `,
 ];

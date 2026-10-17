@@ -2436,3 +2436,14 @@ html[data-ui-theme="dark-orange"] {
 .hour-axis { display: flex; justify-content: space-between; font-size: .7rem; color: var(--muted, #9aa); }
 .rooms-growth { width: 100%; border-collapse: collapse; font-size: .82rem; }
 .rooms-growth th, .rooms-growth td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--border, #333); }
+/* batch F9/F10: ops */
+.admin-ops { margin-top: 18px; }
+.admin-ops h3 { margin: 16px 0 6px; }
+.ops-state { font-weight: 600; overflow-wrap: anywhere; }
+.ops-state.ok { color: var(--accent, #6f6); } .ops-state.bad { color: #ff6b6b; } .ops-state.warn { color: #ffd166; }
+.ops-table { width: 100%; border-collapse: collapse; font-size: .85rem; margin-top: 8px; table-layout: fixed; }
+.ops-table th, .ops-table td { text-align: left; padding: 4px; border-bottom: 1px solid var(--border, #333); overflow-wrap: anywhere; vertical-align: top; }
+.ops-alerts { list-style: none; padding: 0; display: grid; gap: 8px; }
+.ops-alerts li { overflow-wrap: anywhere; }
+.admin-ops code { overflow-wrap: anywhere; }
+.admin-ops .btn { min-height: 40px; }
