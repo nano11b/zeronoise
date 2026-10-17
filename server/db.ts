@@ -789,7 +789,15 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS room_ban_appeals_room ON room_ban_appeals(room_id, status);
   ALTER TABLE user_totp ADD COLUMN secret_enc TEXT;
-  ALTER TABLE user_totp ADD COLUMN marker INTEGER NOT NULL DEFAULT 0
+  ALTER TABLE user_totp ADD COLUMN marker INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE IF NOT EXISTS user_drafts (
+    user_id INTEGER NOT NULL,
+    room_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, room_id, thread_id)
+  )
   `,
 ];
 

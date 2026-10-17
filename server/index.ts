@@ -2937,6 +2937,33 @@ function onConnection(socket: AppSocket) {
     ack({ ok: true });
   });
 
+  // ---------- draft sync (batch E4) ----------
+  const draftRl = new Map<string, number[]>();
+  socket.on('draft:get', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const acc = session()?.account;
+    if (!acc) return ack({ ok: true, drafts: [] });
+    const roomId = typeof p?.roomId === 'string' ? p.roomId.slice(0, 80) : '';
+    void socket.join(`acct:${acc.id}`);
+    ack({ ok: true, drafts: repo8.draftsOf(acc.id, roomId).map((d) => ({ threadId: d.thread_id, text: d.text, updatedAt: d.updated_at })) });
+  });
+  socket.on('draft:save', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const acc = session()?.account;
+    if (!acc) return ack({ ok: false, error: 'Sign in to sync drafts' });
+    const now = Date.now(); const hits = (draftRl.get('d') ?? []).filter((t) => now - t < 10_000); hits.push(now); draftRl.set('d', hits);
+    if (hits.length > 40) return ack({ ok: false, error: 'Slow down' });
+    const roomId = typeof p?.roomId === 'string' ? p.roomId.slice(0, 80) : '';
+    const threadId = typeof p?.threadId === 'string' ? p.threadId.slice(0, 80) : '';
+    if (!roomId || !rooms.has(roomId)) return ack({ ok: false, error: 'Unknown room' });
+    const text = typeof p?.text === 'string' ? p.text.slice(0, LIMITS.messageMax) : '';
+    // the device's own clock orders its edits; never trust a time far ahead of ours
+    const at = Math.min(Number.isFinite(p?.at) ? Number(p.at) : now, now + 5_000);
+    const stored = repo8.saveDraft(acc.id, roomId, threadId, text, at);
+    void socket.join(`acct:${acc.id}`);
+    if (stored != null) socket.to(`acct:${acc.id}`).emit('draft:sync', { roomId, threadId, text, updatedAt: stored });
+    ack({ ok: true, updatedAt: stored });
+  });
   socket.on('chat:send', (p, ackRaw) => {
     const ack = safeAck(ackRaw);
     const s = session();

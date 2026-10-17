@@ -8,6 +8,7 @@ import { applyAudioOutputToDocument, audioConstraints, loadStoredDevices } from 
 import { LocalSpeakingMonitor, RemoteSpeakingMonitor } from '../speaking';
 import { LevelBadge } from './Level';
 import { call, getIceServers, socket } from '../socket';
+import { useDraftSync } from '../drafts';
 import { fmtTime, unreadBadge } from '../util';
 import { readRoomLocally } from '../mentions';
 import { storedDeviceId } from '../api';
@@ -1118,6 +1119,9 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   };
   const [burnOn, setBurnOn] = useState(false);
   const [burnTtl, setBurnTtl] = useState<BurnTtl>(BURN_DEFAULT_TTL);
+  // batch E4: drafts follow the account across devices (not while editing an old message)
+  useDraftSync(initial.id, '', editingId ? '' : text, (t) => { if (!editingId) setText(t); }, !!account, !editingId);
+  useDraftSync(initial.id, thread ? thread.parent.id : null, threadText, setThreadText, !!account, !!thread);
   const [threadBurnOn, setThreadBurnOn] = useState(false);
   const [threadBurnTtl, setThreadBurnTtl] = useState<BurnTtl>(BURN_DEFAULT_TTL);
   /** burn messages whose countdown ran out for me */

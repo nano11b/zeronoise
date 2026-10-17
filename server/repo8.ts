@@ -219,3 +219,16 @@ export function decideRoomAppeal(id: number, status: 'approved' | 'denied', by: 
   return Number(q(`UPDATE room_ban_appeals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'open'`).run(status, by, now(), note, id).changes) > 0;
 }
 export const passkeyUsers = () => (q('SELECT DISTINCT user_id FROM user_passkeys WHERE removed_at IS NULL').all() as { user_id: number }[]).map((r) => r.user_id);
+
+// ---------- draft sync (batch E4): one unsent draft per account, room and thread; '' = cleared ----------
+export interface DraftRow { thread_id: string; text: string; updated_at: number }
+export const draftsOf = (userId: number, roomId: string) =>
+  q("SELECT thread_id, text, updated_at FROM user_drafts WHERE user_id = ? AND room_id = ? AND text <> '' ORDER BY updated_at DESC LIMIT 50").all(userId, roomId) as unknown as DraftRow[];
+/** Last writer wins by time; returns the stored time, or null when a newer draft was already there. */
+export function saveDraft(userId: number, roomId: string, threadId: string, text: string, at: number): number | null {
+  const cur = q('SELECT updated_at FROM user_drafts WHERE user_id = ? AND room_id = ? AND thread_id = ?').get(userId, roomId, threadId) as { updated_at: number } | undefined;
+  if (cur && cur.updated_at > at) return null;
+  q(`INSERT INTO user_drafts (user_id, room_id, thread_id, text, updated_at) VALUES (?,?,?,?,?)
+     ON CONFLICT(user_id, room_id, thread_id) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`).run(userId, roomId, threadId, text, at);
+  return at;
+}

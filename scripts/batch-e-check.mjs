@@ -176,6 +176,26 @@ try {
   // E3: no key in this run: admin status says so, members can't read it
   { const st = await admin.j.req('/api/admin/security-status'); ok(st.ok && st.keySet === false && typeof st.plaintext === 'number', 'E3: admin security status reports the missing key', JSON.stringify(st));
     ok((await mem.j.req('/api/admin/security-status')).status >= 401, 'E3: security status is admin-only'); }
+  // E4: draft sync API
+  {
+    const s2 = await sock(mem.j); sockets.push(s2);
+    await emit(mem.s, 'draft:get', { roomId: room }); await emit(s2, 'draft:get', { roomId: room });
+    const got = new Promise((r) => { const t = setTimeout(() => r(null), 4000); s2.once('draft:sync', (p) => { clearTimeout(t); r(p); }); });
+    const sv = await emit(mem.s, 'draft:save', { roomId: room, threadId: '', text: 'half a thought', at: Date.now() });
+    const p = await got;
+    ok(sv.ok && p?.text === 'half a thought' && p.threadId === '', 'E4: a saved draft reaches the account\'s other device live', JSON.stringify({ sv, p }));
+    const old = await emit(mem.s, 'draft:save', { roomId: room, threadId: '', text: 'stale', at: Date.now() - 60_000 });
+    ok(old.ok && old.updatedAt == null, 'E4: an older edit never overwrites a newer draft');
+    await emit(mem.s, 'draft:save', { roomId: room, threadId: 'thread-x', text: 'reply draft', at: Date.now() });
+    const g = await emit(s2, 'draft:get', { roomId: room });
+    ok(g.drafts?.find((d) => d.threadId === '')?.text === 'half a thought' && g.drafts?.find((d) => d.threadId === 'thread-x')?.text === 'reply draft', 'E4: drafts are kept per room and per thread', JSON.stringify(g));
+    const og = await emit(other.s, 'draft:get', { roomId: room });
+    ok(og.ok && og.drafts.length === 0, 'E4: drafts are private to the account');
+    await emit(mem.s, 'draft:save', { roomId: room, threadId: '', text: '', at: Date.now() });
+    await emit(mem.s, 'draft:save', { roomId: room, threadId: 'thread-x', text: '', at: Date.now() });
+    ok(((await emit(s2, 'draft:get', { roomId: room })).drafts || []).length === 0, 'E4: clearing (sending) removes the draft everywhere');
+    s2.disconnect();
+  }
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -293,6 +313,26 @@ try {
       { const nss = await noSideScroll(a.page); ok(!!st && nss, `${width}: Security tab shows the key status and the setup command`, JSON.stringify({ st: !!st, nss, w: await a.page.evaluate(() => [document.documentElement.scrollWidth, innerWidth, [...document.querySelectorAll("body *")].filter((e) => e.getBoundingClientRect().right > innerWidth + 1).slice(0, 4).map((e) => e.tagName + "." + e.className + ":" + Math.round(e.getBoundingClientRect().right))]) })); }
       if (st) { await st.evaluate((e) => e.scrollIntoView({ block: 'start' })); await shot(a.page, `e3-secret-key-warning-${width}`); }
       await a.ctx.close();
+    }
+    // E4: type on the laptop, pick it up on the phone (one chat session per account, so devices take turns)
+    {
+      const msg = `draft from the laptop ${width}`;
+      const A = await pageFor(other, 1366);
+      await enterRoom(A.page, room);
+      await A.page.type('input[aria-label="Chat message"]', msg); await sleep(1500);
+      await A.ctx.close();
+      const B = await pageFor(other, width);
+      await enterRoom(B.page, room);
+      const seen = await B.page.waitForFunction((m) => document.querySelector('input[aria-label="Chat message"]')?.value === m, { timeout: 8000 }, msg).catch(() => null);
+      ok(!!seen, `${width}: draft typed on one device is there on the other`);
+      await shot(B.page, `e4-draft-synced-${width}`);
+      await B.page.focus('input[aria-label="Chat message"]'); await B.page.keyboard.press('Enter'); await sleep(800);
+      await B.ctx.close();
+      const C = await pageFor(other, 1366);
+      await enterRoom(C.page, room); await sleep(1200);
+      ok(await C.page.$eval('input[aria-label="Chat message"]', (i) => i.value) === '', `${width}: once sent, the draft is gone on the first device too`);
+      await C.ctx.close();
+      await fresh0(other);
     }
     // @@UI-END
   }

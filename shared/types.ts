@@ -281,6 +281,9 @@ export interface ClientToServer {
   /** batch C: same, from the mod queue (staff anywhere; room managers for their own rooms) */
   'roomappeal:status': (p: { roomId: string }, ack: Ack<{ banned: boolean; ban?: { id: number; reason: string | null; expiresAt: number | null }; appeal?: RoomAppealInfo | null; canAppeal?: boolean }>) => void;
   'roomappeal:submit': (p: { roomId: string; text: string }, ack: Ack<{ appeal: RoomAppealInfo }>) => void;
+  /** batch E4: unsent drafts (accounts), keyed by room and thread ('' = main chat) */
+  'draft:get': (p: { roomId: string }, ack: Ack<{ drafts: { threadId: string; text: string; updatedAt: number }[] }>) => void;
+  'draft:save': (p: { roomId: string; threadId?: string; text: string; at?: number }, ack: Ack<{ updatedAt: number | null }>) => void;
   'roomappeal:decide': (p: { appealId: number; decision: 'approve' | 'deny'; note?: string }, ack: Ack<{ decision: 'approved' | 'denied' }>) => void;
   'modq:history': (p: { messageId: string }, ack: Ack<{ versions: { text: string; at: number }[]; current: { text: string; at: number } }>) => void;
   'chat:history': (p: { messageId: string }, ack: Ack<{ versions: { text: string; at: number }[]; current: { text: string; at: number } }>) => void;
@@ -407,6 +410,8 @@ export interface ClientToServer {
 
 export interface ServerToClient {
   rooms: (rooms: RoomSummary[]) => void;
+  /** batch E4: a draft changed on another device of this account */
+  'draft:sync': (p: { roomId: string; threadId: string; text: string; updatedAt: number }) => void;
   // ---- moderation queue ----
   /** a line was auto-hidden pending review, or shown again (with the line to restore) */
   'chat:hidden': (p: { id: string; hidden: boolean; message?: ChatMessage }) => void;
