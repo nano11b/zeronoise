@@ -714,7 +714,11 @@ const MIGRATIONS: string[] = [
   // 41: batch C - voice rooms (audio only).
   `
   ALTER TABLE rooms ADD COLUMN voice INTEGER NOT NULL DEFAULT 0;
-  ALTER TABLE room_schedules ADD COLUMN poll TEXT
+  ALTER TABLE room_schedules ADD COLUMN poll TEXT;
+  ALTER TABLE users ADD COLUMN banner_id TEXT;
+  ALTER TABLE users ADD COLUMN profile_links TEXT;
+  ALTER TABLE users ADD COLUMN now_playing TEXT;
+  ALTER TABLE users ADD COLUMN now_playing_at INTEGER
   `,
 ];
 

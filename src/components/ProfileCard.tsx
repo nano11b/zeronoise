@@ -5,6 +5,7 @@ import { api } from '../api';
 import { renderBioMarkdown } from '../markdown';
 import { call, socket } from '../socket';
 import { BadgeCard } from './Badges';
+import { Profile2Banner, Profile2Blocks } from './Profile2';
 import { RoleTag } from './RoleTag';
 import { NickLabel, UserAvatar } from './UserAvatar';
 
@@ -49,6 +50,7 @@ export function ProfileCard({ nick, onClose, toast, isIgnored, toggleIgnore, ope
         {error && <p className="muted">{error}</p>}
         {p && (
           <>
+            <Profile2Banner url={p.bannerUrl} />
             <div className="pc-head">
               <UserAvatar nick={p.username} accountId={p.id} chatColor={p.chatColor} hasAvatar={p.hasAvatar} size={64} />
               <div className="pc-id">
@@ -62,6 +64,7 @@ export function ProfileCard({ nick, onClose, toast, isIgnored, toggleIgnore, ope
               </div>
             </div>
             {bioHtml ? <div className="pc-bio md" data-bio="1" dangerouslySetInnerHTML={{ __html: bioHtml }} /> : <p className="muted small pc-bio">No bio yet.</p>}
+            <Profile2Blocks nowPlaying={p.nowPlaying} links={p.links} mutualFriends={p.mutualFriends} mutualRooms={p.mutualRooms} onOpenRoom={onOpenRoom} />
             <BadgeCard ids={p.badges} />
             {p.rooms.length > 0 && (
               <div className="pc-rooms">

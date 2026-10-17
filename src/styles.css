@@ -2314,3 +2314,13 @@ html[data-ui-theme="dark-orange"] {
 .voice-talker.speaking .voice-dot { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
 .voice-hands { flex: none; display: inline-flex; align-items: center; gap: 4px; }
 .queue-edits { margin: 6px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+
+/* ---- batch C: profiles 2.0 ---- */
+.p2-banner-preview { display: block; width: 100%; aspect-ratio: 4 / 1; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); margin: 6px 0; }
+.p2-banner-preview.empty { background: linear-gradient(120deg, var(--panel-2), var(--bg-2)); }
+.p2-link-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 6px; margin: 4px 0; }
+.p2-link-row input { min-width: 0; }
+.pc-banner { display: block; width: 100%; aspect-ratio: 4 / 1; object-fit: cover; border-radius: 8px; flex: none; }
+.pc-np { margin: 6px 0; }
+.pc-links { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.pc-links a { overflow-wrap: anywhere; }

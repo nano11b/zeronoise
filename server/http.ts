@@ -60,6 +60,9 @@ import { EMOTE_ID_RE, EMOTE_MAX_BYTES, EMOTE_NAME_RE, EMOTES_PER_ROOM, emoteUrl 
 import { deleteEmoteFile, emoteFileExists, emotePath, newEmoteId, processEmote, writeEmote } from './roomEmotes';
 import { ART_ID_RE, radioArt } from './radio';
 import * as invites from './invites';
+import * as repo7 from './repo7';
+import { BANNER_ID_RE, bannerPath, bannerUrl, newBannerId, processBanner, retireBanner, writeBanner } from './banners';
+import { BANNER_MAX_BYTES, checkProfileLinks, cleanNowPlaying, NOW_PLAYING_MAX } from '../shared/profile2';
 import { INVITE_CODE_RE, INVITE_EXPIRY, INVITE_MAX_USES, INVITE_PATH_RE, INVITES_PER_ROOM, type InviteExpiry, type InvitePublic } from '../shared/invites';
 import { cardVersion, injectMeta, roomCard, roomMeta, siteMeta, variantFor, type CardRoom, type Meta } from './og';
 
@@ -1782,8 +1785,94 @@ export function createApp(roomList: () => unknown) {
         id: row.id, username: row.username, role: row.role, chatColor: row.chat_color, chatEffect: row.chat_effect,
         hasAvatar: !!row.has_avatar, bio: row.bio ?? '', badges: shownBadges(repo.shownBadgeChoice(row.id), earned),
         joinedAt: row.created_at, rooms: repo2.publicRoomsOwned(row.id), friend, online: !!sid, ...(sid ? { socketId: sid } : {}),
+        ...(() => {
+          const p2 = repo7.profile2Of(row.id);
+          return {
+            bannerUrl: p2.bannerId ? bannerUrl(p2.bannerId) : null, links: p2.links, nowPlaying: p2.nowPlaying,
+            mutualFriends: row.id === viewer.id ? [] : repo7.mutualFriends(viewer.id, row.id),
+            mutualRooms: row.id === viewer.id ? [] : repo7.mutualRooms(viewer.id, row.id),
+          };
+        })(),
       },
     });
+  });
+  // ---- profiles 2.0 (batch C): banner, links, now playing ----
+  const bannerUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: BANNER_MAX_BYTES, files: 1 },
+    fileFilter: (_req, file, cb) => {
+      if (/^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)) cb(null, true);
+      else cb(new Error('Use JPEG, PNG, WebP or GIF'));
+    },
+  }).single('banner');
+  app.get('/api/me/profile2', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    const p2 = repo7.profile2Of(a.id);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ ok: true, bannerUrl: p2.bannerId ? bannerUrl(p2.bannerId) : null, links: p2.links, nowPlaying: p2.nowPlaying });
+  });
+  app.post('/api/me/banner', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    bannerUpload(req, res, async (err) => {
+      if (err) {
+        const msg = err instanceof Error ? err.message : 'Upload failed';
+        if (/File too large|LIMIT_FILE_SIZE/i.test(msg)) return fail(res, 400, 'Image too large (max 2 MB)');
+        return fail(res, 400, /Use JPEG/.test(msg) ? msg : 'Upload failed');
+      }
+      const file = (req as Request & { file?: Express.Multer.File }).file;
+      if (!file?.buffer?.length) return fail(res, 400, 'Choose an image file');
+      try {
+        const webp = await processBanner(file.buffer);
+        const id = newBannerId();
+        writeBanner(id, webp);
+        const old = repo7.profile2Of(a.id).bannerId;
+        repo7.setBanner(a.id, id);
+        if (old) retireBanner(old);
+        res.json({ ok: true, bannerUrl: bannerUrl(id) });
+      } catch (e) { return fail(res, 400, (e as Error).message || 'Could not process image'); }
+    });
+  });
+  app.delete('/api/me/banner', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const old = repo7.profile2Of(a.id).bannerId;
+    repo7.setBanner(a.id, null);
+    if (old) retireBanner(old);
+    res.json({ ok: true, bannerUrl: null });
+  });
+  app.get('/api/banners/:id.webp', (req, res) => {
+    const id = String(req.params.id ?? '');
+    if (!BANNER_ID_RE.test(id) || repo7.bannerOwner(id) == null) return res.status(404).end();
+    res.setHeader('Content-Type', 'image/webp');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.sendFile(bannerPath(id), (e) => { if (e && !res.headersSent) res.status(404).end(); });
+  });
+  app.patch('/api/me/links', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const v = checkProfileLinks((req.body as { links?: unknown })?.links);
+    if (!v.ok) return fail(res, 400, v.error);
+    const links = v.links.map((l) => ({ ...l, label: maskWords(l.label) }));
+    if (links.some((l) => hasFilteredWord(l.url))) return fail(res, 400, 'Please use another link');
+    repo7.setProfileLinks(a.id, links);
+    res.json({ ok: true, links });
+  });
+  app.patch('/api/me/now-playing', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const raw = (req.body as { text?: unknown })?.text;
+    if (raw != null && typeof raw !== 'string') return fail(res, 400, 'Status must be text');
+    if (typeof raw === 'string' && raw.trim().length > NOW_PLAYING_MAX) return fail(res, 400, `At most ${NOW_PLAYING_MAX} characters`);
+    const text = cleanNowPlaying(raw ?? '');
+    repo7.setNowPlaying(a.id, text ? maskWords(text) : null);
+    res.json({ ok: true, nowPlaying: text ? maskWords(text) : null });
   });
   app.patch('/api/me/bio', (req, res) => {
     const a = reqAccount(req);

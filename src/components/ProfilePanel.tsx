@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Profile2Section } from './Profile2';
 import type { Account } from '../App';
 import { api } from '../api';
 import { NickLabel, UserAvatar } from './UserAvatar';
@@ -140,6 +141,7 @@ export function ProfileDialogBody({ account, onAccount, toast }: { account: Acco
         </div>
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={(e) => upload(e.target.files?.[0] ?? null)} />
       </div>
+      <Profile2Section toast={toast} />
       <BioSection username={account.username} toast={toast} />
       <PrivacySection toast={toast} />
       <div className="profile-section previews-section">

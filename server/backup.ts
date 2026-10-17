@@ -26,7 +26,7 @@ export const BACKUP_KEEP = 7;
 const MIN_FREE_BYTES = 2 * 1024 ** 3;
 const MAX_FREE_FRACTION = 0.3;
 /** User data worth keeping. Link-preview images and radio art are caches; downloads/ holds re-uploadable app installers. */
-export const BACKUP_DIRS = ['avatars', 'room-thumbs', 'room-icons', 'room-emotes', 'voice', 'sounds', 'uploads', 'report-evidence'] as const;
+export const BACKUP_DIRS = ['avatars', 'room-thumbs', 'room-icons', 'room-emotes', 'voice', 'sounds', 'uploads', 'report-evidence', 'banners'] as const;
 export const BACKUP_FILES = ['vapid.json'] as const;
 
 const env = process.env;

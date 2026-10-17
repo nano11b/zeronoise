@@ -185,6 +185,46 @@ try {
   ok(pm && pm.poll.options.length === 3 && pm.from === 'CcOwner', 'scheduled poll posts itself on time', JSON.stringify(pm?.poll ?? null));
   const sp2 = await emit(owner.s, 'schedule:create', { text: 'Weekly check-in?', at: Date.now() + 3_600_000, repeat: 'weekly', kind: 'poll', poll: { options: ['Good', 'Meh'] } });
   ok(sp2.ok, 'a weekly scheduled poll stays listed');
+  // ---------- 4. profiles 2.0 ----------
+  const bannerPng = await sharp({ create: { width: 1600, height: 500, channels: 4, background: '#3355ff' } }).png().toBuffer();
+  let fd = new FormData(); fd.append('banner', new Blob([bannerPng], { type: 'image/png' }), 'b.png');
+  const bu = await mem.j.form('/api/me/banner', fd);
+  ok(bu.ok && /^\/api\/banners\/[a-f0-9]{20}\.webp$/.test(bu.bannerUrl), 'banner upload re-encoded to WebP', JSON.stringify(bu));
+  const bimg = await fetch(BASE + bu.bannerUrl);
+  const bbuf = Buffer.from(await bimg.arrayBuffer());
+  const bmeta = await sharp(bbuf).metadata();
+  ok(bimg.status === 200 && bmeta.format === 'webp' && bmeta.width === 1200 && bmeta.height === 300, 'banner served 1200x300 webp');
+  fd = new FormData(); fd.append('banner', new Blob([Buffer.alloc(3 * 1024 * 1024, 7)], { type: 'image/png' }), 'big.png');
+  ok(!(await mem.j.form('/api/me/banner', fd)).ok, 'banner over 2 MB refused');
+  fd = new FormData(); fd.append('banner', new Blob([Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>')], { type: 'image/svg+xml' }), 'x.svg');
+  ok(!(await mem.j.form('/api/me/banner', fd)).ok, 'SVG banner refused');
+  for (const [bad, why] of [['javascript:alert(1)', 'javascript:'], ['http://127.0.0.1/admin', 'IP literal'], ['https://user:pw@example.com', 'credentials'], ['ftp://example.com/x', 'ftp'], ['https://localhost/x', 'localhost'], ['data:text/html,hi', 'data:']]) {
+    const r = await mem.j.req('/api/me/links', { links: [{ label: 'x', url: bad }] }, 'PATCH');
+    ok(!r.ok && r.status === 400, `link refused: ${why}`);
+  }
+  ok(!(await mem.j.req('/api/me/links', { links: Array.from({ length: 5 }, (_, i) => ({ label: `l${i}`, url: `https://ex${i}.com` })) }, 'PATCH')).ok, 'at most 4 links');
+  const lk = await mem.j.req('/api/me/links', { links: [{ label: 'My channel', url: 'youtube.com/@ccmember' }, { label: '', url: 'https://github.com/ccmember' }] }, 'PATCH');
+  ok(lk.ok && lk.links[0].url === 'https://youtube.com/@ccmember' && lk.links[1].label === 'github.com', 'links normalized (https added, label from host)', JSON.stringify(lk));
+  ok(!(await mem.j.req('/api/me/now-playing', { text: 'x'.repeat(81) }, 'PATCH')).ok, 'now playing max 80 chars');
+  const np = await mem.j.req('/api/me/now-playing', { text: '  Rocket   League <3 ' }, 'PATCH');
+  ok(np.ok && np.nowPlaying === 'Rocket League 3', 'now playing cleaned', np.nowPlaying);
+  // mutual friends and rooms
+  const fr = async (a, b) => { await emit(a.s, 'friends:request', { username: b.nick }); await sleep(150); await emit(b.s, 'friends:respond', { userId: a.id, accept: true }); await sleep(150); };
+  await fr(owner, mem); await fr(owner, other); await fr(admin, mem); await fr(admin, other);
+  await emit(other.s, 'room:join', { roomId: troom }); await emit(mem.s, 'room:join', { roomId: troom }); await sleep(300);
+  await emit(other.s, 'room:join', { roomId: vroom }); await emit(mem.s, 'room:join', { roomId: vroom }); await sleep(300);
+  const pw = await emit(owner.s, 'room:create', { name: 'cc-secret', password: 'hunter22' });
+  await emit(mem.s, 'room:join', { roomId: pw.roomId, password: 'hunter22' }); await emit(other.s, 'room:join', { roomId: pw.roomId, password: 'hunter22' }); await sleep(300);
+  const prof = await other.j.req('/api/users/CcMember/profile');
+  const pp = prof.profile ?? {};
+  ok(pp.bannerUrl === bu.bannerUrl && pp.links?.length === 2 && pp.nowPlaying === 'Rocket League 3', 'profile card carries banner, links, now playing');
+  const mf = (pp.mutualFriends ?? []).map((f) => f.username).sort().join(',');
+  ok(mf === 'CcAdmin,CcOwner', 'mutual friends listed', mf);
+  const mr = (pp.mutualRooms ?? []).map((r) => r.id);
+  ok(mr.includes(troom) && mr.includes(vroom), 'mutual rooms listed', JSON.stringify(mr));
+  ok(!mr.includes(pw.roomId), 'password rooms never show as mutual rooms');
+  const self = (await mem.j.req('/api/users/CcMember/profile')).profile;
+  ok(self.mutualFriends.length === 0 && self.mutualRooms.length === 0, 'no mutuals on your own profile');
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -249,6 +289,34 @@ try {
       await o.ctx.close();
       await fresh(owner); await fresh(mem);
       await emit(owner.s, 'room:join', { roomId: troom }); await emit(mem.s, 'room:join', { roomId: troom });
+    }
+    // 4. profiles 2.0: card (other viewer) + editor (own Profile dialog)
+    {
+      const o = await pageFor(other, width);
+      await enterRoom(o.page, troom);
+      if (phone) { await o.page.evaluate(() => document.querySelector('[data-action="more"]')?.click()); await sleep(300); await o.page.evaluate(() => document.querySelector('[data-action="people"]')?.click()); await sleep(400); }
+      await o.page.evaluate(() => document.querySelector('.user-row[data-nick="CcMember"]')?.click()); await sleep(400);
+      await o.page.evaluate(() => document.querySelector('[data-action="view-profile"]')?.click());
+      const card = await o.page.waitForSelector('[data-profile="CcMember"]', { timeout: 6000 }).catch(() => null);
+      ok(!!card, `${width}: profile card opens`);
+      await sleep(600);
+      ok(!!(await o.page.$('[data-profile="CcMember"] img.pc-banner')), `${width}: card shows the banner`);
+      ok(!!(await o.page.$('[data-profile="CcMember"] [data-now-playing]')), `${width}: card shows now playing`);
+      const rels = await o.page.$$eval('[data-profile="CcMember"] a[data-profile-link]', (as) => as.map((a) => a.rel));
+      ok(rels.length === 2 && rels.every((r) => r.includes('nofollow') && r.includes('noopener')), `${width}: links have rel=nofollow noopener`);
+      ok(!!(await o.page.$('[data-profile="CcMember"] [data-mutual="friends"]')) && !!(await o.page.$('[data-profile="CcMember"] [data-mutual="rooms"]')), `${width}: mutual friends and rooms on the card`);
+      await shot(o.page, `c4-profile-card-${width}`);
+      await o.ctx.close();
+      const m = await pageFor(mem, width);
+      await m.page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+      await m.page.waitForSelector('[data-action="profile"]', { timeout: 15000 });
+      await m.page.$eval('[data-action="profile"]', (b) => b.click()); await sleep(400);
+      await m.page.evaluate(() => [...document.querySelectorAll('[role="menu"] button, .profile-actions button')].find((b) => /^\s*Profile\s*$/.test(b.textContent))?.click());
+      const ed = await m.page.waitForSelector('[data-section="banner"]', { timeout: 6000 }).catch(() => null);
+      ok(!!ed && !!(await m.page.$('[data-form="profile-links"]')) && !!(await m.page.$('[data-field="now-playing"]')), `${width}: Profile dialog has banner, now playing and links editors`);
+      await shot(m.page, `c4-profile-editor-${width}`);
+      await m.ctx.close();
+      await fresh(other); await fresh(mem);
     }
     // @@UI-END
   }

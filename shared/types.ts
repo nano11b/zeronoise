@@ -671,4 +671,10 @@ export interface PublicProfile {
   online: boolean;
   /** socket id when online, for private messages */
   socketId?: string;
+  /** batch C: profiles 2.0 */
+  bannerUrl?: string | null;
+  links?: { label: string; url: string }[];
+  nowPlaying?: string | null;
+  mutualFriends?: { id: number; username: string; hasAvatar: boolean }[];
+  mutualRooms?: { id: string; name: string }[];
 }
