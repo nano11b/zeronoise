@@ -85,6 +85,8 @@ export interface RoomSummary {
   persistent: boolean;
   /** true when a password is required to join; the secret itself is never sent */
   passwordRequired: boolean;
+  /** batch C: audio-only voice room */
+  voice?: boolean;
   /** next scheduled event starting within 24 h (lobby 📅 tag) */
   eventSoon?: { title: string; startsAt: number };
   /** an event is running right now */
@@ -150,6 +152,8 @@ export interface RoomState {
   pins: ChatMessage[];
   /** stage mode (speakers publish, audience receives) */
   stage?: StageState;
+  /** batch C: audio-only voice room */
+  voice?: boolean;
   /** in-memory whiteboard; gone when the room is empty */
   board: BoardStroke[];
   /** Synced watch party (YouTube / Twitch), or null when nothing is loaded. */
@@ -241,7 +245,7 @@ export interface ClientToServer {
   /** resume: same tab reconnecting. Keeps the WebRTC peers instead of leaving the room. */
   login: (p: { nick?: string; resume?: boolean; tz?: string } | undefined, ack: Ack<{ user: UserInfo }>) => void;
   'rooms:list': (ack: Ack<{ rooms: RoomSummary[] }>) => void;
-  'room:create': (p: { name: string; topic?: string; password?: string; category?: string | null; tags?: string[] | string }, ack: Ack<{ roomId: string }>) => void;
+  'room:create': (p: { name: string; topic?: string; password?: string; voice?: boolean; category?: string | null; tags?: string[] | string }, ack: Ack<{ roomId: string }>) => void;
   'room:join': (p: { roomId: string; password?: string; invite?: string }, ack: Ack<{ room: RoomState; resumed?: boolean }>) => void;
   'room:leave': () => void;
   'room:kick': (p: { userId: string }, ack: Ack) => void;
@@ -369,6 +373,8 @@ export interface ClientToServer {
   'poll:vote': (p: { pollId: string; option: number }, ack: Ack<{ poll: PollInfo }>) => void;
   'poll:close': (p: { pollId: string }, ack: Ack<{ poll: PollInfo }>) => void;
   // ---- batch 3 ----
+  /** batch C: owner / staff toggles audio-only voice room mode */
+  'room:voice': (p: { on: boolean }, ack: Ack<{ on: boolean }>) => void;
   'room:meta': (p: { category?: string | null; tags?: string[] | string }, ack: Ack<{ category: string | null; tags: string[] }>) => void;
   /** room owner (or site staff): accent color and welcome message. null clears; omitted keeps. */
   'room:theme:set': (p: { accent?: string | null; welcome?: string | null }, ack: Ack<{ theme: import('./theme').RoomThemeInfo }>) => void;
@@ -402,6 +408,7 @@ export interface ServerToClient {
   'room:inviteSettings': (p: { modsCanInvite: boolean; by: string }) => void;
   // ---- batch 3 ----
   'room:meta': (p: { category: string | null; tags: string[] }) => void;
+  'room:voice': (p: { on: boolean }) => void;
   'room:theme': (p: { theme: import('./theme').RoomThemeInfo }) => void;
   'room:announcement': (p: { announcement: RoomAnnouncement | null }) => void;
   'room:schedules': (p: { schedules: RoomScheduleInfo[] }) => void;
@@ -423,6 +430,8 @@ export interface ServerToClient {
   'stage:state': (p: StageState) => void;
   /** you were moved to the audience: stop camera / mic / screen */
   'stage:demoted': (p: { by: string }) => void;
+  /** batch C: the room became a voice room; stop camera and screen share (mic stays) */
+  'media:force': (p: { cam: false; screen: false }) => void;
   'chat:reactions': (p: { messageId: string; reactions: { emoji: string; count: number }[] }) => void;
   'user:joined': (u: UserInfo) => void;
   'user:left': (p: { id: string }) => void;

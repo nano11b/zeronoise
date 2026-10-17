@@ -711,6 +711,10 @@ const MIGRATIONS: string[] = [
   ALTER TABLE room_schedules ADD COLUMN kind TEXT NOT NULL DEFAULT 'message';
   ALTER TABLE users ADD COLUMN link_previews INTEGER NOT NULL DEFAULT 1
   `,
+  // 41: batch C - voice rooms (audio only).
+  `
+  ALTER TABLE rooms ADD COLUMN voice INTEGER NOT NULL DEFAULT 0
+  `,
 ];
 
 /**

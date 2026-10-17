@@ -136,6 +136,8 @@ interface Room {
   mods: Set<number>;
   /** stage mode: on / cap stored; invited speakers and raised hands (by user key) live in memory */
   stage: { on: boolean; cap: number; speakers: Set<string>; hands: Map<string, number> };
+  /** batch C: audio-only voice room (no cameras / screen share; raise-hand talk queue) */
+  voice: boolean;
 }
 interface Session {
   user: UserInfo | null;
@@ -185,6 +187,7 @@ function loadRoom(r: repo.RoomRow): Room {
     callPeers: null, members: new Set(), notices: [], lastChatAt: new Map(), board: [], soundLast: new Map(), fxLast: new Map(), fxRoomLast: 0, watch: null, watchLocked: false, whispers: new Map(), trivia: null, triviaGuests: new Map(),
     mods: new Set(),
     stage: { on: !!r.stage_mode && !r.is_private, cap: clampStageCap(r.stage_cap, STAGE_CAP_ENV), speakers: new Set(), hands: new Map() },
+    voice: !!r.voice && !r.is_private,
   };
   rooms.set(room.id, room);
   return room;
@@ -212,12 +215,12 @@ const isStageSpeaker = (s: Session, room: Room) => !room.stage.on || canRoomMana
 function stageStateOf(room: Room): StageState {
   const speakers: string[] = [];
   const hands: StageState['hands'] = [];
-  if (room.stage.on) {
+  if (room.stage.on || room.voice) {
     for (const id of room.members) {
       const m = sessions.get(id);
       if (!m?.user) continue;
-      if (isStageSpeaker(m, room)) speakers.push(id);
-      else {
+      if (room.stage.on && isStageSpeaker(m, room)) speakers.push(id);
+      else if (room.stage.on || room.voice) {
         const at = room.stage.hands.get(stageKey(m));
         if (at != null) hands.push({ id, nick: m.user.nick, at });
       }
@@ -360,6 +363,7 @@ function summary(room: Room): RoomSummary {
     id: room.id, name: room.name, topic: room.topic, users: users.length,
     broadcasters: users.filter((u) => u.cam || u.mic || u.screen).length, permanent: room.permanent, persistent: room.persistent,
     passwordRequired: !!room.passwordHash,
+    ...(room.voice ? { voice: true } : {}),
     ...(eventsSoonCache.has(room.id) ? { eventSoon: eventsSoonCache.get(room.id)! } : {}),
     ...(eventsLiveCache.has(room.id) ? { eventLive: eventsLiveCache.get(room.id)! } : {}),
     ...(room.thumbId && !room.isPrivate ? { thumbUrl: roomThumbUrl(room.thumbId) } : {}),
@@ -380,6 +384,7 @@ function roomState(room: Room, s: Session): RoomState {
     locked: room.locked, slowModeSec: room.slowModeSec, isPrivate: room.isPrivate, passwordRequired: !!room.passwordHash,
     pins: pinsOf(room.id, repo.userKey(identOf(s))),
     stage: stageStateOf(room),
+    voice: room.voice,
     board: room.board,
     watch: room.watch,
     watchLocked: room.watchLocked,
@@ -2388,7 +2393,9 @@ function onConnection(socket: AppSocket) {
       const row = { id, name, topic, owner_user_id: s.account?.id ?? null, owner_nick: s.user.nick, permanent: 0, persistent: persistent ? 1 : 0, created_at: Date.now(), locked: 0, slow_mode_sec: 0, is_private: 0, password_hash };
       repo.insertRoom(row);
       if (meta.category || meta.tags.length) repo3.setRoomMeta(row.id, meta.category, meta.tags);
-      const room = loadRoom({ ...row, category: meta.category, tags: meta.tags.length ? JSON.stringify(meta.tags) : null });
+      const voice = !!(p as { voice?: unknown })?.voice;
+      if (voice) repo.setRoomVoice(row.id, true);
+      const room = loadRoom({ ...row, category: meta.category, tags: meta.tags.length ? JSON.stringify(meta.tags) : null, voice: voice ? 1 : 0 });
       broadcastRooms();
       ack({ ok: true, roomId: room.id });
       bumpStat(badgeEarner(socket.id, s), 'rooms_created');
@@ -3114,8 +3121,8 @@ function onConnection(socket: AppSocket) {
     const g = stageRoom(ack);
     if (!g) return;
     const { s, room } = g;
-    if (!room.stage.on) return ack({ ok: false, error: 'Stage mode is off.' });
-    if (isStageSpeaker(s, room)) return ack({ ok: false, error: 'You are already a speaker.' });
+    if (!room.stage.on && !room.voice) return ack({ ok: false, error: 'Stage mode is off.' });
+    if (room.stage.on && isStageSpeaker(s, room)) return ack({ ok: false, error: 'You are already a speaker.' });
     if (p?.up) { if (!room.stage.hands.has(stageKey(s))) room.stage.hands.set(stageKey(s), Date.now()); }
     else room.stage.hands.delete(stageKey(s));
     emitStage(room);
@@ -3127,10 +3134,17 @@ function onConnection(socket: AppSocket) {
     if (!g) return;
     const { s, room } = g;
     if (!canRoomManage(s, room)) return ack({ ok: false, error: 'Only the room owner or moderators can bring people up.' });
-    if (!room.stage.on) return ack({ ok: false, error: 'Stage mode is off.' });
+    if (!room.stage.on && !room.voice) return ack({ ok: false, error: 'Stage mode is off.' });
     const id = String(p?.userId ?? '');
     const t = room.members.has(id) ? sessions.get(id) : undefined;
     if (!t?.user) return ack({ ok: false, error: 'User not found' });
+    if (!room.stage.on) {
+      // voice room talk queue: give the floor to the oldest (or chosen) raised hand
+      room.stage.hands.delete(stageKey(t));
+      systemMsg(room, `🎙 ${t.user.nick} has the floor`);
+      emitStage(room);
+      return ack({ ok: true });
+    }
     if (isStageSpeaker(t, room)) return ack({ ok: true });
     if (stageSpeakerCount(room) >= room.stage.cap) return ack({ ok: false, error: `Stage is full: at most ${room.stage.cap} speakers. Move someone down first.` });
     room.stage.hands.delete(stageKey(t));
@@ -3144,7 +3158,7 @@ function onConnection(socket: AppSocket) {
     const g = stageRoom(ack);
     if (!g) return;
     const { s, room } = g;
-    if (!room.stage.on) return ack({ ok: false, error: 'Stage mode is off.' });
+    if (!room.stage.on && !room.voice) return ack({ ok: false, error: 'Stage mode is off.' });
     const id = String(p?.userId ?? '');
     const self = id === socket.id;
     if (!self && !canRoomManage(s, room)) return ack({ ok: false, error: 'Only the room owner or moderators can move people down.' });
@@ -3152,6 +3166,7 @@ function onConnection(socket: AppSocket) {
     if (!t?.user) return ack({ ok: false, error: 'User not found' });
     const key = stageKey(t);
     if (room.stage.hands.delete(key)) { emitStage(room); return ack({ ok: true }); }
+    if (!room.stage.on) return ack({ ok: false, error: 'No hand raised.' });
     if (!room.stage.speakers.has(key)) {
       return ack({ ok: false, error: canRoomManage(t, room) ? 'The owner, room moderators and staff are always speakers.' : 'Not a speaker.' });
     }
@@ -3241,6 +3256,7 @@ function onConnection(socket: AppSocket) {
     const wantCam = !!p?.cam, wantMic = !!p?.mic, wantScreen = !!p?.screen;
     const videoOn = wantCam || wantScreen;
     const alreadyVideo = !!(s.user.cam || s.user.screen);
+    if (room.voice && videoOn) return ack({ ok: false, error: 'This is a voice room: audio only (no camera or screen share).' });
     if (room.stage.on && (wantCam || wantMic || wantScreen)) {
       if (!isStageSpeaker(s, room)) return ack({ ok: false, error: 'Stage mode: only speakers can use their camera or mic. Raise your hand to ask to speak.' });
       const publishing = !!(s.user.cam || s.user.mic || s.user.screen);
@@ -4238,6 +4254,38 @@ function onConnection(socket: AppSocket) {
 
   // ================= batch 3 =================
   // ---- 1. category + tags (owner / site staff) ----
+  socket.on('room:voice', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
+    const { s, room } = c;
+    if (room.isPrivate) return ack({ ok: false, error: 'Private calls cannot be voice rooms', status: 400 });
+    if (!isStaff(s) && !isOwner(s, room)) return ack({ ok: false, error: 'Only the room owner can change this', status: 403 });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited', status: 429 });
+    const on = !!p?.on;
+    if (on !== room.voice) {
+      room.voice = on;
+      repo.setRoomVoice(room.id, on);
+      if (!on && !room.stage.on) room.stage.hands.clear();
+      repo.logAction(actorLabel(s), s.account?.id ?? null, on ? 'voice-on' : 'voice-off', null, room.id, null);
+      systemMsg(room, on ? `${s.user!.nick} made this a voice room: audio only, raise your hand to take the floor` : `${s.user!.nick} turned off voice-room mode`);
+      if (on) {
+        // cameras and screen shares stop; mics stay on
+        for (const id of room.members) {
+          const m = sessions.get(id);
+          if (m?.user && (m.user.cam || m.user.screen)) {
+            m.user = { ...m.user, cam: false, screen: false };
+            io.to(`room:${room.id}`).emit('user:updated', m.user);
+            io.to(id).emit('media:force', { cam: false, screen: false });
+          }
+        }
+      }
+      io.to(`room:${room.id}`).emit('room:voice', { on });
+      emitStage(room);
+      broadcastRooms();
+    }
+    ack({ ok: true, on });
+  });
   socket.on('room:meta', (p, ackRaw) => {
     const ack = safeAck(ackRaw);
     const c = roomCtx();

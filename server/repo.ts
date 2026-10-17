@@ -241,6 +241,8 @@ export interface RoomRow {
   announcement?: string | null;
   announcement_at?: number | null;
   announcement_by?: string | null;
+  /** batch C: audio-only voice room */
+  voice?: number;
 }
 export function allRooms(): RoomRow[] { return q('SELECT * FROM rooms ORDER BY created_at').all() as unknown as RoomRow[]; }
 export function insertRoom(r: Omit<RoomRow, 'created_at' | 'locked' | 'slow_mode_sec' | 'is_private' | 'password_hash'> & Partial<Pick<RoomRow, 'locked' | 'slow_mode_sec' | 'is_private' | 'password_hash'>>) {
@@ -360,6 +362,7 @@ export function editHistory(m: { id: string; ts: number }): { text: string; at: 
 export function pruneEdits(): number {
   return Number(q('DELETE FROM message_edits WHERE message_id NOT IN (SELECT id FROM messages WHERE deleted = 0)').run().changes);
 }
+export function setRoomVoice(id: string, on: boolean) { q('UPDATE rooms SET voice = ? WHERE id = ?').run(on ? 1 : 0, id); }
 export function setRoomStage(id: string, on: boolean, cap: number) {
   q('UPDATE rooms SET stage_mode = ?, stage_cap = ? WHERE id = ?').run(on ? 1 : 0, cap, id);
 }

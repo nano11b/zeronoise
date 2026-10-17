@@ -50,6 +50,7 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
   const [catFilter, setCatFilter] = useState<RoomCategory | ''>('');
   const [activeFirst, setActiveFirst] = useState(false);
   const [newCat, setNewCat] = useState('');
+  const [newVoice, setNewVoice] = useState(false);
   const [newTags, setNewTags] = useState('');
   const [busy, setBusy] = useState(false);
   const [askPw, setAskPw] = useState<RoomSummary | null>(null);
@@ -114,7 +115,7 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
       const parsedTags = cleanTags(newTags);
       if ('error' in parsedTags) throw new Error(parsedTags.error);
       const meta = { ...(newCat ? { category: newCat } : {}), ...(parsedTags.tags.length ? { tags: parsedTags.tags } : {}) };
-      const r = await call<{ roomId: string }>((ack) => socket.emit('room:create', { name, topic, ...(password ? { password } : {}), ...meta }, ack));
+      const r = await call<{ roomId: string }>((ack) => socket.emit('room:create', { name, topic, ...(password ? { password } : {}), ...(newVoice ? { voice: true } : {}), ...meta }, ack));
       setName(''); setTopic(''); setRoomPw(''); setNewCat(''); setNewTags('');
       if (newThumb) {
         // optional: a failed thumbnail never blocks the new room; it can be set later from the room info tab
@@ -195,6 +196,7 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
                   <span className="room-stats">
                     {!r.permanent && <span className="tag">{r.persistent ? 'user room' : 'guest room'}</span>}
                     {r.passwordRequired && <span className="tag" data-password="1">password</span>}
+                    {r.voice && <span className="tag voice-tag" data-voice="1">🎙 voice</span>}
                     {r.active && <span className="tag hot" data-active="1" title="Lots going on right now">🔥 active</span>}
                     {r.eventLive ? (
                       <span className="tag event-soon live" data-event-live="1" title={`📅 ${r.eventLive.title} · happening now`} aria-label={`Event live: ${r.eventLive.title}`}>📅 live</span>
@@ -233,6 +235,7 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
               <CategorySelect value={newCat} onChange={setNewCat} />
               <input placeholder="Tags: music, chill" value={newTags} maxLength={140} onChange={(e) => setNewTags(e.target.value)} aria-label="Tags (optional)" data-field="create-tags" />
             </div>
+            <label className="check-row voice-check"><input type="checkbox" checked={newVoice} onChange={(e) => setNewVoice(e.target.checked)} data-field="room-voice" /> <span>🎙 Voice room (audio only)</span></label>
             <input type="password" placeholder="Password (optional)" value={roomPw} maxLength={LIMITS.passwordMax} onChange={(e) => setRoomPw(e.target.value)} autoComplete="new-password" aria-label="Room password" />
             {account && (
               <div className="create-thumb">

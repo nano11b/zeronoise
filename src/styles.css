@@ -2300,3 +2300,16 @@ html[data-ui-theme="dark-orange"] {
 .key.guest { background: color-mix(in srgb, var(--accent, #4ade80) 40%, #888); }
 .stats-rooms td, .stats-rooms th { padding: 4px 8px; text-align: left; }
 @media (max-width: 520px) { .bars.hours .bar-col { flex-basis: 10px; } }
+
+/* ---- batch C: voice rooms ---- */
+.voice-check { font-size: 14px; }
+.voice-tag { border-color: var(--accent); }
+.room[data-voice="1"] .voice-empty p:first-child { font-size: 20px; }
+.vroom-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.vroom-bar-title { font-weight: 600; }
+.voice-talkers { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; flex: 1 1 auto; }
+.voice-talker { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.voice-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted, #888); }
+.voice-talker.speaking { border-color: var(--accent); }
+.voice-talker.speaking .voice-dot { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+.voice-hands { flex: none; display: inline-flex; align-items: center; gap: 4px; }

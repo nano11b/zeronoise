@@ -208,6 +208,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const [thumbUrl, setThumbUrl] = useState<string | null>(initial.thumbUrl ?? null);
   const [iconUrl, setIconUrl] = useState<string | null>(initial.iconUrl ?? null);
   const [category, setCategory] = useState<string | null>(initial.category ?? null);
+  /** batch C: audio-only voice room */
+  const [voiceRoom, setVoiceRoom] = useState(!!initial.voice && !initial.isPrivate);
   const [tags, setTags] = useState<string[]>(initial.tags ?? []);
   const [announcement, setAnnouncement] = useState<RoomAnnouncement | null>(initial.announcement ?? null);
   const [theme, setTheme] = useState<RoomThemeInfo | null>(initial.theme ?? null);
@@ -839,6 +841,20 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
       toast(by === me.nick ? 'You left the stage.' : `${by} moved you to the audience. Raise your hand to ask to speak.`);
     };
     socket.on('stage:demoted', onDemoted);
+    const onVoice = ({ on }: { on: boolean }) => setVoiceRoom(on);
+    socket.on('room:voice', onVoice);
+    const onForce = async () => {
+      // voice room: cameras and screen shares stop, the mic stays on
+      const mesh = await meshP.current!;
+      await mesh.releaseVideo();
+      camBeforeScreen.current = false;
+      camRef.current = { ...camRef.current, cam: false, screen: false };
+      setCam(false);
+      setScreen(false);
+      setLocalStream(mesh.hasLocalTracks ? new MediaStream(mesh.local.getTracks()) : null);
+      toast('This is now a voice room: audio only.');
+    };
+    socket.on('media:force', onForce);
     const onMuted = ({ by, until }: { by: string; until: number }) =>
       toast(`${by} muted you in chat for ${Math.ceil((until - Date.now()) / 60_000)} min`, 'error');
     socket.on('chat:message', onMsg);
@@ -922,6 +938,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
       socket.off('rtc:signal', onSignal);
       socket.off('mod:camoff', onCamOff);
       socket.off('stage:demoted', onDemoted);
+      socket.off('room:voice', onVoice);
+      socket.off('media:force', onForce);
       socket.off('mod:muted', onMuted);
       socket.off('room:settings', onSettings);
       socket.off('room:access', onAccess);
@@ -1564,7 +1582,13 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
           <div className="video-area">
             <button type="button" className="btn ghost dock-grip cams-grip" title="Move cameras" aria-label="Move cameras" onPointerDown={(e) => onGripDown('cams', e)}><Icon name="grip" /></button>
           <section ref={tilesRef} className={`tiles n${Math.min(broadcasters.length, 9)} ${bigId ? 'has-big' : ''} ${tileFit.scroll ? 'can-scroll' : ''} ${tileFit.row ? 'row-scroll' : ''}`} data-tile-scroll={tileFit.scroll ? '1' : '0'}>
-            {broadcasters.length === 0 && (
+            {broadcasters.length === 0 && voiceRoom && (
+              <div className="empty-stage voice-empty" data-testid="voice-empty">
+                <p>🎙 Voice room</p>
+                <p className="muted small">Audio only. Turn on your mic to talk, or raise your hand to take the floor.</p>
+              </div>
+            )}
+            {broadcasters.length === 0 && !voiceRoom && (
               <div className="empty-stage">
                 <p>No one is on cam yet.</p>
                 <p className="muted small">
@@ -1643,9 +1667,9 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const audienceLabel = 'Stage mode: only speakers can use camera and mic. Raise your hand to ask.';
   const mediaControls = (
     <div className={`people-media${wide ? '' : ' is-bar'}${stageOn ? ' is-stage' : ''}`} onClick={(e) => e.stopPropagation()} role="toolbar" aria-label="Camera, microphone, and screen share">
-      {wide && <p className="people-media-kicker">{stageOn ? (amSpeaker ? 'On stage' : 'In the audience') : 'Camera and mic'}</p>}
+      {wide && <p className="people-media-kicker">{voiceRoom && !stageOn ? '🎙 Voice room · audio only' : stageOn ? (amSpeaker ? 'On stage' : 'In the audience') : 'Camera and mic'}</p>}
       <div className="people-media-row">
-        {!amSpeaker && (
+        {(!amSpeaker || (voiceRoom && !canRoomManage)) && (
           <div className={`people-media-cell stage-hand-cell${myHand ? ' is-on' : ''}`}>
             <button type="button" className={`btn icon-act toggle stage-hand-btn${myHand ? ' on' : ''}`} aria-pressed={myHand} title={myHand ? 'Lower your hand' : 'Raise your hand to ask to speak'} aria-label={myHand ? 'Lower hand' : 'Raise hand'} onClick={() => stageHand(!myHand)} data-action="stage-hand"><span aria-hidden="true">✋</span></button>
             <span className="people-media-name" aria-hidden="true">{myHand ? 'Hand up' : 'Raise hand'}</span>
@@ -1657,18 +1681,18 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
             <span className="people-media-name" aria-hidden="true">Leave stage</span>
           </div>
         )}
-        <div className={`people-media-cell${cam ? ' is-on' : ''}`}>
+        {!voiceRoom && <div className={`people-media-cell${cam ? ' is-on' : ''}`}>
           <IconAction label={!amSpeaker ? audienceLabel : guestCamLocked ? 'Register a free account to go on cam' : screen ? 'Stop screen share first' : cam ? 'Cam on' : 'Start cam'} icon="cam" className={`toggle ${cam ? 'on' : ''} ${guestCamLocked || !amSpeaker ? 'locked' : ''}`} disabled={mediaBusy || screen || !amSpeaker} onClick={() => setMedia('video', !cam)} aria-pressed={cam} data-action="cam" />
           <span className="people-media-name" aria-hidden="true">{cam ? 'Cam on' : 'Cam'}</span>
-        </div>
+        </div>}
         <div className={`people-media-cell${mic ? ' is-on' : ''}`}>
           <IconAction label={!amSpeaker ? audienceLabel : mic ? 'Mic on' : 'Start mic'} icon="mic" className={`toggle ${mic ? 'on' : ''} ${selfSpeaking ? 'speaking' : ''} ${!amSpeaker ? 'locked' : ''}`} disabled={mediaBusy || !amSpeaker} onClick={() => setMedia('audio', !mic)} aria-pressed={mic} data-action="mic" />
           <span className="people-media-name" aria-hidden="true">{selfSpeaking && mic ? 'Mic live' : mic ? 'Mic on' : 'Mic'}</span>
         </div>
-        <div className={`people-media-cell${screen ? ' is-on' : ''}`}>
+        {!voiceRoom && <div className={`people-media-cell${screen ? ' is-on' : ''}`}>
           <IconAction label={!amSpeaker ? audienceLabel : guestCamLocked ? 'Register to share your screen' : screen ? 'Stop sharing' : 'Share screen. For sound, share a Chrome tab and tick Share tab audio.'} icon="screen" className={`toggle ${screen ? 'on' : ''} ${guestCamLocked || !amSpeaker ? 'locked' : ''}`} disabled={mediaBusy || guestCamLocked || !amSpeaker} onClick={() => void toggleScreen()} aria-pressed={screen} data-action="screen" />
           <span className="people-media-name" aria-hidden="true">{screen ? 'Sharing' : 'Share'}</span>
-        </div>
+        </div>}
         <div className="people-media-cell">
           <IconAction label="Audio & video settings" icon="settings" className="ghost" disabled={mediaBusy} onClick={() => setAvOpen(true)} data-action="av-settings" />
           <span className="people-media-name" aria-hidden="true">Devices</span>
@@ -1678,14 +1702,14 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   );
   const stageSpeakers = stageOn ? shownUsers.filter((u) => stage.speakers.includes(u.id)) : [];
   const stageAudience = stageOn ? shownUsers.filter((u) => !stage.speakers.includes(u.id)) : [];
-  const handQueue = stageOn && canRoomManage && stage.hands.length > 0 && (
+  const handQueue = (stageOn || voiceRoom) && canRoomManage && stage.hands.length > 0 && (
     <div className="stage-hands" data-testid="stage-hands" onClick={(e) => e.stopPropagation()}>
       <p className="stage-hands-title">✋ Raised hands <span className="muted small">{stage.hands.length}</span></p>
       <ul>
         {stage.hands.map((h) => (
           <li key={h.id}>
             <span className="stage-hands-nick">{h.nick}</span>
-            <button type="button" className="btn primary small-btn" onClick={() => stageInvite(h.id)} data-action="stage-approve" disabled={stage.speakers.length >= stage.cap} title={stage.speakers.length >= stage.cap ? `Stage is full (${stage.cap}). Move someone down first.` : 'Let them use camera and mic'}>Bring up</button>
+            <button type="button" className="btn primary small-btn" onClick={() => stageInvite(h.id)} data-action="stage-approve" disabled={stageOn && stage.speakers.length >= stage.cap} title={!stageOn ? 'Give them the floor' : stage.speakers.length >= stage.cap ? `Stage is full (${stage.cap}). Move someone down first.` : 'Let them use camera and mic'}>{stageOn ? 'Bring up' : 'Give floor'}</button>
             <button type="button" className="btn ghost small-btn" onClick={() => stageDown(h.id)} data-action="stage-lower">Lower</button>
           </li>
         ))}
@@ -1707,7 +1731,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                       {u.id === me.id && <span className="muted small">you</span>}
                       {u.screen && <span className="tag cam" title="Sharing screen">screen</span>}
                       {u.mic && <span className="tag mic" title="On mic">mic</span>}
-                      {stageOn && handOf(u.id) && <span className="stage-hand-tag" title="Hand raised" data-hand="1" aria-label="Hand raised">✋</span>}
+                      {(stageOn || voiceRoom) && handOf(u.id) && <span className="stage-hand-tag" title="Hand raised" data-hand="1" aria-label="Hand raised">✋</span>}
                     </span>
                   </span>
                 </button>
@@ -1797,7 +1821,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
 
   return (
     <EmoteContext.Provider value={emoteLookup}>
-    <div className={`room shell${peopleOpen ? ' people-open' : ''}${railOpen ? ' rail-open' : ''}${panelOpen ? ' panel-open' : ''}${panelCollapsed ? ' panel-collapsed' : ''}`} data-accent={theme?.accent ? '1' : undefined} style={theme?.accent ? ({ ['--room-accent' as string]: theme.accent } as CSSProperties) : undefined} onClick={() => { if (menuFor) setMenuFor(null); if (blockFor) setBlockFor(null); if (peopleOpen) setPeopleOpen(false); if (moreOpen) setMoreOpen(false); if (plusOpen) setPlusOpen(false); if (railOpen) setRailOpen(false); if (panelOpen) setPanelOpen(false); }}>
+    <div className={`room shell${peopleOpen ? ' people-open' : ''}${railOpen ? ' rail-open' : ''}${panelOpen ? ' panel-open' : ''}${panelCollapsed ? ' panel-collapsed' : ''}`} data-voice={voiceRoom ? '1' : undefined} data-accent={theme?.accent ? '1' : undefined} style={theme?.accent ? ({ ['--room-accent' as string]: theme.accent } as CSSProperties) : undefined} onClick={() => { if (menuFor) setMenuFor(null); if (blockFor) setBlockFor(null); if (peopleOpen) setPeopleOpen(false); if (moreOpen) setMoreOpen(false); if (plusOpen) setPlusOpen(false); if (railOpen) setRailOpen(false); if (panelOpen) setPanelOpen(false); }}>
       <SiteBar me={me} account={account} onAccount={onAccount} toast={toast} signOut={signOut} openAdmin={openAdmin} wantAccount={wantAccount} onAudioVideo={() => setAvOpen(true)}
         onFriends={account ? () => { try { sessionStorage.setItem('zn.lobbyOpen', 'friends'); } catch { /* ignore */ } onLeave(); } : undefined}
         onStartRoom={() => { try { sessionStorage.setItem('zn.lobbyOpen', 'create'); } catch { /* ignore */ } onLeave(); }}>
@@ -1946,6 +1970,20 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     {canRoomManage && <button type="button" className="icon-btn pin-unpin" title="Unpin" aria-label={`Unpin message from ${pin.from}`} onClick={() => togglePin(pin)} data-action="unpin">✕</button>}
                   </div>
                 ))}
+              </div>
+            )}
+            {voiceRoom && (
+              <div className="vroom-bar" data-testid="voice-bar">
+                <span className="vroom-bar-title">🎙 Voice</span>
+                <ul className="voice-talkers">
+                  {users.filter((u) => u.mic).map((u) => {
+                    const talking = u.id === me.id ? (mic && selfSpeaking) : !!remoteSpeaking[u.id];
+                    return <li key={u.id} className={`voice-talker${talking ? ' speaking' : ''}`} data-talker={u.nick} data-speaking={talking ? '1' : '0'}><span className="voice-dot" aria-hidden="true" />{u.nick}</li>;
+                  })}
+                  {!users.some((u) => u.mic) && <li className="muted small">Nobody on the mic yet</li>}
+                </ul>
+                {stage.hands.length > 0 && <span className="voice-hands" data-testid="voice-hands" title={stage.hands.map((h) => h.nick).join(', ')}>✋ {stage.hands.length}{canRoomManage ? <> · <button type="button" className="btn ghost small-btn" data-action="voice-floor" onClick={() => stageInvite(stage.hands[0].id)}>Give floor to {stage.hands[0].nick}</button></> : null}</span>}
+                {!canRoomManage && <button type="button" className={`btn ghost small-btn${myHand ? ' on' : ''}`} aria-pressed={myHand} data-action="voice-hand" onClick={() => stageHand(!myHand)}>✋ {myHand ? 'Lower hand' : 'Raise hand'}</button>}
               </div>
             )}
             <div className="chat-log" ref={logRef} role="log" aria-label={`Chat in #${initial.name}`} aria-live={logLive ? 'polite' : 'off'} aria-relevant="additions" onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>
@@ -2179,6 +2217,15 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
             <div className="side-body">
               {!initial.isPrivate && (isOwner || isStaff) && <RoomThemeSettings key={`${theme?.accent}|${theme?.welcome}`} roomId={initial.id} theme={theme} toast={toast} />}
               {!initial.isPrivate && <RoomThumbEditor roomId={initial.id} thumbUrl={thumbUrl} canEdit={canManageRoom} onChange={setThumbUrl} toast={toast} />}
+              {!initial.isPrivate && (canManageRoom || voiceRoom) && (
+                <section className="stage-settings voice-settings" data-testid="voice-settings">
+                  <h4>Voice room</h4>
+                  {canManageRoom ? (
+                    <label className="check-row"><input type="checkbox" checked={voiceRoom} onChange={(e) => act((ack) => socket.emit('room:voice', { on: e.target.checked }, ack))} data-action="voice-toggle" /> <span>Audio only: no cameras or screen share, raise a hand to take the floor</span></label>
+                  ) : <p className="small">On: audio only.</p>}
+                  {voiceRoom && <p className="small">{users.filter((u) => u.mic).length} talking · {stage.hands.length} hand{stage.hands.length === 1 ? '' : 's'} up</p>}
+                </section>
+              )}
               {!initial.isPrivate && (canRoomManage || stageOn) && (
                 <section className="stage-settings" data-testid="stage-settings">
                   <h4>Stage mode</h4>
