@@ -169,6 +169,15 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
   const [editing, setEditing] = useState<DmMessage | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const typedAt = useRef(0);
+  /** W2-6: tell the others I'm typing, at most every few seconds, only when my own indicator is on (it's mutual) */
+  const pingTyping = () => {
+    if (!s.typingOn || editing || c.state !== 'active') return;
+    const t = Date.now();
+    if (t - typedAt.current < DM.typingThrottleMs) return;
+    typedAt.current = t;
+    dmSock.emit('dm:typing', { convoId: c.id });
+  };
   const logRef = useRef<HTMLDivElement>(null);
   const others = c.members.filter((m) => m.userId !== myId && !m.left);
   useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [s.messages.length]);
@@ -201,7 +210,7 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
     try {
       if (editing) await dmCall('dm:edit', { convoId: c.id, messageId: editing.id, text: t });
       else await dmCall('dm:send', { convoId: c.id, text: t, replyTo: replyTo?.id });
-      setText(''); setReplyTo(null); setEditing(null);
+      setText(''); setReplyTo(null); setEditing(null); typedAt.current = 0;
     } catch (err) { toast((err as Error).message, 'error'); }
   };
   // "Seen by": under my newest message that someone has read
@@ -248,7 +257,7 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
       <form className="dm-composer" onSubmit={send} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void attach(e.dataTransfer.files?.[0]); }}>
         <input ref={fileRef} type="file" hidden accept={Object.keys(DM_FILE_TYPES).join(',')} onChange={(e) => void attach(e.target.files?.[0])} data-field="dm-file" />
         {c.state === 'active' && <button type="button" className="icon-btn" onClick={() => fileRef.current?.click()} aria-label="Attach a file or image (up to 10 MB)" title="Attach (up to 10 MB)" disabled={uploading} data-action="dm-attach">{uploading ? '…' : '📎'}</button>}
-        <textarea ref={taRef} rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Whisper ${convoTitle(c, myId)}`} aria-label="Message"
+        <textarea ref={taRef} rows={1} value={text} onChange={(e) => { setText(e.target.value); if (e.target.value.trim()) pingTyping(); }} placeholder={`Whisper ${convoTitle(c, myId)}`} aria-label="Message"
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } else if (e.key === 'Escape' && (replyTo || editing)) { setReplyTo(null); if (editing) setText(''); setEditing(null); } }} maxLength={2000} data-field="dm-text" />
         {c.state === 'active' && !text.trim() && !editing && (
           <VoiceNoteButton roomId={`dm:${c.id}`} toast={toast} uploadUrl={`/api/dm/${encodeURIComponent(c.id)}/voice`} post={postVoice} />

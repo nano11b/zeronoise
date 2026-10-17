@@ -257,6 +257,26 @@ try {
     const ed2 = await emit(D.s, 'dm:react', { messageId: rl.id, emoji: '👍' });
     ok(!ed2.ok, 'W1-5: outsiders cannot react');
   }
+  // @@W2-6
+  {
+    const bT = events(B.s, 'dm:typing'), aT = events(A.s, 'dm:typing'), dT = events(D.s, 'dm:typing');
+    A.s.emit('dm:typing', { convoId: globalThis.DIRECT });
+    ok(await waitFor(() => bT.some((t) => t.convoId === globalThis.DIRECT && t.userId === A.id), 2000), 'W2-6: typing reaches the other side');
+    const before = bT.length;
+    for (let i = 0; i < 5; i++) A.s.emit('dm:typing', { convoId: globalThis.DIRECT });
+    await sleep(400);
+    ok(bT.length === before, 'W2-6: typing pings are throttled on the server');
+    D.s.emit('dm:typing', { convoId: globalThis.DIRECT }); await sleep(300);
+    ok(aT.length === 0 && dT.length === 0, 'W2-6: outsiders cannot send or see typing');
+    const off = await emit(B.s, 'dm:settings', { typing: false });
+    ok(off.ok && off.typing === false, 'W2-6: turn my typing indicator off');
+    await sleep(2600); const n = bT.length;
+    A.s.emit('dm:typing', { convoId: globalThis.DIRECT });
+    B.s.emit('dm:typing', { convoId: globalThis.DIRECT });
+    await sleep(500);
+    ok(bT.length === n && aT.length === 0, 'W2-6: off is mutual — I neither send nor see typing');
+    await emit(B.s, 'dm:settings', { typing: true });
+  }
   // @@API-END
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
   for (const width of [1366, 390]) {
@@ -328,6 +348,7 @@ try {
       await a.page.click('[data-react="😂"]'); await sleep(500);
       ok(await a.page.evaluate(() => [...document.querySelectorAll('.dm-line.mine')].at(-1)?.querySelector('[data-emoji="😂"]') != null), `${width}: W1-5: react from the message menu`);
       await (await a.page.$$('.dm-line.mine [data-action="dm-msg-menu"]')).at(-1).click(); await sleep(200);
+      await a.page.$eval('[data-testid="dm-actions"]', (e) => e.scrollIntoView({ block: 'end' })); await sleep(150);
       await shot(a.page, `w5-actions-${width}`);
       await a.page.click('[data-action="dm-edit"]'); await sleep(150);
       await a.page.$eval('[data-field="dm-text"]', (e) => { e.select(); });
@@ -347,8 +368,24 @@ try {
       void lastText;
       if (phone) { await a.page.click('[data-action="dm-back"]'); await sleep(300); }
     }
+    if (!phone) {
+      const b = await pageFor(B, width);
+      await b.page.goto(BASE + '/', { waitUntil: 'networkidle0' });
+      await b.page.waitForSelector('[data-action="dm-open"]', { timeout: 15000 }); await sleep(500); await dismiss(b.page);
+      await b.page.click('[data-action="dm-open"]');
+      await b.page.waitForSelector(`[data-convo="${globalThis.DIRECT}"]`, { timeout: 8000 });
+      await b.page.click(`[data-convo="${globalThis.DIRECT}"]`); await sleep(600);
+      await sleep(2600);
+      await a.page.type('[data-field="dm-text"]', 'typing…');
+      ok(await b.page.waitForSelector('[data-testid="dm-typing"]', { timeout: 4000 }).then(() => true, () => false), `${width}: W2-6: "is typing…" shows under the conversation`);
+      await shot(b.page, `w6-typing-${width}`);
+      await a.page.keyboard.press('Enter');
+      ok(await b.page.waitForFunction(() => !document.querySelector('[data-testid="dm-typing"]'), { timeout: 8000 }).then(() => true, () => false), `${width}: W2-6: the line clears when the message lands`);
+      globalThis.BPAGE = b;
+    }
     // @@UI-W
     await a.ctx.close();
+    if (globalThis.BPAGE) { await globalThis.BPAGE.ctx.close(); globalThis.BPAGE = null; }
   }
 } catch (e) {
   failed++; console.log('FAIL  crashed:', e.stack || e.message);
