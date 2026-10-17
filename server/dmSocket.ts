@@ -266,7 +266,7 @@ export function registerDm(socket: { on: (ev: string, fn: (...a: any[]) => void)
     const m = dm.msgById(String(p?.messageId ?? ''));
     const x = ctx(m?.convo_id, ack, { act: true });
     if (!x || !m) return;
-    if (m.from_user_id !== x.a.id || m.deleted_at || m.kind === 'system' || m.kind === 'voice') return fail(ack, 'You can only edit your own messages', 403);
+    if (m.from_user_id !== x.a.id || m.deleted_at || m.kind === 'system' || m.kind === 'voice' || m.kind === 'file') return fail(ack, 'You can only edit your own messages', 403);
     const t = d.prepareText(p?.text);
     if ('error' in t) return fail(ack, t.error);
     dm.editMessage(m.id, t.text);

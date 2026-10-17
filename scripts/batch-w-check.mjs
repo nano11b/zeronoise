@@ -232,6 +232,31 @@ try {
     const reuse = await emit(B.s, 'dm:send', { convoId: globalThis.GROUP2, voiceId: v.id, durationMs: 2000 });
     ok(!reuse.ok, 'W1-4: a voice note cannot be moved to another conversation');
   }
+  // @@W1-5
+  {
+    const bUpd = events(B.s, 'dm:update');
+    const m1 = await emit(A.s, 'dm:send', { convoId: globalThis.DIRECT, text: `original ${R}` });
+    const mid = m1.message?.id ?? (await emit(A.s, 'dm:open', { convoId: globalThis.DIRECT })).messages.at(-1).id;
+    const rp = await emit(B.s, 'dm:send', { convoId: globalThis.DIRECT, text: 'a reply', replyTo: mid });
+    const op = await emit(A.s, 'dm:open', { convoId: globalThis.DIRECT });
+    const rl = op.messages.find((m) => m.text === 'a reply');
+    ok(rp.ok && rl?.replyTo?.id === mid, 'W1-5: reply quotes the original', rp.error);
+    const rc = await emit(B.s, 'dm:react', { messageId: mid, emoji: '👍' });
+    ok(rc.ok && await waitFor(() => bUpd.some((m) => m.id === mid && m.reactions?.some((r) => r.emoji === '👍' && r.mine))), 'W1-5: react and see it live', rc.error);
+    const rc2 = await emit(B.s, 'dm:react', { messageId: mid, emoji: '👍' });
+    const op2 = await emit(A.s, 'dm:open', { convoId: globalThis.DIRECT });
+    ok(rc2.ok && !op2.messages.find((m) => m.id === mid).reactions?.length, 'W1-5: reacting again removes it');
+    await emit(B.s, 'dm:react', { messageId: mid, emoji: '❤️' });
+    const ed = await emit(A.s, 'dm:edit', { messageId: mid, text: `edited ${R}` });
+    const edB = await emit(B.s, 'dm:edit', { messageId: mid, text: 'hijack' });
+    ok(ed.ok && !edB.ok && await waitFor(() => bUpd.some((m) => m.id === mid && m.editedAt && m.text === `edited ${R}`)), 'W1-5: only the author edits; others see "edited"', ed.error);
+    const del = await emit(A.s, 'dm:delete', { messageId: mid });
+    ok(del.ok && await waitFor(() => bUpd.some((m) => m.id === mid && m.deleted && !m.text)), 'W1-5: delete for everyone leaves a placeholder without the text', del.error);
+    const srch = await emit(B.s, 'dm:search', { q: `edited ${R}` });
+    ok(srch.results.length === 0, 'W1-5: deleted messages drop out of search');
+    const ed2 = await emit(D.s, 'dm:react', { messageId: rl.id, emoji: '👍' });
+    ok(!ed2.ok, 'W1-5: outsiders cannot react');
+  }
   // @@API-END
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
   for (const width of [1366, 390]) {
@@ -292,6 +317,34 @@ try {
       ok(!!(await a.page.$('.dm-composer [data-action="voice-note"]')), `${width}: W1-4: push-to-talk mic in the composer`);
       await a.page.$eval('[data-testid="dm-log"]', (e) => { const v = e.querySelector('[data-testid="dm-voice"]'); v?.scrollIntoView({ block: 'center' }); });
       await shot(a.page, `w4-voice-${width}`);
+    }
+    {
+      await a.page.evaluate(() => { const l = [...document.querySelectorAll('.dm-line.mine')].at(-1); l?.scrollIntoView(); });
+      const btns = await a.page.$$('.dm-line.mine [data-action="dm-msg-menu"]');
+      const lastText = btns.at(-1);
+      await a.page.type('[data-field="dm-text"]', `edit me ${width}`); await a.page.keyboard.press('Enter'); await sleep(500);
+      const menu = (await a.page.$$('.dm-line.mine [data-action="dm-msg-menu"]')).at(-1);
+      await menu.click(); await sleep(200);
+      await a.page.click('[data-react="😂"]'); await sleep(500);
+      ok(await a.page.evaluate(() => [...document.querySelectorAll('.dm-line.mine')].at(-1)?.querySelector('[data-emoji="😂"]') != null), `${width}: W1-5: react from the message menu`);
+      await (await a.page.$$('.dm-line.mine [data-action="dm-msg-menu"]')).at(-1).click(); await sleep(200);
+      await shot(a.page, `w5-actions-${width}`);
+      await a.page.click('[data-action="dm-edit"]'); await sleep(150);
+      await a.page.$eval('[data-field="dm-text"]', (e) => { e.select(); });
+      await a.page.keyboard.press('Backspace');
+      await a.page.type('[data-field="dm-text"]', `edited in ui ${width}`); await a.page.keyboard.press('Enter');
+      ok(await a.page.waitForFunction((w) => [...document.querySelectorAll('.dm-line.mine')].at(-1)?.innerText.includes(`edited in ui ${w}`) && /edited/.test([...document.querySelectorAll('.dm-line.mine .dm-meta')].at(-1)?.textContent), { timeout: 5000 }, width).then(() => true, () => false), `${width}: W1-5: edit from the menu`);
+      await (await a.page.$$('.dm-line.mine [data-action="dm-msg-menu"]')).at(-1).click(); await sleep(150);
+      await a.page.click('[data-action="dm-reply"]'); await sleep(150);
+      ok(!!(await a.page.$('[data-testid="dm-replying"]')), `${width}: W1-5: reply bar above the composer`);
+      await a.page.type('[data-field="dm-text"]', `reply ${width}`); await a.page.keyboard.press('Enter');
+      ok(await a.page.waitForFunction(() => [...document.querySelectorAll('.dm-line.mine')].at(-1)?.querySelector('[data-testid="dm-quote"]') != null, { timeout: 5000 }).then(() => true, () => false), `${width}: W1-5: reply shows the quote`);
+      a.page.once('dialog', (d) => d.accept());
+      await (await a.page.$$('.dm-line.mine [data-action="dm-msg-menu"]')).at(-1).click(); await sleep(150);
+      await a.page.click('[data-action="dm-delete"]');
+      ok(await a.page.waitForFunction(() => /Message deleted/.test([...document.querySelectorAll('.dm-line.mine')].at(-1)?.innerText), { timeout: 5000 }).then(() => true, () => false), `${width}: W1-5: delete from the menu`);
+      await shot(a.page, `w5-thread-${width}`);
+      void lastText;
       if (phone) { await a.page.click('[data-action="dm-back"]'); await sleep(300); }
     }
     // @@UI-W

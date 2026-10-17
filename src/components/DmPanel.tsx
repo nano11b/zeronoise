@@ -165,6 +165,10 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
   const s = useDm();
   const [text, setText] = useState('');
   const [manage, setManage] = useState(false);
+  const [replyTo, setReplyTo] = useState<DmMessage | null>(null);
+  const [editing, setEditing] = useState<DmMessage | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const others = c.members.filter((m) => m.userId !== myId && !m.left);
   useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [s.messages.length]);
@@ -195,8 +199,9 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
     const t = text.trim();
     if (!t) return;
     try {
-      await dmCall('dm:send', { convoId: c.id, text: t });
-      setText('');
+      if (editing) await dmCall('dm:edit', { convoId: c.id, messageId: editing.id, text: t });
+      else await dmCall('dm:send', { convoId: c.id, text: t, replyTo: replyTo?.id });
+      setText(''); setReplyTo(null); setEditing(null);
     } catch (err) { toast((err as Error).message, 'error'); }
   };
   // "Seen by": under my newest message that someone has read
@@ -226,33 +231,65 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
       <div className="dm-log" ref={logRef} role="log" aria-live="polite" aria-relevant="additions" data-testid="dm-log">
         {s.more && <button type="button" className="linklike small" onClick={() => void loadOlder()} data-action="dm-older">Load older</button>}
         {s.messages.map((m) => (
-          <Line key={m.id} m={m} mine={m.fromId === myId}>{seen?.id === m.id && <span className="dm-seen small muted" data-testid="dm-seen">Seen by {seen.by.join(', ')}</span>}</Line>
+          <Line key={m.id} m={m} mine={m.fromId === myId} canAct={c.state === 'active'} menuOpen={menuFor === m.id} onMenu={(o) => setMenuFor(o ? m.id : null)}
+            onReply={() => { setEditing(null); setReplyTo(m); setMenuFor(null); taRef.current?.focus(); }}
+            onEdit={() => { setReplyTo(null); setEditing(m); setText(m.text); setMenuFor(null); taRef.current?.focus(); }}
+            onDelete={() => { setMenuFor(null); if (window.confirm('Delete this message for everyone?')) void dmCall('dm:delete', { convoId: c.id, messageId: m.id }).catch((e) => toast((e as Error).message, 'error')); }}
+            onReact={(emoji) => { setMenuFor(null); void dmCall('dm:react', { convoId: c.id, messageId: m.id, emoji }).catch((e) => toast((e as Error).message, 'error')); }}>{seen?.id === m.id && <span className="dm-seen small muted" data-testid="dm-seen">Seen by {seen.by.join(', ')}</span>}</Line>
         ))}
       </div>
       {typing.length > 0 && <div className="dm-typing small muted" aria-live="polite" data-testid="dm-typing">{typing.join(', ')} {typing.length === 1 ? 'is' : 'are'} typing…</div>}
+      {(replyTo || editing) && (
+        <div className="dm-replying small" data-testid="dm-replying">
+          <span className="dm-replying-text">{editing ? 'Editing your message' : <>Replying to <strong>{replyTo!.from}</strong>: {replyTo!.text.slice(0, 80)}</>}</span>
+          <button type="button" className="icon-btn" aria-label={editing ? 'Cancel editing' : 'Cancel reply'} onClick={() => { setReplyTo(null); if (editing) setText(''); setEditing(null); }} data-action="dm-cancel-reply">✕</button>
+        </div>
+      )}
       <form className="dm-composer" onSubmit={send} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void attach(e.dataTransfer.files?.[0]); }}>
         <input ref={fileRef} type="file" hidden accept={Object.keys(DM_FILE_TYPES).join(',')} onChange={(e) => void attach(e.target.files?.[0])} data-field="dm-file" />
         {c.state === 'active' && <button type="button" className="icon-btn" onClick={() => fileRef.current?.click()} aria-label="Attach a file or image (up to 10 MB)" title="Attach (up to 10 MB)" disabled={uploading} data-action="dm-attach">{uploading ? '…' : '📎'}</button>}
-        <textarea rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Whisper ${convoTitle(c, myId)}`} aria-label="Message"
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }} maxLength={2000} data-field="dm-text" />
-        {c.state === 'active' && !text.trim() && (
+        <textarea ref={taRef} rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Whisper ${convoTitle(c, myId)}`} aria-label="Message"
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } else if (e.key === 'Escape' && (replyTo || editing)) { setReplyTo(null); if (editing) setText(''); setEditing(null); } }} maxLength={2000} data-field="dm-text" />
+        {c.state === 'active' && !text.trim() && !editing && (
           <VoiceNoteButton roomId={`dm:${c.id}`} toast={toast} uploadUrl={`/api/dm/${encodeURIComponent(c.id)}/voice`} post={postVoice} />
         )}
-        <button className="btn primary small-btn" disabled={!text.trim()} data-action="dm-send">Send</button>
+        <button className="btn primary small-btn" disabled={!text.trim()} data-action="dm-send">{editing ? 'Save' : 'Send'}</button>
       </form>
     </div>
   );
 }
 
-function Line({ m, mine, children }: { m: DmMessage; mine: boolean; children?: ReactNode }) {
+const QUICK = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+function Line({ m, mine, children, canAct, menuOpen, onMenu, onReply, onEdit, onDelete, onReact }: {
+  m: DmMessage; mine: boolean; children?: ReactNode; canAct?: boolean; menuOpen?: boolean; onMenu?: (open: boolean) => void;
+  onReply?: () => void; onEdit?: () => void; onDelete?: () => void; onReact?: (emoji: string) => void;
+}) {
   if (m.kind === 'system') return <div className="dm-system small muted" data-msg={m.id} data-kind="system">{m.text}</div>;
+  const live = canAct && !m.deleted;
   return (
     <div className={`dm-line${mine ? ' mine' : ''}`} data-msg={m.id}>
       <div className="dm-bubble">
         {!mine && <span className="dm-from small">{m.from}</span>}
+        {m.replyTo && <div className="dm-quote small" data-testid="dm-quote"><strong>{m.replyTo.from}</strong> {m.replyTo.text.slice(0, 120)}</div>}
         {m.deleted ? <em className="muted">Message deleted</em> : m.file ? <FileView f={m.file} /> : m.voice ? <span data-testid="dm-voice"><VoicePlayer voice={{ id: m.voice.url.split('/').pop() ?? m.id, url: m.voice.url, durationMs: m.voice.durationMs, mime: 'audio/webm' }} /></span> : <ChatText text={m.text} className="dm-text" />}
-        <span className="dm-meta small muted">{fmtTime(m.ts)}{m.editedAt ? ' · edited' : ''}</span>
+        <span className="dm-meta small muted">{m.expiresAt ? '⏱ ' : ''}{fmtTime(m.ts)}{m.editedAt && !m.deleted ? ' · edited' : ''}</span>
+        {live && <button type="button" className="dm-more" aria-label="Message actions" aria-expanded={!!menuOpen} onClick={() => onMenu?.(!menuOpen)} data-action="dm-msg-menu">⋯</button>}
       </div>
+      {!!m.reactions?.length && (
+        <div className="dm-reactions">
+          {m.reactions.map((r) => (
+            <button key={r.emoji} type="button" className={`dm-react${r.mine ? ' mine' : ''}`} title={r.users.join(', ')} aria-pressed={r.mine} aria-label={`${r.emoji} ${r.count}: ${r.users.join(', ')}`} disabled={!live} onClick={() => onReact?.(r.emoji)} data-emoji={r.emoji}>{r.emoji} {r.count}</button>
+          ))}
+        </div>
+      )}
+      {menuOpen && live && (
+        <div className="dm-actions" role="toolbar" aria-label="Message actions" data-testid="dm-actions">
+          {QUICK.map((e) => <button key={e} type="button" className="dm-react-pick" onClick={() => onReact?.(e)} aria-label={`React ${e}`} data-react={e}>{e}</button>)}
+          <button type="button" className="btn ghost small-btn" onClick={onReply} data-action="dm-reply">Reply</button>
+          {mine && m.kind === 'text' && <button type="button" className="btn ghost small-btn" onClick={onEdit} data-action="dm-edit">Edit</button>}
+          {mine && <button type="button" className="btn ghost small-btn danger" onClick={onDelete} data-action="dm-delete">Delete</button>}
+        </div>
+      )}
       {children}
     </div>
   );
