@@ -414,7 +414,7 @@ export function AvSettings({
           </div>
         )}
         <div className="modal-actions">
-          <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" className="btn ghost" onClick={onClose} disabled={busy} data-action="av-cancel">Cancel</button>
           <button type="button" className="btn primary" onClick={apply} disabled={busy} data-action="av-apply">
             {busy ? 'Applying…' : 'Apply'}
           </button>

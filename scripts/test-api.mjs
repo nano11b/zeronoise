@@ -1,6 +1,7 @@
 // Self-contained test for accounts, persistence, moderation, bans, reports and TURN credentials.
 // Starts its own server (dist build) on a free port with a throwaway DATA_DIR, restarts it once.
 //   npm run build && npm run test:api
+import './lib/reap.mjs';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash, createHmac, createECDH, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
@@ -158,7 +159,8 @@ function browser(ip = `198.51.100.${ipSeq++}`) {
   return b;
 }
 const emit = (s, ev, ...args) => new Promise((res) => s.emit(ev, ...args, res));
-const once = (s, ev, pred = () => true, ms = 3000) => new Promise((res, rej) => {
+// batch H9: 3 s was too tight on a busy box (one late event crashed the whole run); events still resolve as soon as they arrive.
+const once = (s, ev, pred = () => true, ms = 8000) => new Promise((res, rej) => {
   const t = setTimeout(() => { s.off(ev, h); rej(new Error(`timeout waiting for ${ev}`)); }, ms);
   const h = (d) => { if (pred(d)) { clearTimeout(t); s.off(ev, h); res(d); } };
   s.on(ev, h);
@@ -2890,7 +2892,7 @@ try {
     };
     const joinAll = async (roomId, ...ps) => { for (const p of ps) ok((await emit(p.s, 'room:join', { roomId })).ok, `${p.name} joins`); };
     const say = async (p, text, extra = {}) => {
-      const got = once(p.s, 'chat:message', (m) => m.fromId === p.s.id && (extra.burnTtl ? true : m.text === text), 3000);
+      const got = once(p.s, 'chat:message', (m) => m.fromId === p.s.id && (extra.burnTtl ? true : m.text === text), 8000);
       const r = await emit(p.s, 'chat:send', { text, ...extra });
       if (!r.ok) { got.catch(() => {}); return { error: r.error }; }
       return got;
@@ -3916,7 +3918,7 @@ try {
     const pace = async (s) => { const w = (lastSend.get(s) ?? 0) + 1100 - Date.now(); if (w > 0) await sleep(w); lastSend.set(s, Date.now()); };
     const say = async (p, text, extra = {}) => {
       await pace(p.s);
-      const got = once(p.s, 'chat:message', (m) => m.fromId === p.s.id && (extra.burnTtl ? true : m.text === text), 3000);
+      const got = once(p.s, 'chat:message', (m) => m.fromId === p.s.id && (extra.burnTtl ? true : m.text === text), 8000);
       const r = await emit(p.s, 'chat:send', { text, ...extra });
       if (!r.ok) { got.catch(() => {}); throw new Error(`send failed: ${r.error}`); }
       return got;
@@ -4304,7 +4306,7 @@ try {
     const pace = async (s) => { const w = (lastSend.get(s) ?? 0) + 1100 - Date.now(); if (w > 0) await sleep(w); lastSend.set(s, Date.now()); };
     const say = async (p, text) => {
       await pace(p.s);
-      const got = once(p.s, 'chat:message', (m) => m.fromId === p.s.id && m.text === text, 3000);
+      const got = once(p.s, 'chat:message', (m) => m.fromId === p.s.id && m.text === text, 8000);
       const r = await Promise.race([emit(p.s, 'chat:send', { text }), sleep(4000).then(() => ({ ok: false, error: `no ack (connected=${p.s.connected})` }))]);
       if (!r.ok) { got.catch(() => {}); throw new Error(`send failed: ${r.error}`); }
       return got;

@@ -5,6 +5,7 @@
  * screenshotted, and the layout is checked: no page-level sideways scroll, and no visible control cut off by
  * the screen edge (elements inside a scroll box are allowed to extend past it).
  */
+import './lib/reap.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';

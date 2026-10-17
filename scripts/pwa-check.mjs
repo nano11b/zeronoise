@@ -10,6 +10,7 @@
 //   - a notification link (/?room=<id>) opens that room and is stripped from the address bar
 //   - an offline navigation shows the offline fallback page
 // --shots <dir> writes pwa-menu-desktop.png, pwa-menu-phone.png, pwa-menu-ios.png, pwa-offline-phone.png there.
+import './lib/reap.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';

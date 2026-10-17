@@ -12,6 +12,7 @@
  * sendonly transceiver (the server drops the offer); after Alice brings him up his camera reaches her, and
  * leaving the stage stops his send transceivers.
  */
+import './lib/reap.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';

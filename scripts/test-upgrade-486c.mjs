@@ -1,6 +1,7 @@
 // Self-contained test for accounts, persistence, moderation, bans, reports and TURN credentials.
 // (helpers copied from test-api.mjs) Starts its own server (dist build) on a free port with a throwaway DATA_DIR, restarts it once.
 //   npm run build && npm run test:api
+import './lib/reap.mjs';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash, createHmac, createECDH, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';

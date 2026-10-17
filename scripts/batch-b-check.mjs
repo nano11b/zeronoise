@@ -3,6 +3,7 @@
  * mod queue), scheduled banner + event reminder lines, link previews (X, images, SSRF, per-user toggle), admin stats.
  * Screenshots at 1366 and 390.   npm run build && node scripts/batch-b-check.mjs [shots-dir]
  */
+import './lib/reap.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';

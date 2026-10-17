@@ -4,6 +4,7 @@
  * Phases: register + connect + login, join rooms (latency + join payload size), chat burst (ack + fan-out latency),
  * HTTP/admin/search/analytics endpoints under the connected load. Prints p50/p95/max and the slowest SQL statements.
  */
+import './lib/reap.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';

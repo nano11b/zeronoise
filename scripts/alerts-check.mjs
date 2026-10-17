@@ -2,6 +2,7 @@
  * Batch F9 + F10: uptime endpoint, error-spike and crash-restart alert emails, daily backup restore check.
  * Several server runs on one data dir (mail is captured to a file).   npm run build && node scripts/alerts-check.mjs [shots]
  */
+import './lib/reap.mjs';
 import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

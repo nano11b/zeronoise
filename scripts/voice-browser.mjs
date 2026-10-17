@@ -6,6 +6,7 @@
  * audio (inbound-rtp packets and audio energy rise) and the element playing it must be unmuted and not paused.
  * Runs at 1280 wide and again at a 390 phone width.
  */
+import './lib/reap.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';

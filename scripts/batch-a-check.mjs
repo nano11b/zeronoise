@@ -3,6 +3,7 @@
  * retention), the lobby-load race, the extra Back press after creating a room, plus screenshots at 1366 / 390.
  *   npm run build && node scripts/batch-a-check.mjs [shots-dir]
  */
+import './lib/reap.mjs';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';

@@ -4,6 +4,7 @@
  *  passkey-less marker logic intact, warning off;  3) key removed: TOTP fails closed, recovery code still signs in.
  *   npm run build && node scripts/secretbox-check.mjs
  */
+import './lib/reap.mjs';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';

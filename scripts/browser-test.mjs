@@ -125,9 +125,14 @@ try {
     }
     return best;
   });
-  await new Promise((r) => setTimeout(r, 600));
-  const aliceLevel = await levelOf(bob);
-  const bobLevel = await levelOf(alice);
+  // batch H9: under load the audio pipeline can take a few seconds to start after unmuting, so poll
+  // (up to 10 s) instead of taking one sample 600 ms in.
+  let aliceLevel = 0; let bobLevel = 0;
+  for (const until = Date.now() + 10_000; Date.now() < until && !(aliceLevel > 0.01 && bobLevel > 0.01);) {
+    await new Promise((r) => setTimeout(r, 400));
+    aliceLevel = Math.max(aliceLevel, await levelOf(bob));
+    bobLevel = Math.max(bobLevel, await levelOf(alice));
+  }
   ok(aliceLevel > 0.01 && bobLevel > 0.01, `audio both ways (Alice at Bob audioLevel ${aliceLevel.toFixed(3)}, Bob at Alice audioLevel ${bobLevel.toFixed(3)})`);
 
   // Remote tiles must stay mounted when the Cams pane is hidden, or voice stops.
@@ -389,7 +394,7 @@ try {
   await bob.click('[data-action="profile-av"]');
   await bob.waitForSelector('.av-modal');
   ok(await bob.$eval('.av-modal', (el) => el.getAttribute('aria-label')) === 'Audio & video settings', 'Audio & video opens the settings dialog');
-  await bob.click('.av-modal .btn.ghost');
+  await bob.click('.av-modal [data-action="av-cancel"]');
   await bob.waitForFunction(() => !document.querySelector('.av-modal'));
   await bob.click('[data-action="music"]');
   await bob.waitForSelector('.radio-panel');
