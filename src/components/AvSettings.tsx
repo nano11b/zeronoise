@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useModal } from '../a11y';
+import { TtsSettings } from './TtsSettings';
 import {
   applyAudioOutput, applyAudioOutputToDocument, audioConstraints, DEFAULT_AUDIO_OUTPUT,
   deviceLabel, ensureMediaPermission, listDevices, loadStoredDevices, saveStoredDevices,
@@ -34,7 +35,10 @@ export function AvSettings({
   bgNote,
   noise,
   onNoise,
+  ttsRoom,
 }: {
+  /** batch H10: the room being read aloud (for its per-room mute) */
+  ttsRoom?: { id: string; name: string } | null;
   open: boolean;
   onClose: () => void;
   /** Called with chosen device ids and optional fresh tracks if cam/mic currently on. */
@@ -389,6 +393,7 @@ export function AvSettings({
                 <label className="check-row"><input type="checkbox" checked={noise.strong} disabled={!noise.on} onChange={(e) => onNoise({ on: true, strong: e.target.checked })} data-action="noise-strong" /> <span>Stronger (RNNoise) <span className="muted small">(one-time ~120 KB download, uses a little more CPU)</span></span></label>
               </fieldset>
             )}
+            <TtsSettings room={ttsRoom} />
           </div>
         </div>
         {error && <div className="form-error">{error}</div>}

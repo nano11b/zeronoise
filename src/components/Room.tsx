@@ -1,4 +1,5 @@
 import { translateText, TranslateUnavailable } from '../translate';
+import { getTts, onQueue, onTts, queueState, roomMuted, setTts, speakable, ttsSay, ttsSkip, ttsStop, ttsSupported, ttsUser } from '../tts';
 import type { RolesState } from './RolesPanel';
 import { RoleChip } from './RoleChip';
 import { TranslationLine, type TranslationState } from './TranslationLine';
@@ -281,6 +282,29 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
     socket.on('whisper:ended', onEnded);
     return () => { socket.off('whisper:update', onUpdate); socket.off('whisper:message', onMessage); socket.off('whisper:ended', onEnded); };
   }, [toast]);
+  // batch H10: read messages aloud
+  const [ttsP, setTtsP] = useState(getTts());
+  const [ttsQ, setTtsQ] = useState(queueState());
+  useEffect(() => { ttsUser(me.accountId); setTtsP(getTts()); const a = onTts(() => setTtsP(getTts())); const b = onQueue(() => setTtsQ(queueState())); return () => { a(); b(); ttsStop(); }; }, [me.accountId]);
+  useEffect(() => {
+    const onChat = (m: ChatMessage) => {
+      const p = getTts();
+      if (p.mode === 'off' || m.kind !== 'chat' || m.fromId === socket.id || m.from === me.nick || m.burn || roomMuted(initial.id)) return;
+      if (ignoredRef.current.has(m.from.toLowerCase())) return;
+      const mentioned = !!me.accountId && !!m.mentions?.includes(me.accountId);
+      if (p.mode === 'mentions' && !mentioned) return;
+      const body = m.voice ? (m.text.startsWith('🎬') ? 'shared a clip' : 'sent a voice note') : m.poll ? `started a poll: ${speakable(m.poll.question)}` : speakable(m.text);
+      if (!body) return;
+      ttsSay(m.id, m.from, `${m.from}${mentioned ? ' mentioned you' : ''}${m.voice || m.poll ? ' ' : ': '}${body}`);
+    };
+    const onWhisper = (m: WhisperMessage) => {
+      if (getTts().mode === 'off' || m.fromId === socket.id || ignoredRef.current.has(m.from.toLowerCase())) return;
+      ttsSay(m.id, m.from, `${m.from} whispers: ${speakable(m.text)}`);
+    };
+    socket.on('chat:message', onChat); socket.on('whisper:message', onWhisper);
+    return () => { socket.off('chat:message', onChat); socket.off('whisper:message', onWhisper); };
+  }, [initial.id, me.nick, me.accountId]);
+  const ttsToggle = () => setTts({ mode: getTts().mode === 'off' ? getTts().lastOn : 'off' });
   // batch G5: whisper read receipts
   const [receiptsOn, setReceiptsOn] = useState(true);
   const [whisperSeen, setWhisperSeen] = useState<Record<string, Record<string, { messageId: string; nick: string }>>>({});
@@ -2204,6 +2228,13 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
             {editingId && (
               <div className="editing-banner">Editing your message <button type="button" className="btn ghost small-btn" onClick={() => { setEditingId(null); setText(''); }}>Cancel</button></div>
             )}
+            {(ttsQ.current || ttsQ.waiting > 0) && (
+              <div className="tts-bar" data-testid="tts-bar" role="status" aria-live="off">
+                <span className="small">🔈 Reading {ttsQ.current?.sender ?? ''}…{ttsQ.waiting ? ` (+${ttsQ.waiting} waiting)` : ''}{ttsQ.dropped ? ` · ${ttsQ.dropped} skipped (busy)` : ''}</span>
+                <button type="button" className="btn ghost small-btn" data-action="tts-skip" onClick={ttsSkip}>Skip</button>
+                <button type="button" className="btn ghost small-btn" data-action="tts-stop" onClick={ttsStop}>Stop</button>
+              </div>
+            )}
             <form className="chat-form" onSubmit={send}>
               <div className="composer-plus" onClick={(e) => e.stopPropagation()}>
                 <button type="button" className="btn ghost icon-act" title="More message tools" aria-label="More message tools" aria-expanded={plusOpen} data-action="composer-plus" onClick={() => setPlusOpen((v) => !v)}><Icon name="plus" /></button>
@@ -2221,6 +2252,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     )}
                     {!editingId && <button type="button" className="plus-item" data-action="new-poll" onClick={() => { setPlusOpen(false); setPollDraft({ question: '', options: [] }); }}>📊 Poll</button>}
                     {account && onAccount && <NameStylePicker account={account} onAccount={onAccount} toast={toast} />}
+                    {ttsSupported() && <button type="button" className={`plus-item${ttsP.mode !== 'off' ? ' on' : ''}`} data-action="tts-plus" onClick={() => { ttsToggle(); setPlusOpen(false); }}>{ttsP.mode === 'off' ? '🔈 Read messages aloud' : '🔇 Stop reading aloud'}</button>}
                     <button type="button" className={`plus-item${pingMuted ? ' on' : ''}`} data-action="ping-mute" onClick={() => setPingMuted((v) => { const next = !v; try { localStorage.setItem(`${APP_NAME.toLowerCase()}.pingMute`, next ? '1' : '0'); } catch { /* ignore */ } return next; })}>{pingMuted ? 'Unmute mention sounds' : 'Mute mention sounds'}</button>
                   </div>
                 )}
@@ -2230,6 +2262,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
               <div className="composer-tools">
                 <GifPicker enabled={!!gifs} value={text} onChange={setText} inputRef={chatInputRef} />
                 <EmojiPicker value={text} onChange={setText} inputRef={chatInputRef} emotes={emotes} />
+                {ttsSupported() && <button type="button" className={`btn ghost icon-act tts-toggle${ttsP.mode !== 'off' ? ' on' : ''}`} aria-pressed={ttsP.mode !== 'off'} data-action="tts-toggle" onClick={ttsToggle}
+                  title={ttsP.mode === 'off' ? 'Read messages aloud (off)' : `Reading ${ttsP.mode === 'all' ? 'all messages' : 'mentions and whispers'} aloud. Click to turn off.`} aria-label="Read messages aloud">{ttsP.mode === 'off' ? '🔇' : '🔈'}</button>}
                 {!editingId && burnOn && <button type="button" className="btn ghost burn-btn on" data-action="burn-disarm" title={`Burn on: next message disappears ${burnTtl}s after viewing. Click to turn off.`} aria-label="Turn off burn after reading" onClick={() => setBurnOn(false)}>🔥</button>}
                 {!editingId && !burnOn && <VoiceNoteButton roomId={initial.id} toast={toast} />}
               </div>
@@ -2429,7 +2463,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
       {!wide && mediaControls}
       {ghost && <div className="dock-ghost" style={{ left: ghost.x, top: ghost.y }} aria-hidden>{ghost.item === 'cams' ? 'Cameras' : 'People'}</div>}
       {historyFor && <EditHistory h={historyFor} onClose={() => setHistoryFor(null)} />}
-      {avOpen && <Lazy fallback={null} inline><AvSettings open={avOpen} onClose={() => setAvOpen(false)} onApply={applyAvDevices} camOn={cam && !screen} micOn={mic} blocked={ignored} onUnblock={toggleIgnore} quality={vq} onQuality={changeQuality} shareMode={shareMode} onShareMode={changeShareMode} bg={bgPref} onBg={changeBg} bgNote={bgNote} noise={noisePref} onNoise={changeNoise} /></Lazy>}
+      {avOpen && <Lazy fallback={null} inline><AvSettings open={avOpen} onClose={() => setAvOpen(false)} onApply={applyAvDevices} camOn={cam && !screen} micOn={mic} blocked={ignored} onUnblock={toggleIgnore} quality={vq} onQuality={changeQuality} shareMode={shareMode} onShareMode={changeShareMode} bg={bgPref} onBg={changeBg} bgNote={bgNote} noise={noisePref} onNoise={changeNoise} ttsRoom={initial.isPrivate ? null : { id: initial.id, name: initial.name }} /></Lazy>}
       {dialog && <Dialog spec={dialog} onClose={() => setDialog(null)} />}
       {notifyOpen && <NotifyDialog roomName={initial.name} onClose={() => setNotifyOpen(false)} />}
       {reportTarget && <ReportDialog target={reportTarget} onClose={() => setReportTarget(null)} toast={toast} registered={me.registered} />}

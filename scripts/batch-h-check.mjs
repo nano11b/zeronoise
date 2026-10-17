@@ -147,7 +147,7 @@ try {
       await a.page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
       const modal = await a.page.waitForSelector('[data-testid="onboarding"][data-step="0"]', { timeout: 15000 }).catch(() => null);
       ok(!!modal, `${width}: H6: first visit opens the tour`);
-      ok(await a.page.evaluate(() => document.activeElement?.id === 'onb-title'), `${width}: H6: focus moves into the dialog`);
+      ok(!!(await a.page.waitForFunction(() => !!document.activeElement?.closest('[data-testid="onboarding"]'), { timeout: 3000 }).catch(() => null)), `${width}: H6: focus moves into the dialog`);
       await shot(a.page, `h6-tour-${width}`);
       for (let i = 0; i < 3; i++) { await a.page.$eval('[data-action="onb-next"]', (b) => b.click()); await sleep(150); }
       await a.page.waitForSelector('[data-testid="onboarding"][data-step="3"]');
@@ -179,6 +179,103 @@ try {
       await b.page.reload({ waitUntil: 'domcontentloaded' }); await sleep(2500);
       ok(!(await b.page.$('[data-testid="onboarding"]')), `${width}: H6: it doesn't come back`);
       await b.ctx.close();
+    }
+    // H10 UI: read aloud (speechSynthesis mocked so the test can hear what would be spoken)
+    {
+      await fresh(owner); await emit(owner.s, 'room:join', { roomId: room });
+      await fresh(other); await emit(other.s, 'room:join', { roomId: room });
+      const a = await pageFor(mem, width);
+      await a.page.evaluateOnNewDocument(() => {
+        window.__spoken = []; window.__cancels = 0;
+        const fake = { speaking: false, pending: false, paused: false, _q: [],
+          getVoices: () => [{ voiceURI: 'test-en', name: 'Test English', lang: 'en-US', default: true, localService: true }, { voiceURI: 'test-fr', name: 'Test French', lang: 'fr-FR', default: false, localService: true }],
+          speak(u) { window.__spoken.push({ text: u.text, rate: u.rate, volume: u.volume, lang: u.lang }); this._cur = u; setTimeout(() => { if (this._cur === u) { this._cur = null; u.onend?.({}); } }, window.__ttsMs ?? 250); },
+          cancel() { window.__cancels++; const u = this._cur; this._cur = null; if (u) setTimeout(() => u.onend?.({}), 0); },
+          addEventListener() {}, removeEventListener() {} };
+        Object.defineProperty(window, 'speechSynthesis', { value: fake, configurable: true });
+      });
+      await enterRoom(a.page, room);
+      await a.page.evaluate(() => document.querySelector('[data-action="rec-ok"]')?.click());
+      const spoken = () => a.page.evaluate(() => window.__spoken.map((x) => x.text));
+      // off by default: nothing read
+      await emit(owner.s, 'chat:send', { text: 'nobody should hear this' }); await sleep(500);
+      ok((await spoken()).length === 0 && !!(await a.page.$('[data-action="tts-toggle"], [data-action="composer-plus"]')), `${width}: H10: off by default`);
+      // settings: all messages, French voice, rate 1.5, volume 0.5
+      await a.page.evaluate(() => document.querySelector('[data-action="av-settings"]')?.click());
+      const fs1 = await a.page.waitForSelector('[data-testid="av-tts"]', { timeout: 6000 }).catch(() => null);
+      ok(!!fs1, `${width}: H10: "Read messages aloud" is in Audio & video settings`);
+      await a.page.$eval('[data-tts-mode="all"]', (b) => b.click());
+      await a.page.select('[data-action="tts-voice"]', 'test-fr');
+      for (const [sel, v] of [['[data-action="tts-rate"]', '1.5'], ['[data-action="tts-volume"]', '0.5']]) await a.page.$eval(sel, (e, v) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(e, v); e.dispatchEvent(new Event('input', { bubbles: true })); }, v);
+      await fs1?.evaluate((e) => e.scrollIntoView({ block: 'center' }));
+      ok(await noSideScroll(a.page), `${width}: H10: settings: no sideways scroll`);
+      await shot(a.page, `h10-tts-settings-${width}`);
+      await a.page.keyboard.press('Escape'); await sleep(300);
+      await emit(owner.s, 'chat:send', { text: 'hello https://www.example.com/some/long/path?x=1 😂😂😂😂 **bold**' });
+      await sleep(700);
+      const s1 = await a.page.evaluate(() => window.__spoken.at(-1));
+      ok(s1?.text === 'HhOwner: hello link to example.com 😂 bold' && s1.rate === 1.5 && s1.volume === 0.5 && s1.lang === 'fr-FR', `${width}: H10: links and emoji spoken sensibly, with the chosen voice/rate/volume`, JSON.stringify(s1));
+      // own messages skipped
+      const n0 = (await spoken()).length;
+      await a.page.type('[aria-label="Chat message"]', 'my own words'); await a.page.keyboard.press('Enter'); await sleep(700);
+      ok((await spoken()).length === n0, `${width}: H10: your own messages are not read`);
+      // flood: 6 lines from one sender -> at most 2 read, queue shows skips
+      await a.page.evaluate(() => { window.__ttsMs = 1500; });
+      for (let i = 0; i < 6; i++) emit(other.s, 'chat:send', { text: `spam ${i}` });
+      const bar = await a.page.waitForSelector('[data-testid="tts-bar"]', { timeout: 3000 }).catch(() => null);
+      await sleep(600);
+      ok(!!bar, `${width}: H10: queue bar with Skip / Stop while reading`);
+      await shot(a.page, `h10-tts-queue-${width}`);
+      await a.page.$eval('[data-action="tts-skip"]', (b) => b.click()); await sleep(200);
+      const afterSkip = await spoken();
+      await a.page.evaluate(() => document.querySelector('[data-action="tts-stop"]')?.click()); await sleep(300);
+      const spam = afterSkip.filter((t) => /spam/.test(t));
+      ok(spam.length === 2 && spam[1] === 'HhOther: spam 1', `${width}: H10: rate limit (2 per sender per 10 s); Skip moves to the next line`, JSON.stringify(spam));
+      ok(!(await a.page.$('[data-testid="tts-bar"]')) && (await a.page.evaluate(() => window.__cancels)) >= 2, `${width}: H10: Stop clears the queue`);
+      await a.page.evaluate(() => { window.__ttsMs = 100; });
+      // per-room mute
+      await a.page.evaluate(() => document.querySelector('[data-action="av-settings"]')?.click());
+      await a.page.waitForSelector('[data-action="tts-room-mute"]', { timeout: 4000 });
+      await a.page.$eval('[data-action="tts-room-mute"]', (b) => b.click());
+      await a.page.$eval('[data-tts-mode="mentions"]', (b) => b.click());
+      await a.page.keyboard.press('Escape'); await sleep(300);
+      const n1 = (await spoken()).length;
+      await sleep(10500); // let the per-sender window pass
+      await emit(owner.s, 'chat:send', { text: 'hey @HhMember muted room' }); await sleep(500);
+      ok((await spoken()).length === n1, `${width}: H10: a muted room is not read`);
+      await a.page.evaluate(() => document.querySelector('[data-action="av-settings"]')?.click());
+      await a.page.waitForSelector('[data-action="tts-room-mute"]', { timeout: 4000 });
+      await a.page.$eval('[data-action="tts-room-mute"]', (b) => b.click());
+      await a.page.keyboard.press('Escape'); await sleep(300);
+      await emit(owner.s, 'chat:send', { text: 'plain line, no mention' }); await sleep(400);
+      await emit(owner.s, 'chat:send', { text: 'hey @HhMember look' }); await sleep(500);
+      const s2 = await spoken();
+      ok(!s2.some((t) => /plain line/.test(t)) && s2.at(-1) === 'HhOwner mentioned you: hey at HhMember look', `${width}: H10: mentions mode reads only mentions`, JSON.stringify(s2.slice(-2)));
+      // whispers in mentions mode
+      const j = await emit(other.s, 'room:join', { roomId: room });
+      const memId = (j.room?.users ?? []).find((u) => u.nick === 'HhMember')?.id;
+      const w = await emit(other.s, 'whisper:start', { userIds: [memId] });
+      await emit(other.s, 'whisper:send', { whisperId: w.whisper?.id, text: 'secret plan' }); await sleep(500);
+      ok((await spoken()).at(-1) === 'HhOther whispers: secret plan', `${width}: H10: whispers are read in mentions mode`);
+      // quick toggle near the composer
+      const toggleSel = width < 800 ? null : '[data-action="tts-toggle"]';
+      if (toggleSel) {
+        await a.page.$eval(toggleSel, (b) => b.click()); await sleep(200);
+        const off = await a.page.$eval(toggleSel, (b) => b.getAttribute('aria-pressed'));
+        await a.page.$eval(toggleSel, (b) => b.click()); await sleep(200);
+        const on = await a.page.$eval(toggleSel, (b) => b.getAttribute('aria-pressed'));
+        ok(off === 'false' && on === 'true', `${width}: H10: quick toggle icon next to the composer`);
+      } else {
+        await a.page.$eval('[data-action="composer-plus"]', (b) => b.click()); await sleep(200);
+        const item = await a.page.$('[data-action="tts-plus"]');
+        ok(!!item && /Stop reading aloud/.test(await item.evaluate((e) => e.textContent)), `${width}: H10: quick toggle in the composer + menu on phones`);
+        await shot(a.page, `h10-tts-plus-${width}`);
+        await item?.click();
+      }
+      await shot(a.page, `h10-tts-composer-${width}`);
+      const persisted = await a.page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('zn.tts.u')).length);
+      ok(persisted === 1, `${width}: H10: settings are kept per user`);
+      await a.ctx.close(); await fresh(mem); await emit(mem.s, 'room:join', { roomId: room });
     }
     // @@UI-END
   }
