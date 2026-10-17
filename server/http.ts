@@ -2362,6 +2362,21 @@ export function createApp(roomList: () => unknown) {
   app.get('/docs', (_req, res) => res.redirect(302, '/docs/bots'));
   app.get('/docs/bots.md', publicDoc(botMarkdown, 'text/markdown; charset=utf-8'));
   app.get('/docs/bots', publicDoc(botApiHtml(), 'text/html; charset=utf-8'));
+  // batch D: game bridge kit (bridge-kit/ in the release), as a ZIP and as plain files
+  const kitDir = path.resolve(__dirname, '../../../bridge-kit');
+  const KIT_FILES = ['README.md', 'bridge.mjs', 'config.example.json'];
+  const kitText = (f: string) => { try { return fs.readFileSync(path.join(kitDir, f), 'utf8'); } catch { return null; } };
+  if (KIT_FILES.every((f) => kitText(f) != null)) {
+    const kitZip = makeZip(KIT_FILES.map((f) => ({ name: `zeronoise-bridge-kit/${f}`, data: kitText(f)! })), new Date(2026, 9, 16));
+    const kitEtag = `"${createHash('sha256').update(kitZip).digest('hex')}"`;
+    app.get('/docs/bots/bridge-kit.zip', (req, res) => {
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate'); res.setHeader('ETag', kitEtag);
+      if (req.headers['if-none-match'] === kitEtag) return res.status(304).end();
+      res.setHeader('Content-Disposition', 'attachment; filename="zeronoise-bridge-kit.zip"');
+      res.type('application/zip').send(kitZip);
+    });
+    for (const f of KIT_FILES) app.get(`/docs/bots/bridge-kit/${f}`, publicDoc(kitText(f)!, f.endsWith('.md') ? 'text/markdown; charset=utf-8' : f.endsWith('.json') ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8'));
+  } else console.warn('[docs] bridge-kit/ not found; /docs/bots/bridge-kit.zip disabled');
   app.get('/llms.txt', publicDoc(llmsTxt(PUBLIC_URL), 'text/plain; charset=utf-8'));
 
   app.use('/api', (_req, res) => fail(res, 404, 'Not found'));

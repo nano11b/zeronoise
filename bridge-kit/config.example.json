@@ -1,0 +1,14 @@
+{
+  "baseUrl": "https://chat.nano11bravo.com",
+  "room": "driftzone",
+  "prefix": "",
+  "sendEveryMs": 1500,
+  "readEveryMs": 2000,
+  "mergeWithinMs": 3000,
+  "sources": [
+    { "type": "fivem-players", "url": "http://127.0.0.1:30120/players.json", "everyMs": 5000 },
+    { "type": "logtail", "preset": "beammp", "file": "/home/beammp/Server.log" },
+    { "type": "webhook", "host": "127.0.0.1", "port": 30121 }
+  ],
+  "chatToGame": { "mode": "off", "format": "[chat] {author}: {text}", "url": "http://127.0.0.1:30122/chat", "file": "./chat-inbox.txt" }
+}

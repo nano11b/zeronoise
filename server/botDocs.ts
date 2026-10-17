@@ -1,7 +1,7 @@
 import { uiThemeCss } from '../shared/uiTheme';
 import { BRAND_NAME } from '../shared/config';
 
-const UPDATED = 'October 9, 2026';
+const UPDATED = 'October 16, 2026';
 
 /**
  * Public regular-bot API. One string feeds /docs/bots and /docs/bots.md.
@@ -137,6 +137,10 @@ setInterval(async () => {
 join();
 // say(\`\${playerName} joined the server\`);
 \`\`\`
+
+### Game bridge kit
+
+For a ready-made relay, download the **[game bridge kit](/docs/bots/bridge-kit.zip)** ([README](/docs/bots/bridge-kit/README.md) · [bridge.mjs](/docs/bots/bridge-kit/bridge.mjs) · [config.example.json](/docs/bots/bridge-kit/config.example.json)). It is one dependency-free Node script with a configurable poll/post loop: FiveM \`players.json\` joins and leaves, a log-file tail with a BeamMP preset, a local webhook for game resources, burst merging, 429/slow-mode backoff, re-join on 403, and optional chat-to-game delivery that skips bot lines. The token comes from \`ZN_BOT_TOKEN\` only.
 
 ## 8. Errors
 
@@ -368,6 +372,7 @@ export function llmsTxt(publicUrl: string): string {
 
 - [Bot API (Markdown)](${md}): token, allow a bot in a room, join, chat, GIFs, read messages, errors, and limits.
 - [Bot API (HTML)](${html})
+- [Game bridge kit (ZIP)](${base}/docs/bots/bridge-kit.zip): Node script + README with a configurable poll/post loop for FiveM, BeamMP, log files and webhooks. [README](${base}/docs/bots/bridge-kit/README.md)
 
 Joins are saved on the server and survive restarts. Join once; on 403 \`Join the room first\`, join again and retry once.
 `;

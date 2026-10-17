@@ -1,5 +1,5 @@
 /**
- * Batch D checks: XP and levels, ban appeals, two-factor sign-in (TOTP, recovery codes, passkeys), data export, game bridge kit.
+ * Batch D checks: XP and levels, ban appeals, two-factor sign-in (TOTP, recovery codes), data export, game bridge kit.
  *
  * Screenshots at 1366 and 390.   npm run build && node scripts/batch-d-check.mjs [shots-dir]
  */
@@ -77,6 +77,7 @@ const shot = async (page, name) => { await sleep(450); await page.screenshot({ p
 const b32d = (str) => { const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = 0, v = 0; const out = []; for (const c of str.replace(/[^A-Z2-7]/g, '')) { v = (v << 5) | A.indexOf(c); bits += 5; if (bits >= 8) { out.push((v >>> (bits - 8)) & 255); bits -= 8; } } return Buffer.from(out); };
 const totpAt = (secret, step) => { const m = Buffer.alloc(8); m.writeBigUInt64BE(BigInt(step)); const h = crypto.createHmac('sha1', b32d(secret)).update(m).digest(); const o = h[h.length - 1] & 15; return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1e6).padStart(6, '0'); };
 const stepNow = () => Math.floor(Date.now() / 30000);
+async function fresh0(u) { try { u.s.disconnect(); } catch { /* */ } u.s = await sock(u.j); sockets.push(u.s); return u.s; }
 let loginN = 0;
 async function login(nick) {
   const j = jar(`10.77.${Math.floor(++loginN / 200)}.${loginN % 200 + 1}`); await j.req('/api/me');
@@ -300,6 +301,47 @@ try {
   ok(exJ.status === 200 && J?.format === 'zeronoise-export/1' && J.profile.username === 'DdOther', 'JSON format works');
   ok((await jar().req('/api/me/export', {})).status === 401, 'export needs sign-in');
   ok((await fetch(BASE + '/api/me/export', { method: 'POST', headers: { cookie: other.j.header() } })).status === 403, 'export needs the CSRF header');
+  // ---------- 10. game bridge kit ----------
+  const kz = await fetch(BASE + '/docs/bots/bridge-kit.zip');
+  const kbuf = Buffer.from(await kz.arrayBuffer());
+  const kdir = fs.mkdtempSync(path.join(os.tmpdir(), 'zn-kit-'));
+  fs.writeFileSync(path.join(kdir, 'kit.zip'), kbuf);
+  const kls = await new Promise((r) => { const p = spawn('python3', ['-c', 'import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; z.extractall(sys.argv[2]); print(" ".join(sorted(z.namelist())))', path.join(kdir, 'kit.zip'), kdir]); let o = ''; p.stdout.on('data', (d) => { o += d; }); p.stderr.on('data', (d) => { o += d; }); p.on('close', () => r(o.trim())); });
+  ok(kz.status === 200 && kls === 'zeronoise-bridge-kit/README.md zeronoise-bridge-kit/bridge.mjs zeronoise-bridge-kit/config.example.json', 'bridge kit ZIP downloads with README, script and example config', kls);
+  const docsMd = await (await fetch(BASE + '/docs/bots.md')).text();
+  const docsHtml = await (await fetch(BASE + '/docs/bots')).text();
+  const llms = await (await fetch(BASE + '/llms.txt')).text();
+  ok(docsMd.includes('/docs/bots/bridge-kit.zip') && /href="\/docs\/bots\/bridge-kit\.zip"/.test(docsHtml), '/docs/bots links the kit');
+  ok(llms.includes('/docs/bots/bridge-kit.zip') && llms.includes('bridge-kit/README.md'), 'llms.txt links the kit');
+  ok((await fetch(BASE + '/docs/bots/bridge-kit/README.md')).headers.get('content-type').includes('markdown'), 'README is served as markdown');
+  const KIT = path.join(kdir, 'zeronoise-bridge-kit');
+  const runKit = (argv, extraEnv, ms = 15000) => new Promise((r) => { const p = spawn(process.execPath, ['bridge.mjs', ...argv], { cwd: KIT, env: { PATH: process.env.PATH, ZN_BASE_URL: BASE, ...extraEnv } }); let o = ''; p.stdout.on('data', (d) => { o += d; }); p.stderr.on('data', (d) => { o += d; }); const t = setTimeout(() => p.kill(), ms); p.on('close', (code) => { clearTimeout(t); r({ code, o }); }); globalThis.__kitProc = p; });
+  fs.writeFileSync(path.join(KIT, 'bad.json'), JSON.stringify({ room, token: 'bot_x' }));
+  ok((await runKit(['bad.json'], { ZN_BOT_TOKEN: 'bot_x' })).code === 2, 'kit refuses a token in the config file');
+  const madeBot = await owner.j.req('/api/bots', { name: 'DdBridge' });
+  await fresh0(owner); await emit(owner.s, 'room:join', { roomId: room });
+  const allowB = await emit(owner.s, 'room:bot-allow', { name: 'DdBridge' });
+  ok(!!madeBot.token && allowB.ok, 'setup: bot created and allowed', JSON.stringify({ madeBot: !!madeBot.token, allowB }));
+  const once = await runKit(['none.json', '--once'], { ZN_BOT_TOKEN: madeBot.token, ZN_ROOM: room });
+  await sleep(400);
+  const h1 = (await emit(owner.s, 'room:join', { roomId: room })).room.history;
+  ok(once.code === 0 && h1.some((m) => m.text === 'bridge self-test ✔'), 'kit --once posts the self-test line into the room', once.o.slice(-300));
+  const logf = path.join(KIT, 'Server.log'); fs.writeFileSync(logf, 'boot\n');
+  fs.writeFileSync(path.join(KIT, 'config.json'), JSON.stringify({ room, sendEveryMs: 800, readEveryMs: 1000, mergeWithinMs: 600, sources: [{ type: 'logtail', preset: 'beammp', file: logf, everyMs: 300 }], chatToGame: { mode: 'file', file: path.join(KIT, 'inbox.txt') } }));
+  const live = runKit(['config.json'], { ZN_BOT_TOKEN: madeBot.token }, 14000);
+  await sleep(2500);
+  fs.appendFileSync(logf, '[03/10/26 21:00:00] [INFO] Racer42 is now synced!\n');
+  await sleep(300);
+  await fresh0(other); await emit(other.s, 'room:join', { roomId: room });
+  await emit(other.s, 'chat:send', { text: 'hello from the website to the game' });
+  await sleep(5000);
+  try { globalThis.__kitProc.kill(); } catch { /* */ }
+  const lr = await live;
+  const h2 = (await emit(owner.s, 'room:join', { roomId: room })).room.history;
+  ok(h2.some((m) => m.text === '🚗 Racer42 joined'), 'kit tails a BeamMP log and posts the join', lr.o.slice(-400));
+  const inbox = fs.existsSync(path.join(KIT, 'inbox.txt')) ? fs.readFileSync(path.join(KIT, 'inbox.txt'), 'utf8') : '';
+  ok(inbox.includes('[chat] DdOther: hello from the website to the game'), 'kit delivers room chat to the game (file mode)', inbox + lr.o.slice(-300));
+  ok(!inbox.includes('Racer42') && !inbox.includes('self-test'), 'kit never echoes bot lines back to the game');
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -406,6 +448,15 @@ try {
       }
       await m.ctx.close();
       await fresh(owner); await emit(owner.s, 'room:join', { roomId: room });
+    }
+    // 10. bridge kit on /docs/bots
+    {
+      const { ctx, page } = await pageFor({ j: jar() }, width);
+      await page.goto(BASE + '/docs/bots', { waitUntil: 'domcontentloaded' });
+      const a = await page.$('a[href="/docs/bots/bridge-kit.zip"]');
+      ok(!!a && await noSideScroll(page), `${width}: docs page shows the bridge kit link`);
+      if (a) { await a.evaluate((e) => e.scrollIntoView({ block: 'center' })); await shot(page, `d10-bridge-kit-docs-${width}`); }
+      await ctx.close();
     }
     // @@UI-END
   }
