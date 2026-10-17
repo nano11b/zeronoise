@@ -1,3 +1,4 @@
+import { RoomAppeal } from './RoomAppeal';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Sheet } from './Sheet';
 import { LIMITS } from '../../shared/config';
@@ -41,6 +42,7 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
   askRoom?: { id: string; name: string; n: number } | null;
 }) {
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
+  const [appealRoom, setAppealRoom] = useState<{ id: string; name: string } | null>(null);
   // Until the first list arrives, placeholder cards hold the grid's height so the page does not jump.
   const [roomsLoaded, setRoomsLoaded] = useState(false);
   const [name, setName] = useState('');
@@ -104,7 +106,11 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
       onJoined(r.room, password);
       setAskPw(null);
       setJoinPw('');
-    } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (/^You are banned from this room/.test(msg)) setAppealRoom({ id: roomId, name: rooms.find((r) => r.id === roomId)?.name ?? roomId });
+      toast(msg, 'error');
+    } finally { setBusy(false); }
   };
 
   const create = async (e: FormEvent) => {
@@ -160,6 +166,7 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
       </SiteBar>
       <main className="lobby-main">
         <section>
+          {appealRoom && <RoomAppeal key={appealRoom.id} roomId={appealRoom.id} roomName={appealRoom.name} onClose={() => setAppealRoom(null)} />}
           <GamesSlot />
           <Lazy fallback={null}>
             <LobbyRows signedIn={!!account} rooms={rooms} roomsLoaded={roomsLoaded} busy={busy} toast={toast}

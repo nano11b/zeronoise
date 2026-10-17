@@ -8,6 +8,7 @@ import * as repo5 from './repo5';
 import * as repo6 from './repo6';
 import * as repo7 from './repo7';
 import * as repo8 from './repo8';
+import { APPEAL_MAX, APPEAL_MIN, type RoomAppealInfo } from '../shared/appeals';
 import { dupKey, XP_COOLDOWN_MS, XP_MIN_CHARS, XP_PER_MESSAGE } from '../shared/xp';
 import { isDiscoverSort, trendingScore, type DiscoverRoom } from '../shared/discover';
 import { blockedLink, cleanDomains, cleanWords, isLinkMode, matchWord } from '../shared/filters';
@@ -3162,6 +3163,70 @@ function onConnection(socket: AppSocket) {
   });
 
   /** batch C: edit history from the mod queue (site staff anywhere; room owner / mods for their rooms), without being in the room */
+  // ---------- room-ban appeals (batch E): same flow as site bans, decided by the room's managers ----------
+  const roomAppealView = (a: repo8.RoomAppealRow): RoomAppealInfo => ({ id: a.id, roomId: a.room_id, username: a.username, text: a.text, createdAt: a.created_at, status: a.status, decidedBy: a.decided_by, decidedAt: a.decided_at, note: a.decision_note });
+  socket.on('roomappeal:status', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (!s.user) return ack({ ok: false, error: 'Sign in first' });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down' });
+    const room = rooms.get(String(p?.roomId ?? ''));
+    if (!room || room.isPrivate) return ack({ ok: false, error: 'Room not found' });
+    const ban = repo.activeRoomBan(room.id, identOf(s));
+    if (!ban) return ack({ ok: true, banned: false });
+    const a = repo8.roomAppealForBan(ban.id);
+    ack({ ok: true, banned: true, ban: { id: ban.id, reason: ban.reason, expiresAt: ban.expires_at }, appeal: a ? roomAppealView(a) : null, canAppeal: !!s.account });
+  });
+  socket.on('roomappeal:submit', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (!s.user) return ack({ ok: false, error: 'Sign in first' });
+    if (!s.account) return ack({ ok: false, error: 'Sign in with an account to appeal.' });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down' });
+    const room = rooms.get(String(p?.roomId ?? ''));
+    if (!room || room.isPrivate) return ack({ ok: false, error: 'Room not found' });
+    const ban = repo.activeRoomBan(room.id, identOf(s));
+    if (!ban) return ack({ ok: false, error: 'You are not banned from this room.' });
+    const text = String(p?.text ?? '').replace(/\s+/g, ' ').trim();
+    if (text.length < APPEAL_MIN) return ack({ ok: false, error: `Please write at least ${APPEAL_MIN} characters.` });
+    if (text.length > APPEAL_MAX) return ack({ ok: false, error: `Keep it under ${APPEAL_MAX} characters.` });
+    const a = repo8.insertRoomAppeal({ banId: ban.id, roomId: room.id, userId: s.account.id, username: s.account.username, text });
+    if (!a) return ack({ ok: false, error: 'You already appealed this ban.' });
+    repo.logAction(s.account.username, s.account.id, 'room-appeal', `room ban #${ban.id}`, room.id, text.slice(0, 200));
+    try {
+      const id = modq.insertReport({
+        reporterUserId: s.account.id, reporterNick: s.account.username, reporterIp: 'appeal', targetUserId: s.account.id, targetNick: s.account.username, targetIp: null, targetDevice: null,
+        roomId: room.id, messageId: null, messageText: text.slice(0, 2000), kind: 'user', key: `rappeal:${a.id}`, category: 'other',
+        note: `Room ban appeal #${a.id} from ${s.account.username} for #${room.name}${ban.reason ? ` (ban reason: ${ban.reason})` : ''}: ${text}`.slice(0, 1200),
+        snapshot: null, privateKind: null, context: [], notify: false,
+      });
+      const row = modq.reportById(id);
+      if (row) afterNewReport(row);
+      emitRoomCounts(room.id, true);
+    } catch (err) { console.error('[appeals] room queue entry', (err as Error).message); }
+    ack({ ok: true, appeal: roomAppealView(a) });
+  });
+  socket.on('roomappeal:decide', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (!s.user) return ack({ ok: false, error: 'Sign in first' });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down' });
+    const a = repo8.roomAppealById(Number(p?.appealId));
+    if (!a) return ack({ ok: false, error: 'No such appeal' });
+    const room = rooms.get(a.room_id);
+    if (!room || !canRoomManage(s, room)) return ack({ ok: false, error: 'Only this room\'s owner, its moderators or site staff can decide.' });
+    if (a.status !== 'open') return ack({ ok: false, error: `Already ${a.status}` });
+    if (p?.decision !== 'approve' && p?.decision !== 'deny') return ack({ ok: false, error: 'decision must be approve or deny' });
+    const status = p.decision === 'approve' ? 'approved' : 'denied';
+    const note = p?.note ? String(p.note).trim().slice(0, 300) || null : null;
+    const by = actorLabel(s);
+    if (!repo8.decideRoomAppeal(a.id, status, by, note)) return ack({ ok: false, error: 'Already decided' });
+    if (status === 'approved') repo.expireRoomBan(a.room_ban_id);
+    repo.logAction(by, s.account?.id ?? null, status === 'approved' ? 'room-appeal-approve' : 'room-appeal-deny', `${a.username} (room appeal #${a.id})`, room.id, note);
+    try { modq.closeGroup(`rappeal:${a.id}`, status === 'approved' ? 'resolved' : 'dismissed', by, note, status === 'approved' ? 'appeal approved: room ban lifted' : 'appeal denied'); } catch (err) { console.error('[appeals] close', (err as Error).message); }
+    emitStaffCounts(true); emitRoomCounts(room.id, false);
+    ack({ ok: true, decision: status });
+  });
   socket.on('modq:history', (p, ackRaw) => {
     const ack = safeAck(ackRaw);
     const s = session();

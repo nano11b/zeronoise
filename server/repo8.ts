@@ -158,3 +158,16 @@ export const hasPasskey = (userId: number) => !!q('SELECT 1 AS x FROM user_passk
 export const secondFactorOn = (userId: number) => mfaEnabled(userId) || hasPasskey(userId);
 /** the TOTP secret in the clear (batch E3 replaces this with the decrypting version) */
 export const totpSecret = (t: TotpRow) => t.secret;
+
+// ---------------- room-ban appeals (migration 43) ----------------
+export interface RoomAppealRow { id: number; room_ban_id: number; room_id: string; user_id: number; username: string; text: string; created_at: number; status: 'open' | 'approved' | 'denied'; decided_by: string | null; decided_at: number | null; decision_note: string | null }
+export const roomAppealForBan = (banId: number) => q('SELECT * FROM room_ban_appeals WHERE room_ban_id = ?').get(banId) as RoomAppealRow | undefined;
+export const roomAppealById = (id: number) => q('SELECT * FROM room_ban_appeals WHERE id = ?').get(id) as RoomAppealRow | undefined;
+export function insertRoomAppeal(a: { banId: number; roomId: string; userId: number; username: string; text: string }): RoomAppealRow | null {
+  const r = q(`INSERT INTO room_ban_appeals (room_ban_id, room_id, user_id, username, text, created_at, status) VALUES (?,?,?,?,?,?, 'open')
+    ON CONFLICT(room_ban_id) DO NOTHING RETURNING id`).get(a.banId, a.roomId, a.userId, a.username, a.text, now()) as { id: number } | undefined;
+  return r ? roomAppealById(r.id)! : null;
+}
+export function decideRoomAppeal(id: number, status: 'approved' | 'denied', by: string, note: string | null): boolean {
+  return Number(q(`UPDATE room_ban_appeals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'open'`).run(status, by, now(), note, id).changes) > 0;
+}

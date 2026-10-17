@@ -773,7 +773,21 @@ const MIGRATIONS: string[] = [
     last_used_at INTEGER,
     removed_at INTEGER
   );
-  CREATE INDEX IF NOT EXISTS user_passkeys_user ON user_passkeys(user_id)
+  CREATE INDEX IF NOT EXISTS user_passkeys_user ON user_passkeys(user_id);
+  CREATE TABLE IF NOT EXISTS room_ban_appeals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_ban_id INTEGER NOT NULL UNIQUE,
+    room_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',
+    decided_by TEXT,
+    decided_at INTEGER,
+    decision_note TEXT
+  );
+  CREATE INDEX IF NOT EXISTS room_ban_appeals_room ON room_ban_appeals(room_id, status)
   `,
 ];
 

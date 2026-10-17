@@ -97,7 +97,7 @@ export function recentRegisteredReporters(messageId: string): number {
 
 export interface Scope { roomId: string }
 // room view: messages in the room, plus lines the room's word / link filters blocked (filed by the moderator bot)
-const scopeSql = (scope?: Scope) => (scope ? ` AND room_id = ? AND (COALESCE(target_kind, CASE WHEN message_id IS NOT NULL THEN 'message' END) = 'message' OR target_key LIKE 'filter:%') AND COALESCE(private_kind, '') <> 'whisper'` : '');
+const scopeSql = (scope?: Scope) => (scope ? ` AND room_id = ? AND (COALESCE(target_kind, CASE WHEN message_id IS NOT NULL THEN 'message' END) = 'message' OR target_key LIKE 'filter:%' OR target_key LIKE 'rappeal:%') AND COALESCE(private_kind, '') <> 'whisper'` : '');
 const scopeArgs = (scope?: Scope) => (scope ? [scope.roomId] : []);
 
 export function counts(scope?: Scope): QueueCounts {

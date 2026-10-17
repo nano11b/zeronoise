@@ -6,3 +6,9 @@ export interface AppealInfo {
   status: 'open' | 'approved' | 'denied'; decidedBy: string | null; decidedAt: number | null; note: string | null;
   reason?: string | null; expiresAt?: number | null;
 }
+
+/** batch E: an appeal against a ban from one room (decided by that room's owner / mods, or site staff) */
+export interface RoomAppealInfo {
+  id: number; roomId: string; username: string; text: string; createdAt: number;
+  status: 'open' | 'approved' | 'denied'; decidedBy: string | null; decidedAt: number | null; note: string | null;
+}

@@ -1,3 +1,4 @@
+import type { RoomAppealInfo } from './appeals';
 import type { RoomFilters } from './filters';
 import type { StageState } from './stage';
 import type { QueueAction, QueueBucket, QueueCounts, QueueItem, QueueSort, ReportCategory } from './modq';
@@ -278,6 +279,9 @@ export interface ClientToServer {
   'chat:pin': (p: { messageId: string; pinned: boolean }, ack: Ack) => void;
   /** room managers / staff: earlier versions of an edited message, oldest first */
   /** batch C: same, from the mod queue (staff anywhere; room managers for their own rooms) */
+  'roomappeal:status': (p: { roomId: string }, ack: Ack<{ banned: boolean; ban?: { id: number; reason: string | null; expiresAt: number | null }; appeal?: RoomAppealInfo | null; canAppeal?: boolean }>) => void;
+  'roomappeal:submit': (p: { roomId: string; text: string }, ack: Ack<{ appeal: RoomAppealInfo }>) => void;
+  'roomappeal:decide': (p: { appealId: number; decision: 'approve' | 'deny'; note?: string }, ack: Ack<{ decision: 'approved' | 'denied' }>) => void;
   'modq:history': (p: { messageId: string }, ack: Ack<{ versions: { text: string; at: number }[]; current: { text: string; at: number } }>) => void;
   'chat:history': (p: { messageId: string }, ack: Ack<{ versions: { text: string; at: number }[]; current: { text: string; at: number } }>) => void;
   // ---- stage mode ----

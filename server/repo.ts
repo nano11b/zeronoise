@@ -226,11 +226,15 @@ export function addRoomBan(roomId: string, i: Ident, reason: string, by: string,
   q('INSERT INTO room_bans (room_id, user_key, ip, device_id, nick, reason, created_by, created_at, expires_at) VALUES (?,?,?,?,?,?,?,?,?)')
     .run(roomId, userKey(i), i.ip, i.deviceIds[0] ?? null, i.nick, reason.slice(0, LIMITS.banReasonMax), by, now(), minutes ? now() + minutes * 60_000 : null);
 }
-export function activeRoomBan(roomId: string, i: Ident): { reason: string | null; expires_at: number | null } | null {
+export function activeRoomBan(roomId: string, i: Ident): { id: number; reason: string | null; expires_at: number | null } | null {
   // room bans match account/guest name + device (IP too for guests, who can trivially rename)
   const m = identMatch(i, !i.userId);
-  return (q(`SELECT reason, expires_at FROM room_bans WHERE room_id = ? AND (expires_at IS NULL OR expires_at > ?) AND ${m.sql} LIMIT 1`)
-    .get(roomId, now(), ...m.args) as { reason: string | null; expires_at: number | null } | undefined) ?? null;
+  return (q(`SELECT id, reason, expires_at FROM room_bans WHERE room_id = ? AND (expires_at IS NULL OR expires_at > ?) AND ${m.sql} LIMIT 1`)
+    .get(roomId, now(), ...m.args) as { id: number; reason: string | null; expires_at: number | null } | undefined) ?? null;
+}
+/** batch E: an approved appeal ends the room ban by expiring it (the row is kept) */
+export function expireRoomBan(id: number): boolean {
+  return Number(q('UPDATE room_bans SET expires_at = ? WHERE id = ? AND (expires_at IS NULL OR expires_at > ?)').run(now(), id, now()).changes) > 0;
 }
 
 // ---------------- rooms & messages ----------------

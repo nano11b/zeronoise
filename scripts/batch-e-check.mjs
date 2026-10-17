@@ -146,6 +146,33 @@ try {
   ok((await jar().req('/api/auth/passkey', { ticket: po.ticket, credential: {} })).status === 400, 'a ticket works only once');
   ok((await mem.j.req('/api/me/passkeys/options', {})).options?.authenticatorSelection?.residentKey === 'required', 'registration options request a resident key');
   ok((await jar().req('/api/me/passkeys/options', {})).status === 401, 'registration needs sign-in');
+  // ---------- 2. room-ban appeals ----------
+  const memId = async () => (await emit(owner.s, 'room:join', { roomId: room })).room.users.find((u) => u.nick === 'EeMember')?.id;
+  await emit(mem.s, 'room:join', { roomId: room });
+  ok((await emit(owner.s, 'room:ban', { userId: await memId(), minutes: 60, reason: 'flooding' })).ok, 'owner bans the member from the room');
+  await sleep(300); await fresh0(mem);
+  const bj = await emit(mem.s, 'room:join', { roomId: room });
+  ok(!bj.ok && /banned from this room/.test(bj.error), 'banned member cannot join', bj.error);
+  const rs1 = await emit(mem.s, 'roomappeal:status', { roomId: room });
+  ok(rs1.ok && rs1.banned && rs1.canAppeal && rs1.appeal === null && rs1.ban.reason === 'flooding', 'status shows the room ban and no appeal yet', JSON.stringify(rs1));
+  ok(!(await emit(mem.s, 'roomappeal:submit', { roomId: room, text: 'short' })).ok, 'appeal text needs a minimum length');
+  const ra = await emit(mem.s, 'roomappeal:submit', { roomId: room, text: 'Sorry for the flood, my macro key got stuck. It will not happen again.' });
+  ok(ra.ok && ra.appeal.status === 'open', 'member appeals the room ban');
+  ok(!(await emit(mem.s, 'roomappeal:submit', { roomId: room, text: 'Trying again with a second appeal for the same ban.' })).ok, 'only one appeal per room ban');
+  ok(!(await emit(other.s, 'roomappeal:submit', { roomId: room, text: 'I am not banned but want to appeal anyway, please.' })).ok, 'cannot appeal without a room ban');
+  const rq = await emit(owner.s, 'modq:room:list', { status: 'open', sort: 'count' });
+  ok(rq.ok && rq.items.some((i) => i.key === `rappeal:${ra.appeal.id}`), 'appeal shows up in the room\'s mod queue', JSON.stringify(rq).slice(0, 200));
+  ok((await admin.j.req('/api/admin/reports?view=queue&status=open')).items?.some((i) => i.key === `rappeal:${ra.appeal.id}`), 'site staff see it too');
+  ok(!(await emit(other.s, 'roomappeal:decide', { appealId: ra.appeal.id, decision: 'approve' })).ok, 'a non-manager cannot decide');
+  const rd = await emit(owner.s, 'roomappeal:decide', { appealId: ra.appeal.id, decision: 'deny', note: 'two strikes' });
+  ok(rd.ok && rd.decision === 'denied', 'owner denies');
+  ok(!(await emit(owner.s, 'roomappeal:decide', { appealId: ra.appeal.id, decision: 'approve' })).ok, 'a decided appeal stays decided');
+  const rs2 = await emit(mem.s, 'roomappeal:status', { roomId: room });
+  ok(rs2.banned && rs2.appeal.status === 'denied' && rs2.appeal.note === 'two strikes', 'denied: ban stays, member sees the note');
+  ok(!(await emit(mem.s, 'room:join', { roomId: room })).ok, 'still banned after denial');
+  ok(!(await emit(owner.s, 'modq:room:list', { status: 'open', sort: 'count' })).items.some((i) => i.key === `rappeal:${ra.appeal.id}`), 'decided appeal leaves the open queue');
+  const lgE = (await admin.j.req('/api/admin/log')).log || [];
+  ok(['room-appeal', 'room-appeal-deny'].every((a) => lgE.some((l) => l.action === a)), 'appeal + denial logged');
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -215,6 +242,41 @@ try {
       ok(!!pk && await noSideScroll(page), `${width}: passkey section shown, no sideways scroll`);
       await ctx.close();
       void phone;
+    }
+    // 2. room-ban appeal form in the lobby, and the queue entry for the room owner
+    {
+      const nick = `EeBan${width}`;
+      const bu = await nodeUser(nick); sockets.push(bu.s);
+      await emit(bu.s, 'room:join', { roomId: room });
+      const uid = (await emit(owner.s, 'room:join', { roomId: room })).room.users.find((u) => u.nick === nick)?.id;
+      await emit(owner.s, 'room:ban', { userId: uid, minutes: 30, reason: 'ui test' });
+      try { bu.s.disconnect(); } catch { /* */ }
+      const p = await pageFor(bu, width);
+      await p.page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+      await p.page.waitForSelector(`.room-card[data-room="${room}"]`, { timeout: 15000 });
+      await p.page.$eval(`.room-card[data-room="${room}"]`, (c) => c.click());
+      const f = await p.page.waitForSelector('[data-testid="room-appeal"] [data-testid="room-appeal-text"]', { timeout: 8000 }).catch(() => null);
+      ok(!!f, `${width}: banned member gets the room appeal form`);
+      if (f) {
+        await f.type('My cat walked on the keyboard, sorry about the spam.');
+        await shot(p.page, `e2-room-appeal-form-${width}`);
+        await p.page.$eval('[data-action="room-appeal-submit"]', (b) => b.click());
+        ok(!!(await p.page.waitForSelector('[data-testid="room-appeal"][data-status="open"]', { timeout: 6000 }).catch(() => null)) && await noSideScroll(p.page), `${width}: appeal sent, status shown`);
+      }
+      await p.ctx.close();
+      const o = await pageFor(owner, width);
+      await enterRoom(o.page, room);
+      await openSettings(o.page, phone, 'reports');
+      const act = await o.page.waitForSelector('[data-testid="appeal-actions"]', { timeout: 8000 }).catch(() => null);
+      ok(!!act, `${width}: room owner sees the appeal with approve/deny`);
+      if (act) { await act.evaluate((e) => e.scrollIntoView({ block: 'center' })); await shot(o.page, `e2-room-appeal-queue-${width}`); }
+      if (act && width === 390) {
+        await o.page.evaluate((n) => [...document.querySelectorAll('.queue-item')].find((q) => q.textContent.includes(n))?.querySelector('[data-action="appeal-approve"]')?.click(), nick); await sleep(800);
+        const j = await emit(await fresh0(bu), 'room:join', { roomId: room });
+        ok(j.ok, 'approving from the queue lifts the room ban', j.error);
+      }
+      await o.ctx.close();
+      await fresh(owner); await emit(owner.s, 'room:join', { roomId: room });
     }
     // @@UI-END
   }
