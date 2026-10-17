@@ -326,6 +326,57 @@ try {
     ok(!l3.convos.find((c) => c.id === globalThis.DIRECT)?.archived, 'W2-8: a new message unarchives it');
     await emit(B.s, 'dm:archive', { convoId: globalThis.GROUP2, on: true });
   }
+  // @@W2-9
+  {
+    const E = await nodeUser(`WwE${R}`), F = await nodeUser(`WwF${R}`), G = await nodeUser(`WwG${R}`), S = await nodeUser('WwAdmin');
+    sockets.push(E.s, F.s, G.s, S.s);
+    globalThis.E = E; globalThis.S = S;
+    const eConvo = events(E.s, 'dm:convo');
+    const st = await emit(D.s, 'dm:start', { usernames: [E.nick] });
+    ok(st.ok, 'W2-9: a non-friend can start a whisper', st.error);
+    await emit(D.s, 'dm:send', { convoId: st.convo.id, text: `hi stranger ${R}` });
+    const le = await emit(E.s, 'dm:list', {});
+    const req = le.convos.find((c) => c.id === st.convo.id);
+    ok(le.policy === 'requests' && req?.state === 'request', 'W2-9: by default it lands in Requests');
+    ok(await waitFor(() => eConvo.some((c) => c.id === st.convo.id && c.state === 'request')), 'W2-9: the request arrives live');
+    const lD = await emit(D.s, 'dm:list', {});
+    ok(lD.convos.find((c) => c.id === st.convo.id)?.pendingFor?.includes(E.id), 'W2-9: the sender sees it is pending');
+    const eSend = await emit(E.s, 'dm:send', { convoId: st.convo.id, text: 'no' });
+    ok(!eSend.ok, 'W2-9: the recipient must accept before replying');
+    const dCall = await emit(D.s, 'dm:call', { convoId: st.convo.id });
+    ok(!dCall.ok, 'W2-9: no calls before the request is accepted');
+    const acc = await emit(E.s, 'dm:request', { convoId: st.convo.id, action: 'accept' });
+    const eSend2 = await emit(E.s, 'dm:send', { convoId: st.convo.id, text: 'hello back' });
+    ok(acc.ok && eSend2.ok, 'W2-9: accept, then reply', acc.error);
+    await emit(F.s, 'dm:settings', { policy: 'friends' });
+    const fs1 = await emit(D.s, 'dm:start', { usernames: [F.nick] });
+    ok(!fs1.ok, `W2-9: "friends only" refuses strangers (${fs1.error})`);
+    await emit(G.s, 'dm:settings', { policy: 'everyone' });
+    const gs = await emit(D.s, 'dm:start', { usernames: [G.nick] });
+    const lg = await emit(G.s, 'dm:list', {});
+    ok(gs.ok && lg.convos.find((c) => c.id === gs.convo.id)?.state === 'active', 'W2-9: "everyone" skips Requests');
+    const sf = await emit(S.s, 'dm:start', { usernames: [F.nick] });
+    const lf = await emit(F.s, 'dm:list', {});
+    ok(sf.ok && lf.convos.find((c) => c.id === sf.convo.id)?.state === 'active', 'W2-9: staff can always reach people (no request)', sf.error);
+    const fs2 = await emit(F.s, 'dm:start', { usernames: [S.nick] });
+    ok(fs2.ok, 'W2-9: anyone can reach staff', fs2.error);
+    const dec = await emit(D.s, 'dm:start', { usernames: [B.nick] });
+    await emit(D.s, 'dm:send', { convoId: dec.convo.id, text: 'spam' });
+    const dcl = await emit(B.s, 'dm:request', { convoId: dec.convo.id, action: 'decline' });
+    const lb = await emit(B.s, 'dm:list', {});
+    ok(dcl.ok && !lb.convos.some((c) => c.id === dec.convo.id), 'W2-9: decline removes it from my lists');
+    const bM = events(B.s, 'dm:message');
+    await emit(D.s, 'dm:send', { convoId: dec.convo.id, text: 'spam again' });
+    await sleep(300);
+    ok(!bM.some((m) => m.convoId === dec.convo.id), 'W2-9: after declining, more whispers stay silent');
+    const gq = await emit(D.s, 'dm:start', { usernames: [G.nick, E.nick], name: `Mixed ${R}` });
+    const lgE = await emit(E.s, 'dm:list', {});
+    ok(gq.ok, 'W2-9: groups can include non-friends', gq.error);
+    ok(lgE.convos.find((c) => c.id === gq.convo.id)?.state === 'active', 'W2-9: an accepted contact can add me to a group (no second request)');
+    const H = await nodeUser(`WwH${R}`); sockets.push(H.s); globalThis.H = H;
+    const hq = await emit(H.s, 'dm:start', { usernames: [E.nick] });
+    await emit(H.s, 'dm:send', { convoId: hq.convo.id, text: `request for ui ${R}` });
+  }
   // @@API-END
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
   for (const width of [1366, 390]) {
@@ -459,8 +510,27 @@ try {
       await bp.click('[data-tab="chats"]'); await sleep(150);
       await shot(bp, `w8-pinned-${width}`);
     }
+    {
+      if (phone) { const I = await nodeUser(`WwI${R}`); sockets.push(I.s); const iq = await emit(I.s, 'dm:start', { usernames: [globalThis.E.nick] }); await emit(I.s, 'dm:send', { convoId: iq.convo.id, text: `phone request ${R}` }); }
+      const e = await pageFor(globalThis.E, width);
+      await e.page.goto(BASE + '/?whispers=1', { waitUntil: 'networkidle0' });
+      await e.page.waitForSelector('[data-testid="dm-panel"]', { timeout: 10000 }); await sleep(400); await dismiss(e.page);
+      ok(!!(await e.page.$('[data-testid="dm-requests-badge"]')), `${width}: W2-9: Requests tab shows a count`);
+      await e.page.click('[data-tab="requests"]'); await sleep(200);
+      await shot(e.page, `w9-requests-${width}`);
+      const row = await e.page.$('[data-testid="dm-rows"] [data-convo]');
+      await row.click(); await sleep(500);
+      ok(!!(await e.page.$('[data-testid="dm-request"]')) && !(await e.page.$('[data-field="dm-text"]')), `${width}: W2-9: request banner with Accept/Decline/Block; no composer yet`);
+      await shot(e.page, `w9-request-${width}`);
+      if (width === 1366) {
+        await e.page.click('[data-action="dm-accept"]');
+        ok(await e.page.waitForSelector('[data-field="dm-text"]', { timeout: 5000 }).then(() => true, () => false), `${width}: W2-9: accepting opens the composer`);
+      }
+      globalThis.EPAGE = e;
+    }
     // @@UI-W
     await a.ctx.close();
+    if (globalThis.EPAGE) { await globalThis.EPAGE.ctx.close(); globalThis.EPAGE = null; }
     if (globalThis.BPAGE) { await globalThis.BPAGE.ctx.close(); globalThis.BPAGE = null; }
   }
 } catch (e) {

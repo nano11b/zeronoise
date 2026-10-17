@@ -2586,3 +2586,8 @@ html[data-ui-theme="dark-orange"] {
 .dm-react-pick:hover { background: rgba(127,127,127,.18); }
 .dm-replying { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-top: 1px solid var(--border); }
 .dm-replying-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dm-request { padding: 10px; border-top: 1px solid var(--border); background: rgba(127,127,127,.08); }
+.dm-request p { margin: 0 0 8px; }
+.dm-request-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.dm-pending { margin: 0; padding: 6px 10px; border-bottom: 1px solid var(--border); }

@@ -100,6 +100,12 @@ export function reachState(from: number, to: number, isStaff: (id: number) => bo
   // staff can always reach people (moderation), and anyone can always reach staff (asking for help)
   if (isStaff(from) || isStaff(to)) return { state: 'active' };
   if (repo.areFriends(from, to)) return { state: 'active' };
+  // someone whose request `to` already accepted (or who accepted `to`'s) counts as a contact: no second request
+  const direct = dm.directBetween(from, to);
+  if (direct) {
+    const mt = dm.memberRow(direct.id, to), mf = dm.memberRow(direct.id, from);
+    if (mt?.state === 'active' && mf?.state === 'active' && dm.messageFrom(direct.id, to)) return { state: 'active' };
+  }
   const policy = dm.policyOf(to);
   if (policy === 'everyone') return { state: 'active' };
   if (policy === 'friends') return { error: `${t.username} only takes whispers from friends` };

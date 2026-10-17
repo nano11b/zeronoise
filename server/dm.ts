@@ -28,6 +28,8 @@ export const membersOf = (convoId: string) => q('SELECT * FROM dm_members WHERE 
 export const activeMemberIds = (convoId: string) => membersOf(convoId).filter((m) => m.left_at == null).map((m) => m.user_id);
 export const isParticipant = (convoId: string, userId: number) => { const m = memberRow(convoId, userId); return !!m && m.left_at == null; };
 export const directKey = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+/** W9: has this person ever written in the conversation (an accepted request they replied to)? */
+export const messageFrom = (convoId: string, userId: number) => !!q('SELECT 1 FROM dm_messages WHERE convo_id = ? AND from_user_id = ? LIMIT 1').get(convoId, userId);
 export const directBetween = (a: number, b: number) => q('SELECT * FROM dm_convos WHERE direct_key = ?').get(directKey(a, b)) as ConvoRow | undefined;
 
 export function createConvo(kind: 'direct' | 'group', createdBy: number, others: number[], name: string | null, stateFor: (uid: number) => MemberRow['state']): ConvoRow {

@@ -236,6 +236,10 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
         </>}
         <button type="button" className="icon-btn" onClick={() => setManage((v) => !v)} aria-label="Conversation options" title="Options" aria-expanded={manage} data-action="dm-manage">⋯</button>
       </header>
+      {c.state === 'request' && <RequestBanner c={c} myId={myId} toast={toast} />}
+      {c.state === 'active' && !!c.pendingFor?.length && (
+        <p className="dm-pending small muted" data-testid="dm-pending">Waiting for {c.members.filter((m) => c.pendingFor!.includes(m.userId)).map((m) => m.username).join(', ')} to accept. They can read your whispers, but you won't see if they've read them until then.</p>
+      )}
       {manage && <Manage c={c} myId={myId} toast={toast} onClose={() => setManage(false)} />}
       <div className="dm-log" ref={logRef} role="log" aria-live="polite" aria-relevant="additions" data-testid="dm-log">
         {s.more && <button type="button" className="linklike small" onClick={() => void loadOlder()} data-action="dm-older">Load older</button>}
@@ -254,7 +258,7 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
           <button type="button" className="icon-btn" aria-label={editing ? 'Cancel editing' : 'Cancel reply'} onClick={() => { setReplyTo(null); if (editing) setText(''); setEditing(null); }} data-action="dm-cancel-reply">✕</button>
         </div>
       )}
-      <form className="dm-composer" onSubmit={send} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void attach(e.dataTransfer.files?.[0]); }}>
+      {c.state === 'request' ? null : <form className="dm-composer" onSubmit={send} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); void attach(e.dataTransfer.files?.[0]); }}>
         <input ref={fileRef} type="file" hidden accept={Object.keys(DM_FILE_TYPES).join(',')} onChange={(e) => void attach(e.target.files?.[0])} data-field="dm-file" />
         {c.state === 'active' && <button type="button" className="icon-btn" onClick={() => fileRef.current?.click()} aria-label="Attach a file or image (up to 10 MB)" title="Attach (up to 10 MB)" disabled={uploading} data-action="dm-attach">{uploading ? '…' : '📎'}</button>}
         <textarea ref={taRef} rows={1} value={text} onChange={(e) => { setText(e.target.value); if (e.target.value.trim()) pingTyping(); }} placeholder={`Whisper ${convoTitle(c, myId)}`} aria-label="Message"
@@ -263,7 +267,7 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
           <VoiceNoteButton roomId={`dm:${c.id}`} toast={toast} uploadUrl={`/api/dm/${encodeURIComponent(c.id)}/voice`} post={postVoice} />
         )}
         <button className="btn primary small-btn" disabled={!text.trim()} data-action="dm-send">{editing ? 'Save' : 'Send'}</button>
-      </form>
+      </form>}
     </div>
   );
 }
@@ -331,6 +335,29 @@ export async function dmUpload<T>(url: string, blob: Blob, name: string, field =
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data?.ok === false) throw new Error(data?.error || 'Upload failed');
   return data as T;
+}
+
+function RequestBanner({ c, myId, toast }: { c: DmConvo; myId: number; toast: Toast }) {
+  const from = c.kind === 'direct' ? c.members.find((m) => m.userId !== myId) : c.members.find((m) => m.userId === c.createdBy);
+  const act = async (action: 'accept' | 'decline' | 'block') => {
+    if (action === 'block' && !window.confirm(`Block ${from?.username ?? 'them'}? They won't be able to whisper, call or request you.`)) return;
+    try {
+      await dmCall('dm:request', { convoId: c.id, action });
+      if (action === 'block' && from) blockLocally(from.username);
+      toast(action === 'accept' ? 'Accepted' : action === 'decline' ? 'Request declined' : `${from?.username ?? 'They'} blocked`);
+      if (action !== 'accept') void openConvo(null);
+    } catch (e) { toast((e as Error).message, 'error'); }
+  };
+  return (
+    <div className="dm-request" role="region" aria-label="Message request" data-testid="dm-request">
+      <p><strong>{from?.username ?? 'Someone'}</strong> {c.kind === 'group' ? <>added you to <strong>{c.name}</strong></> : 'wants to whisper you'}. They are not your friend. Reply only if you accept; they won't know you've read this until you do.</p>
+      <div className="dm-request-actions">
+        <button type="button" className="btn primary small-btn" onClick={() => void act('accept')} data-action="dm-accept">Accept</button>
+        <button type="button" className="btn ghost small-btn" onClick={() => void act('decline')} data-action="dm-decline">Decline</button>
+        <button type="button" className="btn ghost small-btn danger" onClick={() => void act('block')} data-action="dm-block-request">Block</button>
+      </div>
+    </div>
+  );
 }
 
 function Manage({ c, myId, toast, onClose }: { c: DmConvo; myId: number; toast: Toast; onClose: () => void }) {
