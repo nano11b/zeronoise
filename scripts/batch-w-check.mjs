@@ -14,6 +14,7 @@ import net from 'node:net';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(path.join(ROOT, 'package.json'));
@@ -212,6 +213,25 @@ try {
     const op = await emit(B.s, 'dm:open', { convoId: globalThis.DIRECT });
     ok(op.messages.some((m) => m.file?.image && m.file.name === 'holiday.webp'), 'W1-3: the image shows in the history');
   }
+  // @@W1-4
+  {
+    const webm = (secs, freq = 440) => execFileSync('ffmpeg', ['-loglevel', 'error', '-f', 'lavfi', '-i', `sine=frequency=${freq}:duration=${secs}`, '-c:a', 'libopus', '-b:a', '32k', '-f', 'webm', 'pipe:1'], { maxBuffer: 8 << 20 });
+    const fd = new FormData(); fd.append('voice', new Blob([webm(2)], { type: 'audio/webm' }), 'voice.webm');
+    const v = await A.j.form(`/api/dm/${globalThis.DIRECT}/voice`, fd);
+    ok(v.ok && v.id, 'W1-4: record and upload a voice note to a whisper', v.error);
+    const sv = await emit(A.s, 'dm:send', { convoId: globalThis.DIRECT, voiceId: v.id, durationMs: 2000 });
+    ok(sv.ok, 'W1-4: send the voice note', sv.error);
+    const op = await emit(B.s, 'dm:open', { convoId: globalThis.DIRECT });
+    const vm = op.messages.find((m) => m.kind === 'voice');
+    ok(vm?.voice?.durationMs === 2000, 'W1-4: voice note in the history with its length');
+    const bGet = await fetch(BASE + vm.voice.url, { headers: { cookie: B.j.header() } });
+    const dGet = await fetch(BASE + vm.voice.url, { headers: { cookie: D.j.header() } });
+    ok(bGet.status === 200 && dGet.status >= 400, `W1-4: only participants can play it (${bGet.status}/${dGet.status})`);
+    const stolen = await emit(D.s, 'dm:send', { convoId: globalThis.DIRECT, voiceId: v.id });
+    ok(!stolen.ok, 'W1-4: outsiders cannot post into the conversation');
+    const reuse = await emit(B.s, 'dm:send', { convoId: globalThis.GROUP2, voiceId: v.id, durationMs: 2000 });
+    ok(!reuse.ok, 'W1-4: a voice note cannot be moved to another conversation');
+  }
   // @@API-END
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
   for (const width of [1366, 390]) {
@@ -268,6 +288,10 @@ try {
       ok(await a.page.waitForFunction(() => document.querySelectorAll('[data-testid="dm-image"] img').length >= 2, { timeout: 8000 }).then(() => true, () => false), `${width}: W1-3: attach from the composer`);
       await sleep(500);
       await shot(a.page, `w3-files-${width}`);
+      ok(!!(await a.page.$('[data-testid="dm-voice"]')), `${width}: W1-4: voice note player in the conversation`);
+      ok(!!(await a.page.$('.dm-composer [data-action="voice-note"]')), `${width}: W1-4: push-to-talk mic in the composer`);
+      await a.page.$eval('[data-testid="dm-log"]', (e) => { const v = e.querySelector('[data-testid="dm-voice"]'); v?.scrollIntoView({ block: 'center' }); });
+      await shot(a.page, `w4-voice-${width}`);
       if (phone) { await a.page.click('[data-action="dm-back"]'); await sleep(300); }
     }
     // @@UI-W

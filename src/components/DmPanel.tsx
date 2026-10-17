@@ -2,7 +2,7 @@
  * batch W: the Whispers inbox — private 1:1 and group conversations for accounts.
  * Two panes on wide screens (list | conversation), one pane with a Back button on phones.
  */
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { DM, DM_FILE_TYPES, disappearLabel, type DmConvo, type DmMessage, type DmPolicy } from '../../shared/dm';
 import { dmCall, dmSock, loadDm, loadOlder, markRead, openConvo, requestCount, setDmPrefs, totalUnread, useDm, blockLocally } from '../dmStore';
 import { call, socket } from '../socket';
@@ -10,6 +10,7 @@ import { fmtTime } from '../util';
 import { storedDeviceId } from '../api';
 import { ChatText } from './ChatText';
 import { UserAvatar } from './UserAvatar';
+import { VoiceNoteButton, VoicePlayer } from './VoiceNote';
 import type { RoomState } from '../../shared/types';
 
 type Toast = (t: string, tone?: 'error' | 'info') => void;
@@ -183,6 +184,7 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
       await dmCall('dm:send', { convoId: c.id, fileId: r.file.id });
     } catch (e) { toast((e as Error).message, 'error'); } finally { setUploading(false); if (fileRef.current) fileRef.current.value = ''; }
   };
+  const postVoice = useCallback(async (voiceId: string, durationMs: number) => { await dmCall('dm:send', { convoId: c.id, voiceId, durationMs }); }, [c.id]);
   const startCall = async (video: boolean) => {
     try { const r = await dmCall<{ room: RoomState; rang: number }>('dm:call', { convoId: c.id, video }); onJoinCall?.(r.room); }
     catch (e) { toast((e as Error).message, 'error'); }
@@ -233,6 +235,9 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
         {c.state === 'active' && <button type="button" className="icon-btn" onClick={() => fileRef.current?.click()} aria-label="Attach a file or image (up to 10 MB)" title="Attach (up to 10 MB)" disabled={uploading} data-action="dm-attach">{uploading ? '…' : '📎'}</button>}
         <textarea rows={1} value={text} onChange={(e) => setText(e.target.value)} placeholder={`Whisper ${convoTitle(c, myId)}`} aria-label="Message"
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }} maxLength={2000} data-field="dm-text" />
+        {c.state === 'active' && !text.trim() && (
+          <VoiceNoteButton roomId={`dm:${c.id}`} toast={toast} uploadUrl={`/api/dm/${encodeURIComponent(c.id)}/voice`} post={postVoice} />
+        )}
         <button className="btn primary small-btn" disabled={!text.trim()} data-action="dm-send">Send</button>
       </form>
     </div>
@@ -245,7 +250,7 @@ function Line({ m, mine, children }: { m: DmMessage; mine: boolean; children?: R
     <div className={`dm-line${mine ? ' mine' : ''}`} data-msg={m.id}>
       <div className="dm-bubble">
         {!mine && <span className="dm-from small">{m.from}</span>}
-        {m.deleted ? <em className="muted">Message deleted</em> : m.file ? <FileView f={m.file} /> : <ChatText text={m.text} className="dm-text" />}
+        {m.deleted ? <em className="muted">Message deleted</em> : m.file ? <FileView f={m.file} /> : m.voice ? <span data-testid="dm-voice"><VoicePlayer voice={{ id: m.voice.url.split('/').pop() ?? m.id, url: m.voice.url, durationMs: m.voice.durationMs, mime: 'audio/webm' }} /></span> : <ChatText text={m.text} className="dm-text" />}
         <span className="dm-meta small muted">{fmtTime(m.ts)}{m.editedAt ? ' · edited' : ''}</span>
       </div>
       {children}
