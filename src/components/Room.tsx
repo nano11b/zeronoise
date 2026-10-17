@@ -282,6 +282,21 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
     socket.on('whisper:ended', onEnded);
     return () => { socket.off('whisper:update', onUpdate); socket.off('whisper:message', onMessage); socket.off('whisper:ended', onEnded); };
   }, [toast]);
+  // batch H8: polite screen-reader announcements for new lines from others (one live region, throttled)
+  const [srText, setSrText] = useState('');
+  useEffect(() => {
+    let recent: number[] = []; let pending = 0; let timer = 0;
+    const onChat = (m: ChatMessage) => {
+      if (m.kind !== 'chat' || m.fromId === socket.id || m.from === me.nick || ignoredRef.current.has(m.from.toLowerCase())) return;
+      const now = Date.now(); recent = recent.filter((t) => now - t < 5000); recent.push(now);
+      if (recent.length > 3) { pending++; window.clearTimeout(timer); timer = window.setTimeout(() => { setSrText(`${pending} more new messages`); pending = 0; }, 1500); return; }
+      const body = m.burn ? 'sent a burn-after-reading message' : m.voice ? 'sent a voice message' : m.poll ? `started a poll: ${m.poll.question}` : speakable(m.text);
+      setSrText(`${m.from}${m.burn || m.voice || m.poll ? ' ' : ': '}${body}`);
+    };
+    socket.on('chat:message', onChat);
+    return () => { socket.off('chat:message', onChat); window.clearTimeout(timer); };
+  }, [me.nick]);
+  const focusFirstOnOpen = (el: HTMLDivElement | null) => { if (el && !el.contains(document.activeElement)) requestAnimationFrame(() => el.querySelector<HTMLElement>('button')?.focus({ preventScroll: true })); };
   // batch H10: read messages aloud
   const [ttsP, setTtsP] = useState(getTts());
   const [ttsQ, setTtsQ] = useState(queueState());
@@ -1756,9 +1771,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
 
   );
   // Escape closes the innermost open thing and focus goes back to the control that opened it.
-  // The chat log announces new lines politely, but not the history burst on join.
-  const [logLive, setLogLive] = useState(false);
-  useEffect(() => { const t = window.setTimeout(() => setLogLive(true), 1500); return () => window.clearTimeout(t); }, []);
+  // New lines are announced by the polite sr-announcer below (batch H8), not by the whole log.
   const byAction = (a: string) => () => document.querySelector<HTMLElement>(`.room [data-action="${a}"]`);
   useEscape(boardOpen, () => setBoardOpen(false), byAction('more'));
   useEscape(watchOpen, () => setWatchOpen(false), byAction('more'));
@@ -1830,7 +1843,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   );
   const renderUser = (u: UserInfo) => (
               <li key={u.id} className={`user ${isIgnored(u.nick) ? 'ignored' : ''}`}>
-                <button className="user-row" onClick={(e) => { e.stopPropagation(); if (u.id !== me.id) setMenuFor(menuFor === u.id ? null : u.id); }} data-nick={u.nick}>
+                <button className="user-row" onClick={(e) => { e.stopPropagation(); if (u.id !== me.id) setMenuFor(menuFor === u.id ? null : u.id); }} data-nick={u.nick} aria-expanded={u.id !== me.id ? menuFor === u.id : undefined} aria-controls={menuFor === u.id ? `umenu-${u.id}` : undefined}>
                   <UserAvatar nick={u.nick} accountId={u.accountId} chatColor={u.chatColor} hasAvatar={u.hasAvatar} size={28} />
                   <span className="user-id">
                     <NickLabel nick={u.nick} chatColor={roleOfAcct(u.accountId)?.color ?? u.chatColor} chatEffect={u.chatEffect} className="nick" /><LevelBadge level={u.level} /><RoleChip role={roleOfAcct(u.accountId)} />
@@ -1861,7 +1874,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     </button>
                   )}
                 {menuFor === u.id && (
-                  <div className="menu" onClick={(e) => e.stopPropagation()}>
+                  <div className="menu" id={`umenu-${u.id}`} role="group" aria-label={`Actions for ${u.nick}`} ref={focusFirstOnOpen} onClick={(e) => e.stopPropagation()}>
                     {!u.id.startsWith('bot:') && <BadgeCard ids={u.badges} />}
                     {u.registered && u.accountId != null && !u.id.startsWith('bot:') && <button data-action="view-profile" onClick={() => openProfile(u.nick)}>View profile</button>}
                     {!u.id.startsWith('whip:') && !u.id.startsWith('bot:') && <button onClick={() => { openPm({ id: u.id, nick: u.nick }); setMenuFor(null); }}>Private message</button>}
@@ -2108,7 +2121,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                 {!canRoomManage && <button type="button" className={`btn ghost small-btn${myHand ? ' on' : ''}`} aria-pressed={myHand} data-action="voice-hand" onClick={() => stageHand(!myHand)}>✋ {myHand ? 'Lower hand' : 'Raise hand'}</button>}
               </div>
             )}
-            <div className="chat-log" ref={logRef} role="log" aria-label={`Chat in #${initial.name}`} aria-live={logLive ? 'polite' : 'off'} aria-relevant="additions" onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>
+            <div className="chat-log" ref={logRef} role="log" aria-label={`Chat in #${initial.name}`} aria-live="off" aria-relevant="additions" onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40; }}>
               {visibleMsgs.map((m, i) => {
                 const prev = visibleMsgs[i - 1];
                 const sep = !prev || dayKey(prev.ts) !== dayKey(m.ts);
@@ -2228,6 +2241,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
             {editingId && (
               <div className="editing-banner">Editing your message <button type="button" className="btn ghost small-btn" onClick={() => { setEditingId(null); setText(''); }}>Cancel</button></div>
             )}
+            <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="sr-announcer">{srText}</div>
             {(ttsQ.current || ttsQ.waiting > 0) && (
               <div className="tts-bar" data-testid="tts-bar" role="status" aria-live="off">
                 <span className="small">🔈 Reading {ttsQ.current?.sender ?? ''}…{ttsQ.waiting ? ` (+${ttsQ.waiting} waiting)` : ''}{ttsQ.dropped ? ` · ${ttsQ.dropped} skipped (busy)` : ''}</span>

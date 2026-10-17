@@ -249,7 +249,7 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
         {tab === 'log' && (
           <section>
             <div className="section-head"><h2>Recent moderation actions</h2><button className="btn ghost small-btn" onClick={load}>Refresh</button></div>
-            <table className="table">
+            <table className="table" tabIndex={0} aria-label="Moderation action log">
               <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Target</th><th>Room</th><th>Details</th></tr></thead>
               <tbody>
                 {log.map((l) => (
