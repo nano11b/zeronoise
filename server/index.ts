@@ -4178,6 +4178,7 @@ function onConnection(socket: AppSocket) {
     if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited' });
     const peerId = Number(p?.userId);
     if (!repo.areFriends(s.account.id, peerId)) return ack({ ok: false, error: 'You can only call friends' });
+    if (lobby.blockedEitherWay(s.account.id, peerId)) return ack({ ok: false, error: "You can't call this person" }); // batch W10
     const peerSock = accountSockets.get(peerId);
     if (!peerSock) return ack({ ok: false, error: 'Friend is offline' });
     const id = `call-${s.account.id}-${peerId}-${randomUUID().slice(0, 6)}`;

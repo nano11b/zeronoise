@@ -1,11 +1,11 @@
 #!/bin/bash
 # batch H9: the full suite in parallel lanes (servers pick free ports; the one fixed-port pair,
 # signaling + browser-test on :3000, stays in one lane). Prints per-suite wall time.
-#   scripts/run-all.sh <log dir> [shots dir for batch-c/d] [shots dir for batch-g/h]
+#   scripts/run-all.sh <log dir> [shots dir for batch-c/d] [shots dir for batch-g/h] [shots dir for batch-w]
 # Env: VQ_TURN / VQ_TURN_USER / VQ_TURN_PASS, SIG_TURN (TURN url for the signaling server), OSC_PATH (openssl-with-sig dir).
 set -u
 cd "$(dirname "$0")/.."
-L=${1:?log dir}; CD=${2:-$L/batch-cd}; GH=${3:-$L/batch-gh}
+L=${1:?log dir}; CD=${2:-$L/batch-cd}; GH=${3:-$L/batch-gh}; W=${4:-$L/batch-w}
 mkdir -p "$L" "$L/pwa" "$L/ui"
 S=$L/summary.txt; : > "$S"
 export ONBOARDING_SINCE=${ONBOARDING_SINCE:-4102444800000}
@@ -31,6 +31,7 @@ laneC() { run vq-browser node scripts/vq-browser.mjs; run voice-browser node scr
 laneD() { run batch-e node scripts/batch-e-check.mjs "$L/batch-e"; run batch-f node scripts/batch-f-check.mjs "$L/batch-f"
   run batch-g node scripts/batch-g-check.mjs "$GH"; run batch-h node scripts/batch-h-check.mjs "$GH"
   A11Y_SHOTS="$GH" run a11y node scripts/a11y-check.mjs "$L/a11y"; run secretbox node scripts/secretbox-check.mjs "$L/secretbox"; run alerts node scripts/alerts-check.mjs "$L/alerts"; }
-laneA & laneB & laneC & laneD & wait
+laneE() { run batch-w node scripts/batch-w-check.mjs "$W"; }  # batch W: whispers (own lane; ~2 min)
+laneA & laneB & laneC & laneD & laneE & wait
 echo "ALLDONE in $((SECONDS - T0))s" >> "$S"
 grep -q "exit [1-9]" "$S" && exit 1 || exit 0

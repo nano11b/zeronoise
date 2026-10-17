@@ -12,6 +12,7 @@ import { ChatText } from './ChatText';
 import { UserAvatar } from './UserAvatar';
 import { VoiceNoteButton, VoicePlayer } from './VoiceNote';
 import type { RoomState } from '../../shared/types';
+import { REPORT_CATEGORIES, type ReportCategory } from '../../shared/modq';
 
 type Toast = (t: string, tone?: 'error' | 'info') => void;
 type Tab = 'chats' | 'requests' | 'archived';
@@ -168,6 +169,7 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
   const [replyTo, setReplyTo] = useState<DmMessage | null>(null);
   const [editing, setEditing] = useState<DmMessage | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [reporting, setReporting] = useState<{ messageId?: string } | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const typedAt = useRef(0);
   /** W2-6: tell the others I'm typing, at most every few seconds, only when my own indicator is on (it's mutual) */
@@ -240,7 +242,8 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
       {c.state === 'active' && !!c.pendingFor?.length && (
         <p className="dm-pending small muted" data-testid="dm-pending">Waiting for {c.members.filter((m) => c.pendingFor!.includes(m.userId)).map((m) => m.username).join(', ')} to accept. They can read your whispers, but you won't see if they've read them until then.</p>
       )}
-      {manage && <Manage c={c} myId={myId} toast={toast} onClose={() => setManage(false)} />}
+      {manage && <Manage c={c} myId={myId} toast={toast} onClose={() => setManage(false)} onReport={() => { setManage(false); setReporting({}); }} />}
+      {reporting && <ReportForm c={c} messageId={reporting.messageId} toast={toast} onClose={() => setReporting(null)} />}
       <div className="dm-log" ref={logRef} role="log" aria-live="polite" aria-relevant="additions" data-testid="dm-log">
         {s.more && <button type="button" className="linklike small" onClick={() => void loadOlder()} data-action="dm-older">Load older</button>}
         {s.messages.map((m) => (
@@ -248,6 +251,7 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
             onReply={() => { setEditing(null); setReplyTo(m); setMenuFor(null); taRef.current?.focus(); }}
             onEdit={() => { setReplyTo(null); setEditing(m); setText(m.text); setMenuFor(null); taRef.current?.focus(); }}
             onDelete={() => { setMenuFor(null); if (window.confirm('Delete this message for everyone?')) void dmCall('dm:delete', { convoId: c.id, messageId: m.id }).catch((e) => toast((e as Error).message, 'error')); }}
+            onReport={() => { setMenuFor(null); setReporting({ messageId: m.id }); }}
             onReact={(emoji) => { setMenuFor(null); void dmCall('dm:react', { convoId: c.id, messageId: m.id, emoji }).catch((e) => toast((e as Error).message, 'error')); }}>{seen?.id === m.id && <span className="dm-seen small muted" data-testid="dm-seen">Seen by {seen.by.join(', ')}</span>}</Line>
         ))}
       </div>
@@ -273,9 +277,9 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
 }
 
 const QUICK = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-function Line({ m, mine, children, canAct, menuOpen, onMenu, onReply, onEdit, onDelete, onReact }: {
+function Line({ m, mine, children, canAct, menuOpen, onMenu, onReply, onEdit, onDelete, onReact, onReport }: {
   m: DmMessage; mine: boolean; children?: ReactNode; canAct?: boolean; menuOpen?: boolean; onMenu?: (open: boolean) => void;
-  onReply?: () => void; onEdit?: () => void; onDelete?: () => void; onReact?: (emoji: string) => void;
+  onReply?: () => void; onEdit?: () => void; onDelete?: () => void; onReact?: (emoji: string) => void; onReport?: () => void;
 }) {
   if (m.kind === 'system') return <div className="dm-system small muted" data-msg={m.id} data-kind="system">{m.text}</div>;
   const live = canAct && !m.deleted;
@@ -301,6 +305,7 @@ function Line({ m, mine, children, canAct, menuOpen, onMenu, onReply, onEdit, on
           <button type="button" className="btn ghost small-btn" onClick={onReply} data-action="dm-reply">Reply</button>
           {mine && m.kind === 'text' && <button type="button" className="btn ghost small-btn" onClick={onEdit} data-action="dm-edit">Edit</button>}
           {mine && <button type="button" className="btn ghost small-btn danger" onClick={onDelete} data-action="dm-delete">Delete</button>}
+          {!mine && <button type="button" className="btn ghost small-btn" onClick={onReport} data-action="dm-report-msg">Report</button>}
         </div>
       )}
       {children}
@@ -360,7 +365,47 @@ function RequestBanner({ c, myId, toast }: { c: DmConvo; myId: number; toast: To
   );
 }
 
-function Manage({ c, myId, toast, onClose }: { c: DmConvo; myId: number; toast: Toast; onClose: () => void }) {
+const CAT_LABEL: Record<ReportCategory, string> = { spam: 'Spam', harassment: 'Harassment or bullying', sexual: 'Sexual content', hate: 'Hate', 'self-harm': 'Self-harm', impersonation: 'Impersonation', other: 'Something else' };
+function ReportForm({ c, messageId, toast, onClose }: { c: DmConvo; messageId?: string; toast: Toast; onClose: () => void }) {
+  const [category, setCategory] = useState<ReportCategory>('harassment');
+  const [note, setNote] = useState('');
+  const [consent, setConsent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const r = await dmCall<{ lines: number; updated?: boolean }>('dm:report', { convoId: c.id, messageId, category, note, consent });
+      toast(r.updated ? 'Report updated' : `Reported. ${r.lines} recent messages were sent to the moderators.`);
+      onClose();
+    } catch (err) { toast((err as Error).message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <form className="dm-report" onSubmit={submit} role="region" aria-label="Report" data-testid="dm-report">
+      <strong>{messageId ? 'Report this message' : 'Report this conversation'}</strong>
+      <label className="field">Reason
+        <select value={category} onChange={(e) => setCategory(e.target.value as ReportCategory)} data-field="dm-report-cat">
+          {REPORT_CATEGORIES.map((k) => <option key={k} value={k}>{CAT_LABEL[k]}</option>)}
+        </select>
+      </label>
+      <label className="field">Anything to add (optional)<input value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} data-field="dm-report-note" /></label>
+      <label className="check dm-consent"><input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} data-field="dm-report-consent" required />
+        I understand the last {DM.excerptLines} messages I can see here{messageId ? ', up to this one,' : ''} will be sent to the moderators with my report. Moderators can't read whispers otherwise.</label>
+      <div className="dm-manage-actions">
+        <button className="btn primary small-btn" disabled={!consent || busy} data-action="dm-report-send">Send report</button>
+        <button type="button" className="btn ghost small-btn" onClick={onClose}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function Manage({ c, myId, toast, onClose, onReport }: { c: DmConvo; myId: number; toast: Toast; onClose: () => void; onReport: () => void }) {
+  const block = async (m: { userId: number; username: string }) => {
+    if (!window.confirm(`Block ${m.username}? They won't be able to whisper you, call you or send requests, and you won't see their messages in groups.`)) return;
+    try { await dmCall('dm:block', { userId: m.userId }); blockLocally(m.username); toast(`${m.username} blocked`); onClose(); }
+    catch (e) { toast((e as Error).message, 'error'); }
+  };
+  const direct = c.kind === 'direct' ? c.members.find((m) => m.userId !== myId) : undefined;
   const [add, setAdd] = useState('');
   const [rename, setRename] = useState(c.name ?? '');
   const owner = c.kind === 'group' && c.createdBy === myId;
@@ -376,6 +421,7 @@ function Manage({ c, myId, toast, onClose }: { c: DmConvo; myId: number; toast: 
               <li key={m.userId}>
                 <UserAvatar nick={m.username} accountId={m.userId} chatColor={m.chatColor} hasAvatar={m.hasAvatar} size={20} /> {m.username}{m.owner && <span className="muted small"> (manages)</span>}
                 {owner && m.userId !== myId && <button type="button" className="btn ghost small-btn" onClick={() => void act('dm:group:remove', { userId: m.userId }, `${m.username} removed`)} data-action="dm-remove">Remove</button>}
+                {m.userId !== myId && <button type="button" className={`btn ghost small-btn${owner ? ' dm-block-after' : ''}`} onClick={() => void block(m)} data-action="dm-block-member" aria-label={`Block ${m.username}`}>Block</button>}
               </li>
             ))}
           </ul>
@@ -406,6 +452,8 @@ function Manage({ c, myId, toast, onClose }: { c: DmConvo; myId: number; toast: 
           <button type="button" className="btn ghost small-btn" onClick={() => void act('dm:pin', { on: !c.pinned }, c.pinned ? 'Unpinned' : 'Pinned to the top')} data-action="dm-pin" aria-pressed={c.pinned}>{c.pinned ? 'Unpin' : 'Pin'}</button>
           <button type="button" className="btn ghost small-btn" onClick={() => { onClose(); void act('dm:archive', { on: !c.archived }, c.archived ? 'Moved back to Chats' : 'Archived; a new message brings it back').then(() => { if (!c.archived) void openConvo(null); }); }} data-action="dm-archive">{c.archived ? 'Unarchive' : 'Archive'}</button>
         </>}
+        {direct && <button type="button" className="btn ghost small-btn danger" onClick={() => void block(direct)} data-action="dm-block">Block {direct.username}</button>}
+        <button type="button" className="btn ghost small-btn" onClick={onReport} data-action="dm-report">Report</button>
         <button type="button" className="btn ghost small-btn" onClick={() => { onClose(); void act('dm:leave', {}, c.kind === 'group' ? 'You left the group' : 'Conversation closed'); }} data-action="dm-leave">{c.kind === 'group' ? 'Leave group' : 'Close conversation'}</button>
       </div>
     </div>

@@ -377,6 +377,51 @@ try {
     const hq = await emit(H.s, 'dm:start', { usernames: [E.nick] });
     await emit(H.s, 'dm:send', { convoId: hq.convo.id, text: `request for ui ${R}` });
   }
+  // @@W2-10
+  {
+    const S = globalThis.S, E = globalThis.E;
+    // report: consent required, excerpt only from what the reporter can see
+    const noC = await emit(B.s, 'dm:report', { convoId: globalThis.DIRECT, category: 'harassment' });
+    ok(!noC.ok && /Confirm/.test(noC.error), 'W2-10: report needs the consent box');
+    const op = await emit(B.s, 'dm:open', { convoId: globalThis.DIRECT });
+    const target = op.messages.filter((m) => m.fromId === A.id && m.kind === 'text').at(-1);
+    const rep = await emit(B.s, 'dm:report', { convoId: globalThis.DIRECT, messageId: target.id, category: 'harassment', note: 'test', consent: true });
+    ok(rep.ok && rep.lines > 0 && rep.lines <= 20, `W2-10: report sends the recent excerpt (${rep.lines} lines)`, rep.error);
+    const own = await emit(A.s, 'dm:report', { convoId: globalThis.DIRECT, messageId: target.id, category: 'spam', consent: true });
+    ok(!own.ok, 'W2-10: you cannot report your own message');
+    const outsider = await emit(D.s, 'dm:report', { convoId: globalThis.DIRECT, category: 'spam', consent: true });
+    ok(!outsider.ok, 'W2-10: only participants can report a conversation');
+    const q = await S.j.req('/api/admin/reports?view=queue&status=open');
+    const flat = JSON.stringify(q);
+    ok(q.ok && flat.includes(target.text) && /Private whisper/.test(flat), 'W2-10: the report and its excerpt reach the mod queue', String(q.error || q.status));
+    const sOpen = await emit(S.s, 'dm:open', { convoId: globalThis.DIRECT });
+    const sSearch = await emit(S.s, 'dm:search', { q: R });
+    ok(!sOpen.ok && sSearch.results.length === 0, 'W2-10: staff cannot open or search whispers they are not in');
+    // block
+    const blk = await emit(B.s, 'dm:block', { userId: A.id });
+    ok(blk.ok, 'W2-10: block from a whisper', blk.error);
+    const aS = await emit(A.s, 'dm:send', { convoId: globalThis.DIRECT, text: 'blocked?' });
+    const bS = await emit(B.s, 'dm:send', { convoId: globalThis.DIRECT, text: 'blocked?' });
+    ok(!aS.ok && !bS.ok, 'W2-10: block stops whispers both ways');
+    const aC = await emit(A.s, 'dm:call', { convoId: globalThis.DIRECT });
+    const aF = await emit(A.s, 'call:invite', { userId: B.id });
+    ok(!aC.ok && !aF.ok, 'W2-10: and calls (whisper and friends call)');
+    const aN = await emit(A.s, 'dm:start', { usernames: [B.nick, C.nick], name: 'sneaky' });
+    ok(!aN.ok, 'W2-10: and new conversations or groups with them');
+    const bT = events(B.s, 'dm:typing'); await sleep(2600);
+    A.s.emit('dm:typing', { convoId: globalThis.GROUP }); await sleep(300);
+    ok(bT.length === 0, 'W2-10: and typing in shared groups');
+    const bM = events(B.s, 'dm:message');
+    await emit(C.s, 'dm:send', { convoId: globalThis.GROUP, text: 'c talks' }).catch(() => {});
+    await emit(A.s, 'dm:send', { convoId: globalThis.GROUP, text: `a in group ${R}` });
+    await sleep(400);
+    ok(!bM.some((m) => m.text === `a in group ${R}`), 'W2-10: their group messages are hidden from me');
+    const gb = await emit(B.s, 'blocks:get');
+    ok(gb.usernames?.map((x) => x.toLowerCase()).includes(A.nick.toLowerCase()), 'W2-10: the block is on the account block list');
+    const sb = await emit(E.s, 'dm:block', { userId: S.id });
+    ok(!sb.ok, 'W2-10: staff cannot be blocked (report instead)');
+    await emit(B.s, 'blocks:set', { usernames: [] });
+  }
   // @@API-END
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
   for (const width of [1366, 390]) {
@@ -527,6 +572,22 @@ try {
         ok(await e.page.waitForSelector('[data-field="dm-text"]', { timeout: 5000 }).then(() => true, () => false), `${width}: W2-9: accepting opens the composer`);
       }
       globalThis.EPAGE = e;
+    }
+    {
+      const t = phone ? globalThis.GROUP2 : globalThis.GROUP2;
+      if (phone) { await a.page.click('[data-action="dm-back"]').catch(() => {}); await sleep(200); }
+      await a.page.click(`[data-convo="${t}"]`).catch(() => {}); await sleep(400);
+      await a.page.click('[data-action="dm-manage"]'); await sleep(200);
+      await a.page.click('[data-action="dm-report"]'); await sleep(200);
+      ok(await a.page.$eval('[data-action="dm-report-send"]', (b) => b.disabled), `${width}: W2-10: report stays disabled until consent is ticked`);
+      await a.page.click('[data-field="dm-report-consent"]');
+      await shot(a.page, `w10-report-${width}`);
+      await a.page.click('[data-action="dm-report-send"]');
+      ok(await a.page.waitForFunction(() => /Reported\.|Report updated/.test(document.body.innerText), { timeout: 5000 }).then(() => true, () => false), `${width}: W2-10: report sent with a confirmation`);
+      await a.page.click('[data-action="dm-manage"]'); await sleep(200);
+      ok(!!(await a.page.$('[data-action="dm-block-member"]')), `${width}: W2-10: block is offered from the conversation`);
+      await shot(a.page, `w10-block-${width}`);
+      await a.page.click('[data-action="dm-manage"]');
     }
     // @@UI-W
     await a.ctx.close();

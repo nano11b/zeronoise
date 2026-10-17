@@ -2591,3 +2591,7 @@ html[data-ui-theme="dark-orange"] {
 .dm-request p { margin: 0 0 8px; }
 .dm-request-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .dm-pending { margin: 0; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+
+.dm-members li .btn + .btn, .dm-block-after { margin-left: 0 !important; }
+.dm-report { padding: 10px; border-bottom: 1px solid var(--border); display: grid; gap: 6px; margin: 0; background: rgba(127,127,127,.06); }
+.dm-consent { align-items: flex-start; line-height: 1.35; }

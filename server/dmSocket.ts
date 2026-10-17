@@ -455,6 +455,7 @@ export function registerDm(socket: { on: (ev: string, fn: (...a: any[]) => void)
     if (x.mr.state !== 'active') return fail(ack, 'Accept the request first');
     const rows = dm.membersOf(x.c.id).filter((m) => m.user_id !== x.a.id && m.left_at == null);
     if (rows.some((m) => m.state === 'request') && x.c.kind === 'direct') return fail(ack, 'They have not accepted your whisper yet');
+    if (x.c.kind === 'direct' && rows.some((m) => lobby.blockedEitherWay(x.a.id, m.user_id))) return fail(ack, "You can't call this person");
     const targets = rows.filter((m) => m.state === 'active' && !lobby.blockedEitherWay(x.a.id, m.user_id) && d.online(m.user_id)).map((m) => m.user_id);
     if (!targets.length) return fail(ack, x.c.kind === 'group' ? 'Nobody in this group is online' : 'They are offline');
     const video = !!p?.video;
