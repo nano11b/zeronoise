@@ -9,6 +9,7 @@ import { LocalSpeakingMonitor, RemoteSpeakingMonitor } from '../speaking';
 import { LevelBadge } from './Level';
 import { call, getIceServers, socket } from '../socket';
 import { useDraftSync } from '../drafts';
+import { RecorderControls, RecordingBanner } from './RoomRecording';
 import { enqueue, newClientId, useOutbox } from '../outbox';
 import { fmtTime, unreadBadge } from '../util';
 import { readRoomLocally } from '../mentions';
@@ -44,7 +45,7 @@ import type { Account } from '../App';
 import { NickLabel, UserAvatar } from './UserAvatar';
 import { VideoTile } from './VideoTile';
 import { decideShareAudio } from '../../shared/shareAudio';
-import type { BookmarkEntry, LinkPreviewInfo, PollInfo, RoomEventInfo, RoomModInfo, SearchHit } from '../../shared/types';
+import type { BookmarkEntry, LinkPreviewInfo, PollInfo, RoomEventInfo, RoomModInfo, SearchHit, RecState } from '../../shared/types';
 import { EVENT_SOON_MS, eventEnd } from '../../shared/events';
 import { parsePollCommand } from '../../shared/polls';
 import { EventBanner } from './EventBanner';
@@ -1120,6 +1121,14 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   };
   const [burnOn, setBurnOn] = useState(false);
   const [burnTtl, setBurnTtl] = useState<BurnTtl>(BURN_DEFAULT_TTL);
+  // batch F6: recording notice for everyone; controls for the owner of a voice room
+  const [rec, setRec] = useState<RecState | null>(initial.recording ?? null);
+  useEffect(() => {
+    const on = (p: { roomId: string; rec: RecState | null }) => { if (p.roomId === initial.id) setRec(p.rec); };
+    socket.on('rec:state', on);
+    return () => { socket.off('rec:state', on); };
+  }, [initial.id]);
+  const recTracks = useMemo(() => [localStream, ...Object.values(streams)].flatMap((st) => st?.getAudioTracks() ?? []), [localStream, streams]);
   const outbox = useOutbox(initial.id);
   /** batch E5: plain lines go through the outbox when offline (or behind lines still waiting), else straight out with a clientId */
   const sendPlain = async (body: string, parentId?: string) => {
@@ -1983,6 +1992,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
           <section className="chat">
             <WhisperStrip convs={whispers} open={openWhisper} setOpen={setOpenWhisper} selfId={me.id} isIgnored={isIgnored} toast={toast} onReport={(m) => setReportTarget({ kind: 'whisper', messageId: m.id, from: m.from, preview: m.text })} />
             <RoomThemeHeader theme={theme && theme.welcome && welcomeHidden === theme.welcome ? { ...theme, welcome: null } : theme} onDismiss={() => { if (theme?.welcome) { setWelcomeHidden(theme.welcome); try { localStorage.setItem(welcomeKey, theme.welcome); } catch { /* private mode */ } } }} />
+            <RecordingBanner rec={rec} onLeave={onLeave} joinNotice={!!initial.recording && !initial.isOwner} />
+            {voiceRoom && isOwner && !!account && <RecorderControls roomId={initial.id} rec={rec} tracks={recTracks} toast={toast} />}
             <AnnouncementBanner key={announcement?.at ?? 0} roomId={initial.id} ann={announcement} />
             {nextEvent && <EventBanner ev={nextEvent} onOpen={() => openSide('events')} />}
             {radio.np && (radioHere > 0 || radio.playing) && <div className="np-room"><NowPlayingCard np={radio.np} here={radioHere} compact /></div>}

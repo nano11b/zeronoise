@@ -799,6 +799,27 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (user_id, room_id, thread_id)
   )
   `,
+  // 44: batch F (voice recordings, uptime/error alerts, backup restore checks)
+  `
+  CREATE TABLE IF NOT EXISTS room_recordings (
+    id TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    started_by INTEGER NOT NULL,
+    started_nick TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    last_chunk_at INTEGER NOT NULL,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'recording',
+    end_reason TEXT,
+    mime TEXT NOT NULL DEFAULT 'audio/webm'
+  );
+  CREATE INDEX IF NOT EXISTS room_recordings_room ON room_recordings(room_id, started_at);
+  CREATE TABLE IF NOT EXISTS room_recording_settings (
+    room_id TEXT PRIMARY KEY,
+    retention_days INTEGER NOT NULL DEFAULT 30
+  )
+  `,
 ];
 
 /**

@@ -28,6 +28,7 @@ import { newRecoveryCodes, newTotpSecret, normalizeRecovery, otpauthUrl, verifyT
 import { APPEAL_MIN, APPEAL_MAX, type AppealInfo } from '../shared/appeals';
 import * as repo from './repo';
 import { backupHealth, backupPath, backupRunning, backupStatus, listBackups, runBackup } from './backup';
+import * as recs from './recordings';
 import { live, type BotIdentity, type BotModAction, type BotModBody } from './live';
 import { consumeNativeHandoff, issueNativeHandoff } from './nativeHandoff';
 import { registerDownloads } from './downloads';
@@ -395,6 +396,48 @@ export function createApp(roomList: () => unknown) {
     });
   });
 
+  // ---------- batch F6: voice-room recordings (owner's browser streams chunks; owner downloads) ----------
+  const recChunk = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024, files: 1 } }).single('chunk');
+  app.post('/api/rooms/:roomId/recordings/:id/chunk', (req, res, next) => recChunk(req, res, (err) => (err ? fail(res, 413, 'Chunk too large') : next())), (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    const r = recs.recById(String(req.params.id));
+    if (!r || r.room_id !== String(req.params.roomId) || r.started_by !== a.id) return fail(res, 404, 'No such recording');
+    if (r.status !== 'recording') return res.json({ ok: true, stop: true, reason: r.end_reason });
+    const buf = (req as Request & { file?: Express.Multer.File }).file?.buffer ?? Buffer.alloc(0);
+    if (!buf.length) return res.json({ ok: true });
+    const out = recs.appendChunk(r, buf);
+    if (out !== 'ok') { live.recordingEnded(r.room_id, out); return res.json({ ok: true, stop: true, reason: out }); }
+    res.json({ ok: true });
+  });
+  const recOwner = (req: Request, roomId: string) => { const a = reqAccount(req); return a && (live.roomOwnerId(roomId) === a.id || a.role === 'admin') ? a : null; };
+  app.get('/api/rooms/:roomId/recordings', (req, res) => {
+    const roomId = String(req.params.roomId);
+    if (!recOwner(req, roomId)) return fail(res, 403, 'Only the room owner can see recordings');
+    res.json({ ok: true, recordings: recs.recsOf(roomId).map(recs.recView), retentionDays: recs.retentionOf(roomId), choices: recs.RETENTION_CHOICES, maxBytes: recs.REC_MAX_BYTES, maxMs: recs.REC_MAX_MS });
+  });
+  app.post('/api/rooms/:roomId/recordings/settings', (req, res) => {
+    const roomId = String(req.params.roomId);
+    const a = recOwner(req, roomId);
+    if (!a) return fail(res, 403, 'Only the room owner can change this');
+    const d = Number(req.body?.retentionDays);
+    if (!(recs.RETENTION_CHOICES as readonly number[]).includes(d)) return fail(res, 400, 'Pick 1, 7, 30 or 90 days');
+    recs.setRetention(roomId, d);
+    repo.logAction(a.username, a.id, 'recording-retention', null, roomId, `${d} days`);
+    res.json({ ok: true, retentionDays: d });
+  });
+  app.get('/api/rooms/:roomId/recordings/:id/file', (req, res) => {
+    const roomId = String(req.params.roomId);
+    if (!recOwner(req, roomId)) return res.status(403).end();
+    const r = recs.recById(String(req.params.id));
+    const f = r && r.room_id === roomId && r.status !== 'expired' ? recs.recFile(r.id) : null;
+    if (!f || !fs.existsSync(f)) return res.status(404).end();
+    res.setHeader('Content-Type', 'audio/webm');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', `attachment; filename="recording-${new Date(r!.started_at).toISOString().slice(0, 16).replace(/[:T]/g, '-')}.webm"`);
+    res.sendFile(f);
+  });
   app.get('/api/voice/:id', (req, res) => {
     const row = repo.voiceNoteById(String(req.params.id));
     if (!row) return res.status(404).end();

@@ -102,6 +102,9 @@ export const live = {
   /** The designated moderator bot was changed or cleared. Drop a stale people-list row at once. */
   modBotChanged: () => {},
   /** True when this account or device has a live socket in the room. Bots do not count. */
+  /** batch F6 */
+  recordingEnded: (_roomId: string, _reason: string) => {},
+  roomOwnerId: (_roomId: string) => null as number | null,
   isRoomMember: (_roomId: string, _accountId: number | null, _deviceIds: string[]) => false,
   /** Room creator: owning account, or the guest who created it and is still connected as that nick. */
   isRoomCreator: (_roomId: string, _accountId: number | null, _deviceIds: string[]) => false,

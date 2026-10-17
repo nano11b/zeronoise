@@ -2402,3 +2402,17 @@ html[data-ui-theme="dark-orange"] {
 .outbox-item.failed { opacity: 1; border-left-color: #e55; }
 .outbox-status { display: block; color: var(--muted, #9aa); }
 .outbox-status .btn { min-height: 40px; }
+/* batch F6: recording */
+.rec-banner { display: flex; align-items: center; gap: 8px; background: #5a0f14; color: #fff; font-weight: 600; padding: 6px 12px; border-radius: 8px; margin: 4px 0; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #ff3b3b; box-shadow: 0 0 0 3px rgba(255,59,59,.35); animation: rec-pulse 1.4s infinite; flex: none; }
+@keyframes rec-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
+.rec-join-notice { border: 2px solid #ff3b3b; border-radius: 10px; padding: 10px 12px; margin: 4px 0; background: var(--panel, #111); }
+.rec-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.rec-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+.rec-bar .btn, .rec-actions .btn, .rec-list .btn { min-height: 40px; }
+.rec-confirm { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: .9rem; }
+.rec-list { flex-basis: 100%; border: 1px solid var(--border, #333); border-radius: 8px; padding: 8px 10px; }
+.rec-list ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.rec-list li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.rec-list select { min-height: 40px; }

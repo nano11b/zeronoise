@@ -30,6 +30,7 @@ import {
 } from './env';
 import { gifById } from './gifs';
 import { COOKIE_SID, checkSecret, createApp, deviceIdsOf, hashSecret, iceServers, isStaffRole } from './http';
+import * as recs from './recordings';
 import { live, type BotFeedQuery, type BotIdentity, type BotModBody, type BotModMessage, type BotResult, type BotRoomLine } from './live';
 import { deleteRoomSoundFiles, soundPlayAllowed } from './sounds';
 import { deleteVoiceForMessages, deleteVoiceForRoom, isVoiceUploader, sweepVoiceNotes } from './voiceNotes';
@@ -62,7 +63,7 @@ import { isViewPref } from '../shared/videoQuality';
 import * as invites from './invites';
 import * as repo3 from './repo3';
 import { ANNOUNCE_MAX, cleanTags, emoteUrl, HOUR_MS, isRoomCategory, isScheduleRepeat, SCHEDULE_GRACE_MS, SCHEDULE_MAX_AHEAD_MS, SCHEDULE_TEXT_MAX, SCHEDULES_PER_ROOM } from '../shared/batch3';
-import type { RoomAnnouncement, RoomEmote, RoomScheduleInfo } from '../shared/types';
+import type { RoomAnnouncement, RoomEmote, RoomScheduleInfo, RecState } from '../shared/types';
 import { deleteEmoteFile, sweepEmoteFiles } from './roomEmotes';
 import { getNowPlaying, initRadio, syncRadioPolling } from './radio';
 import * as modq from './modq';
@@ -442,6 +443,7 @@ function roomState(room: Room, s: Session): RoomState {
     pins: pinsOf(room.id, repo.userKey(identOf(s))),
     stage: stageStateOf(room),
     voice: room.voice,
+    recording: recStateOf(room.id),
     board: room.board,
     watch: room.watch,
     watchLocked: room.watchLocked,
@@ -975,6 +977,25 @@ function broadcastRooms() {
     io.to('lobby').emit('rooms', roomList());
   }), 250);
 }
+
+// ---------- batch F6: voice-room recordings ----------
+function recStateOf(roomId: string): RecState | null {
+  const r = recs.activeRec(roomId);
+  return r ? { id: r.id, by: r.started_nick, startedAt: r.started_at, maxMs: recs.REC_MAX_MS } : null;
+}
+const REC_REASONS: Record<string, string> = { stop: 'stopped recording', size: 'recording reached its size limit', time: 'recording reached its time limit', idle: 'recording stopped (the recorder went offline)', left: 'recording stopped (the owner left)', voiceoff: 'recording stopped (no longer a voice room)' };
+function recEnded(roomId: string, nick: string, reason: string) {
+  io.to(`room:${roomId}`).emit('rec:state', { roomId, rec: null, reason });
+  const room = rooms.get(roomId);
+  if (room) systemMsg(room, reason === 'stop' ? `⏹ ${nick} stopped recording` : `⏹ ${REC_REASONS[reason] ?? 'recording stopped'}`);
+}
+live.recordingEnded = (roomId, reason) => { const r = recs.recsOf(roomId)[0]; recEnded(roomId, r?.started_nick ?? '', reason); };
+live.roomOwnerId = (roomId) => rooms.get(roomId)?.ownerUserId ?? null;
+setInterval(guardTimer('recordings', () => {
+  for (const r of recs.idleRecs()) { recs.endRec(r.id, 'done', 'idle'); recEnded(r.room_id, r.started_nick, 'idle'); }
+}), 5_000).unref();
+setInterval(guardTimer('recording retention', () => { const n = recs.sweepRecordings(); if (n) console.log(`[rec] removed ${n} recording(s) past retention`); }), 3_600_000).unref();
+setTimeout(() => { try { recs.sweepRecordings(); } catch (e) { console.error('[rec] sweep', e); } }, 30_000).unref();
 
 function systemMsg(room: Room, text: string) {
   const msg: ChatMessage = { kind: 'system', id: randomUUID(), ts: Date.now(), text };
@@ -4508,6 +4529,35 @@ function onConnection(socket: AppSocket) {
       tags: [...tags].map(([t, count]) => ({ tag: t, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)).slice(0, 30),
     });
   });
+  socket.on('rec:start', (_p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
+    const { s, room } = c;
+    if (!s.account || room.ownerUserId !== s.account.id) return ack({ ok: false, error: 'Only the room owner can record', status: 403 });
+    if (!room.voice || room.isPrivate) return ack({ ok: false, error: 'Recording is for voice rooms', status: 400 });
+    if (recs.activeRec(room.id)) return ack({ ok: false, error: 'Already recording', status: 409 });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited', status: 429 });
+    const r = recs.startRec(room.id, s.account.id, s.user!.nick);
+    const rec = recStateOf(room.id)!;
+    repo.logAction(actorLabel(s), s.account.id, 'recording-start', null, room.id, r.id);
+    io.to(`room:${room.id}`).emit('rec:state', { roomId: room.id, rec });
+    systemMsg(room, `🔴 ${s.user!.nick} started recording this room. Everyone here is told; leave now if you don't want to be recorded.`);
+    ack({ ok: true, rec, maxBytes: recs.REC_MAX_BYTES });
+  });
+  socket.on('rec:stop', (_p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = roomCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error, status: c.status });
+    const { s, room } = c;
+    const r = recs.activeRec(room.id);
+    if (!r) return ack({ ok: true });
+    if (!isStaff(s) && s.account?.id !== room.ownerUserId) return ack({ ok: false, error: 'Only the room owner can stop it', status: 403 });
+    recs.endRec(r.id, 'done', 'stop');
+    repo.logAction(actorLabel(s), s.account?.id ?? null, 'recording-stop', null, room.id, r.id);
+    recEnded(room.id, s.user!.nick, 'stop');
+    ack({ ok: true });
+  });
   socket.on('room:voice', (p, ackRaw) => {
     const ack = safeAck(ackRaw);
     const c = roomCtx();
@@ -4521,6 +4571,7 @@ function onConnection(socket: AppSocket) {
       room.voice = on;
       repo.setRoomVoice(room.id, on);
       if (!on && !room.stage.on) room.stage.hands.clear();
+      { const r = recs.activeRec(room.id); if (!on && r) { recs.endRec(r.id, 'done', 'voiceoff'); recEnded(room.id, r.started_nick, 'voiceoff'); } }
       repo.logAction(actorLabel(s), s.account?.id ?? null, on ? 'voice-on' : 'voice-off', null, room.id, null);
       systemMsg(room, on ? `${s.user!.nick} made this a voice room: audio only, raise your hand to take the floor` : `${s.user!.nick} turned off voice-room mode`);
       if (on) {
