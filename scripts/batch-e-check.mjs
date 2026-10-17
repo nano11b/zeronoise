@@ -173,6 +173,9 @@ try {
   ok(!(await emit(owner.s, 'modq:room:list', { status: 'open', sort: 'count' })).items.some((i) => i.key === `rappeal:${ra.appeal.id}`), 'decided appeal leaves the open queue');
   const lgE = (await admin.j.req('/api/admin/log')).log || [];
   ok(['room-appeal', 'room-appeal-deny'].every((a) => lgE.some((l) => l.action === a)), 'appeal + denial logged');
+  // E3: no key in this run: admin status says so, members can't read it
+  { const st = await admin.j.req('/api/admin/security-status'); ok(st.ok && st.keySet === false && typeof st.plaintext === 'number', 'E3: admin security status reports the missing key', JSON.stringify(st));
+    ok((await mem.j.req('/api/admin/security-status')).status >= 401, 'E3: security status is admin-only'); }
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -277,6 +280,19 @@ try {
       }
       await o.ctx.close();
       await fresh(owner); await emit(owner.s, 'room:join', { roomId: room });
+    }
+    // E3: missing-key warning in the admin panel
+    {
+      const a = await pageFor(admin, width);
+      await a.page.goto(BASE + '/admin', { waitUntil: 'domcontentloaded' });
+      const ban = await a.page.waitForSelector('[data-testid="secret-key-banner"]', { timeout: 15000 }).catch(() => null);
+      ok(!!ban, `${width}: admin panel warns that the secret key is missing`);
+      await a.page.waitForSelector('.admin-tabs [data-tab="security"]', { timeout: 15000 }).catch(() => null); await sleep(300);
+      await a.page.evaluate(() => document.querySelector('.admin-tabs [data-tab="security"]')?.click());
+      const st = await a.page.waitForSelector('[data-testid="secret-key-status"][data-keyset="0"]', { timeout: 6000 }).catch(() => null);
+      { const nss = await noSideScroll(a.page); ok(!!st && nss, `${width}: Security tab shows the key status and the setup command`, JSON.stringify({ st: !!st, nss, w: await a.page.evaluate(() => [document.documentElement.scrollWidth, innerWidth, [...document.querySelectorAll("body *")].filter((e) => e.getBoundingClientRect().right > innerWidth + 1).slice(0, 4).map((e) => e.tagName + "." + e.className + ":" + Math.round(e.getBoundingClientRect().right))]) })); }
+      if (st) { await st.evaluate((e) => e.scrollIntoView({ block: 'start' })); await shot(a.page, `e3-secret-key-warning-${width}`); }
+      await a.ctx.close();
     }
     // @@UI-END
   }

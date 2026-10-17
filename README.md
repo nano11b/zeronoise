@@ -431,3 +431,13 @@ TikTok Login Kit (Web) uses the same pattern. The button appears only when `TIKT
 - `node:sqlite` is flagged experimental in Node 22 (the warning is suppressed); it has been stable
   for this workload. Node 22.13+ is required.
 - The age/rules checkbox is informational only.
+
+### Encrypting two-factor secrets (batch E)
+TOTP seeds are sealed with AES-256-GCM when `CAMCHAT_SECRET_KEY` (32+ characters) is in `/etc/camchat.env`.
+Add it once, after upgrading: `sudo bash /opt/camchat/deploy/secret-key-env.sh` (generates the key on the server, never prints it,
+backs up the env file, restarts and health-checks). Existing secrets are sealed at the next start and the plaintext column is
+replaced with `ENCRYPTED`. Without the key (or with a different one) TOTP fails closed and people sign in with a recovery code;
+`scripts/reset-2fa.mjs` clears two-factor for anyone without codes. Keep a copy of the env file.
+Rollback (`--keep-db`) safety: an older build sees `ENCRYPTED` as the seed, so TOTP codes fail and recovery codes still work;
+passkey-only accounts keep a marker TOTP row so older builds still ask for a second step; half-finished sign-ins are stored
+under an `mfa:` id that older builds cannot use. Nobody gets in on a rollback build without a second step.

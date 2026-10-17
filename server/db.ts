@@ -787,7 +787,9 @@ const MIGRATIONS: string[] = [
     decided_at INTEGER,
     decision_note TEXT
   );
-  CREATE INDEX IF NOT EXISTS room_ban_appeals_room ON room_ban_appeals(room_id, status)
+  CREATE INDEX IF NOT EXISTS room_ban_appeals_room ON room_ban_appeals(room_id, status);
+  ALTER TABLE user_totp ADD COLUMN secret_enc TEXT;
+  ALTER TABLE user_totp ADD COLUMN marker INTEGER NOT NULL DEFAULT 0
   `,
 ];
 

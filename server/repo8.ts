@@ -2,6 +2,7 @@
 import { createHash } from 'crypto';
 import { q, tx } from './db';
 import { levelFor, XP_DAILY_CAP } from '../shared/xp';
+import { open, SCRUBBED, seal, secretKeySet, secretKeyTooShort } from './secretbox';
 
 const now = () => Date.now();
 const dayOf = (ms: number) => Math.floor(ms / 86_400_000);
@@ -65,20 +66,59 @@ export function listAppeals(status: 'open' | 'approved' | 'denied' | 'all' = 'op
 }
 
 // ---------------- two-factor (migration 42) ----------------
-export interface TotpRow { user_id: number; secret: string; enabled_at: number | null; last_step: number; created_at: number }
-export const totpOf = (userId: number) => q('SELECT * FROM user_totp WHERE user_id = ?').get(userId) as TotpRow | undefined;
+// batch E: `secret_enc` holds the AES-GCM sealed seed when CAMCHAT_SECRET_KEY is set (then `secret` is a scrubbed marker).
+// `marker = 1` rows are not TOTP at all: they keep `enabled_at` set for passkey-only accounts so an OLDER build
+// (which only knows user_totp) still demands a second step after a --keep-db rollback instead of silently skipping it.
+export interface TotpRow { user_id: number; secret: string; enabled_at: number | null; last_step: number; created_at: number; secret_enc: string | null; marker: number }
+const rawTotp = (userId: number) => q('SELECT * FROM user_totp WHERE user_id = ?').get(userId) as TotpRow | undefined;
+/** the real TOTP enrolment (marker rows are hidden) */
+export const totpOf = (userId: number) => { const t = rawTotp(userId); return t && !t.marker ? t : undefined; };
 export const mfaEnabled = (userId: number) => !!totpOf(userId)?.enabled_at;
+/** an enrolment waiting for its first code (a not-yet-enabled row, or a passkey marker row with a fresh secret) */
+export const totpSetupRow = (userId: number) => { const t = rawTotp(userId); return t && (t.marker || !t.enabled_at) ? t : undefined; };
+/** Keep the passkey marker in step: enabled while the account has passkeys but no real TOTP. */
+export function syncPasskeyMarker(userId: number) {
+  const t = rawTotp(userId);
+  const pk = !!q('SELECT 1 AS x FROM user_passkeys WHERE user_id = ? AND removed_at IS NULL').get(userId);
+  if (t && !t.marker && t.enabled_at) return; // real TOTP already makes old builds ask
+  if (pk) {
+    if (!t) q(`INSERT INTO user_totp (user_id, secret, enabled_at, last_step, created_at, marker) VALUES (?, ?, ?, 0, ?, 1)`).run(userId, SCRUBBED, now(), now());
+    else q('UPDATE user_totp SET marker = 1, enabled_at = COALESCE(enabled_at, ?), secret = ?, secret_enc = NULL WHERE user_id = ?').run(now(), SCRUBBED, userId);
+  } else if (t?.marker) q('UPDATE user_totp SET enabled_at = NULL, marker = 0 WHERE user_id = ?').run(userId);
+}
+/** Startup (key present): seal every plaintext seed and scrub the old column. Returns how many were sealed. */
+export function sealPlaintextSecrets(): number {
+  if (!secretKeySet()) return 0;
+  const rows = q(`SELECT user_id, secret FROM user_totp WHERE marker = 0 AND secret_enc IS NULL AND secret <> ?`).all(SCRUBBED) as { user_id: number; secret: string }[];
+  tx(() => { for (const r of rows) q('UPDATE user_totp SET secret_enc = ?, secret = ? WHERE user_id = ?').run(seal(r.secret, `totp:${r.user_id}`), SCRUBBED, r.user_id); });
+  return rows.length;
+}
+export function secretStatus() {
+  const c = (sql: string, ...a: (string | number)[]) => (q(sql).get(...a) as { n: number }).n;
+  return {
+    keySet: secretKeySet(), keyTooShort: secretKeyTooShort(),
+    plaintext: c(`SELECT COUNT(*) AS n FROM user_totp WHERE marker = 0 AND secret_enc IS NULL AND secret <> ?`, SCRUBBED),
+    encrypted: c('SELECT COUNT(*) AS n FROM user_totp WHERE marker = 0 AND secret_enc IS NOT NULL'),
+    // sealed secrets but no (or a different) key: those TOTP users must use recovery codes until the key is back
+    unreadable: secretKeySet() ? (q('SELECT user_id, secret_enc FROM user_totp WHERE marker = 0 AND secret_enc IS NOT NULL').all() as { user_id: number; secret_enc: string }[]).filter((r) => open(r.secret_enc, `totp:${r.user_id}`) == null).length
+      : c('SELECT COUNT(*) AS n FROM user_totp WHERE marker = 0 AND secret_enc IS NOT NULL'),
+  };
+}
+const sealFor = (userId: number, secret: string) => (secretKeySet() ? { secret: SCRUBBED, enc: seal(secret, `totp:${userId}`) } : { secret, enc: null });
 /** Start (or restart) enrolment with a fresh secret. Never touches an enabled one. */
 export function startTotp(userId: number, secret: string): boolean {
   const cur = totpOf(userId);
   if (cur?.enabled_at) return false;
-  q('INSERT INTO user_totp (user_id, secret, enabled_at, last_step, created_at) VALUES (?,?,NULL,0,?) ON CONFLICT(user_id) DO UPDATE SET secret = excluded.secret, created_at = excluded.created_at, last_step = 0')
-    .run(userId, secret, now());
+  const s = sealFor(userId, secret);
+  // a passkey marker row stays enabled (old-build safety) until this enrolment is confirmed
+  q(`INSERT INTO user_totp (user_id, secret, secret_enc, enabled_at, last_step, created_at, marker) VALUES (?,?,?,NULL,0,?,0)
+     ON CONFLICT(user_id) DO UPDATE SET secret = excluded.secret, secret_enc = excluded.secret_enc, created_at = excluded.created_at, last_step = 0`)
+    .run(userId, s.secret, s.enc, now());
   return true;
 }
 export function enableTotp(userId: number, step: number, codeHashes: string[]) {
   tx(() => {
-    q('UPDATE user_totp SET enabled_at = ?, last_step = ? WHERE user_id = ?').run(now(), step, userId);
+    q('UPDATE user_totp SET enabled_at = ?, last_step = ?, marker = 0 WHERE user_id = ?').run(now(), step, userId);
     q('UPDATE user_recovery_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(now(), userId);
     for (const h of codeHashes) q('INSERT INTO user_recovery_codes (user_id, code_hash) VALUES (?,?)').run(userId, h);
   });
@@ -103,6 +143,7 @@ export function disableTotp(userId: number) {
     q('UPDATE user_totp SET enabled_at = NULL WHERE user_id = ?').run(userId);
     q('UPDATE user_recovery_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(now(), userId);
   });
+  syncPasskeyMarker(userId);
 }
 
 // ---------------- personal data export (batch D) ----------------
@@ -148,16 +189,22 @@ export interface PasskeyRow { id: number; user_id: number; cred_id: string; publ
 export const passkeysOf = (userId: number) => q('SELECT * FROM user_passkeys WHERE user_id = ? AND removed_at IS NULL ORDER BY created_at').all(userId) as unknown as PasskeyRow[];
 export const passkeyByCred = (credId: string) => q('SELECT * FROM user_passkeys WHERE cred_id = ? AND removed_at IS NULL').get(credId) as PasskeyRow | undefined;
 export function addPasskey(userId: number, credId: string, jwk: object, alg: number, signCount: number, name: string): number {
-  return (q('INSERT INTO user_passkeys (user_id, cred_id, public_jwk, alg, sign_count, name, created_at) VALUES (?,?,?,?,?,?,?) RETURNING id').get(userId, credId, JSON.stringify(jwk), alg, signCount, name, now()) as { id: number }).id;
+  const id = (q('INSERT INTO user_passkeys (user_id, cred_id, public_jwk, alg, sign_count, name, created_at) VALUES (?,?,?,?,?,?,?) RETURNING id').get(userId, credId, JSON.stringify(jwk), alg, signCount, name, now()) as { id: number }).id;
+  syncPasskeyMarker(userId);
+  return id;
 }
 export const touchPasskey = (id: number, signCount: number) => q('UPDATE user_passkeys SET sign_count = ?, last_used_at = ? WHERE id = ?').run(signCount, now(), id);
 /** removed, not deleted */
-export const removePasskey = (userId: number, id: number) => Number(q('UPDATE user_passkeys SET removed_at = ? WHERE id = ? AND user_id = ? AND removed_at IS NULL').run(now(), id, userId).changes) > 0;
+export function removePasskey(userId: number, id: number): boolean {
+  const ok = Number(q('UPDATE user_passkeys SET removed_at = ? WHERE id = ? AND user_id = ? AND removed_at IS NULL').run(now(), id, userId).changes) > 0;
+  if (ok) syncPasskeyMarker(userId);
+  return ok;
+}
 export const hasPasskey = (userId: number) => !!q('SELECT 1 AS x FROM user_passkeys WHERE user_id = ? AND removed_at IS NULL').get(userId);
 /** any second factor: TOTP on or at least one passkey */
 export const secondFactorOn = (userId: number) => mfaEnabled(userId) || hasPasskey(userId);
 /** the TOTP secret in the clear (batch E3 replaces this with the decrypting version) */
-export const totpSecret = (t: TotpRow) => t.secret;
+export const totpSecret = (t: TotpRow) => (t.secret_enc ? open(t.secret_enc, `totp:${t.user_id}`) ?? '' : t.secret);
 
 // ---------------- room-ban appeals (migration 43) ----------------
 export interface RoomAppealRow { id: number; room_ban_id: number; room_id: string; user_id: number; username: string; text: string; created_at: number; status: 'open' | 'approved' | 'denied'; decided_by: string | null; decided_at: number | null; decision_note: string | null }
@@ -171,3 +218,4 @@ export function insertRoomAppeal(a: { banId: number; roomId: string; userId: num
 export function decideRoomAppeal(id: number, status: 'approved' | 'denied', by: string, note: string | null): boolean {
   return Number(q(`UPDATE room_ban_appeals SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ? AND status = 'open'`).run(status, by, now(), note, id).changes) > 0;
 }
+export const passkeyUsers = () => (q('SELECT DISTINCT user_id FROM user_passkeys WHERE removed_at IS NULL').all() as { user_id: number }[]).map((r) => r.user_id);

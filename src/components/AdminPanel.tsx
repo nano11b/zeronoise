@@ -3,6 +3,7 @@ import { APP_NAME, LIMITS } from '../../shared/config';
 import type { AdminBan, AdminLogEntry, AdminUser, BanKind, Role } from '../../shared/types';
 import { ModQueue } from './ModQueue';
 import { TwoFactorSection } from './TwoFactor';
+import { SecretKeyStatus, SecretKeyBanner } from './SecretKeyStatus';
 import { useStaffCounts } from '../modq';
 import { api } from '../api';
 import type { Account } from '../App';
@@ -113,6 +114,7 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
           <button className="btn ghost small-btn" onClick={onBack}>Back to chat</button>
         </div>
       </header>
+      {isAdmin && <SecretKeyBanner onOpen={() => setTab('security')} />}
       <main className="admin-main">
         <GamesSlot />
         {error && <div className="form-error">{error}</div>}
@@ -232,6 +234,7 @@ export function AdminPanel({ account, onBack, onGames }: { account: Account | nu
         {tab === 'stats' && <AdminStats onError={setError} />}
         {tab === 'security' && isAdmin && (
           <section className="admin-security" data-testid="admin-security">
+            <SecretKeyStatus />
             <h2>Your two-factor sign-in</h2>
             <TwoFactorSection adminView />
           </section>

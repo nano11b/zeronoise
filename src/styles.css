@@ -2392,3 +2392,8 @@ html[data-ui-theme="dark-orange"] {
 .pk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .pk-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .pk-list li .btn { margin-left: auto; }
+.secret-key { border: 1px solid var(--border, #333); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
+.secret-key.warn { border-color: #d9a400; }
+.secret-key h3 { margin: 0 0 4px; font-size: .95rem; }
+.secret-key pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+.banner.warn { background: #3a2c00; color: #ffe08a; }

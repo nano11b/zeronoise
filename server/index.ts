@@ -79,6 +79,17 @@ installProcessGuards();
 // ---------- startup: database ----------
 migrate();
 repo.promoteBootstrapAdmins();
+{
+  // batch E: rollback-safe two-factor storage
+  const moved = repo.hardenPendingSessions();
+  if (moved) console.log(`[2fa] moved ${moved} pending sign-in(s) under the mfa: prefix`);
+  for (const r of repo8.passkeyUsers()) repo8.syncPasskeyMarker(r);
+  const sealed = repo8.sealPlaintextSecrets();
+  if (sealed) console.log(`[2fa] encrypted ${sealed} TOTP secret(s) with CAMCHAT_SECRET_KEY`);
+  const st = repo8.secretStatus();
+  if (!st.keySet) console.warn(`[2fa] CAMCHAT_SECRET_KEY is ${st.keyTooShort ? 'too short (min 32 characters)' : 'not set'}: TOTP secrets are stored unencrypted${st.encrypted ? `; ${st.encrypted} sealed secret(s) cannot be read until it is restored` : ''}`);
+  else if (st.unreadable) console.warn(`[2fa] ${st.unreadable} TOTP secret(s) were sealed with a different key; those users need recovery codes`);
+}
 for (const id of repo.ephemeralRoomIds()) { deleteRoomSoundFiles(id); deleteVoiceForRoom(id); deleteImagesForRoom(id); }
 const removed = repo.deleteEphemeralRooms();
 if (removed) console.log(`[db] removed ${removed} leftover guest room(s)`);

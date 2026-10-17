@@ -1299,8 +1299,8 @@ export function createApp(roomList: () => unknown) {
     const a = reqAccount(req);
     if (!a) return fail(res, 401, 'Sign in first');
     if (!mfaUserLimiter.take(`m:${a.id}`)) return fail(res, 429, 'Too many attempts. Try again later.');
-    const t = repo8.totpOf(a.id);
-    if (!t || t.enabled_at) return fail(res, 409, t ? 'Two-factor is already on.' : 'Start setup first.');
+    const t = repo8.totpSetupRow(a.id);
+    if (!t) return fail(res, 409, repo8.mfaEnabled(a.id) ? 'Two-factor is already on.' : 'Start setup first.');
     if (Date.now() - t.created_at > 30 * 60_000) return fail(res, 410, 'Setup expired. Start again.');
     const step = verifyTotp(repo8.totpSecret(t), String(req.body?.code ?? ''));
     if (step == null) return fail(res, 400, 'That code does not match. Check the time on your phone and try the next code.');
@@ -1852,6 +1852,10 @@ export function createApp(roomList: () => unknown) {
     if (!repo.liftBan(Number(req.params.id), actor(req).username)) return fail(res, 404, 'No active ban with that id');
     repo.logAction(actor(req).username, actor(req).id, 'unban', `#${req.params.id}`, null);
     res.json({ ok: true });
+  });
+  admin.get('/security-status', (req, res) => {
+    if (actor(req).role !== 'admin') return fail(res, 403, 'Admins only');
+    res.json({ ok: true, ...repo8.secretStatus() });
   });
   admin.get('/appeals', (req, res) => {
     const st = String(req.query.status ?? 'open');
