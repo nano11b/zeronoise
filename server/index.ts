@@ -3069,6 +3069,18 @@ function onConnection(socket: AppSocket) {
     ack({ ok: true, messages: rows.map((m) => chatFromRow(m, rx.get(m.id), 0)) });
   });
 
+  /** batch C: edit history from the mod queue (site staff anywhere; room owner / mods for their rooms), without being in the room */
+  socket.on('modq:history', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    if (!s.user) return ack({ ok: false, error: 'Sign in first' });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down' });
+    const m = repo.messageById(String(p?.messageId ?? ''));
+    if (!m || m.deleted || m.burn_ttl != null) return ack({ ok: false, error: 'Message not found' });
+    const room = rooms.get(m.room_id);
+    if (!isStaff(s) && !(room && !room.isPrivate && canRoomManage(s, room))) return ack({ ok: false, error: 'Only moderators can see edit history.' });
+    ack({ ok: true, versions: repo.editHistory(m), current: { text: m.text, at: m.edited_at ?? m.ts } });
+  });
   socket.on('chat:history', (p, ackRaw) => {
     const ack = safeAck(ackRaw);
     const s = session();

@@ -146,6 +146,7 @@ export function ModQueue({ mode, roomId, toast }: { mode: 'site' | 'room'; roomI
               <p className="queue-cats">
                 {(Object.entries(it.categories) as [ReportCategory, number][]).map(([c, n]) => <span key={c} className="tag cat-tag">{REPORT_CATEGORY_LABELS[c]}{n > 1 ? ` ×${n}` : ''}</span>)}
               </p>
+              {it.kind === 'message' && it.messageId && !it.messageGone && <EditHistory messageId={it.messageId} />}
               {it.snapshot && (it.kind === 'message' || it.kind === 'whisper') && (
                 <div className="queue-snap">
                   {it.snapshot.text != null ? <p className="small"><span className="muted">Reported message{it.snapshot.editedAt ? ' (as it was when reported)' : ''}:</span> <span className="quoted" data-snapshot="1">{it.snapshot.text || '(no text)'}</span></p>
@@ -246,5 +247,21 @@ function BotActions({ scope, version }: { scope: 'site' | 'room'; version: numbe
         ))}
       </ul>
     </section>
+  );
+}
+
+type Versions = { versions: { text: string; at: number }[]; current: { text: string; at: number } };
+/** batch C: earlier versions of a reported message (only shown when it was edited) */
+function EditHistory({ messageId }: { messageId: string }) {
+  const [h, setH] = useState<Versions | null | 'err'>(null);
+  const load = () => call<Versions>((ack) => socket.emit('modq:history', { messageId }, ack)).then(setH, () => setH('err'));
+  if (h === 'err') return null;
+  if (!h) return <button type="button" className="btn ghost small-btn" data-action="queue-edit-history" onClick={() => void load()}>Edit history</button>;
+  if (!h.versions.length) return <p className="muted small" data-testid="queue-edit-history">Never edited.</p>;
+  return (
+    <ol className="queue-edits small" data-testid="queue-edit-history">
+      {h.versions.map((v, i) => <li key={i}><span className="muted">{new Date(v.at).toLocaleString()}:</span> <span className="quoted">{v.text}</span></li>)}
+      <li><span className="muted">now:</span> <span className="quoted">{h.current.text}</span></li>
+    </ol>
   );
 }

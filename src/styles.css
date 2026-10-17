@@ -2313,3 +2313,4 @@ html[data-ui-theme="dark-orange"] {
 .voice-talker.speaking { border-color: var(--accent); }
 .voice-talker.speaking .voice-dot { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
 .voice-hands { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.queue-edits { margin: 6px 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }

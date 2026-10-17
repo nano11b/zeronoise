@@ -134,6 +134,28 @@ try {
   ok((await emit(owner.s, 'room:voice', { on: true })).ok && (await emit(owner.s, 'rooms:list')).rooms.find((r) => r.id === plain.roomId)?.voice === true, 'owner turns an existing room into a voice room');
   await emit(owner.s, 'room:voice', { on: false });
   await emit(owner.s, 'room:join', { roomId: vroom });
+  // ---------- 2. message edit history ----------
+  const tr = await emit(owner.s, 'room:create', { name: 'cc-text', category: 'gaming', tags: ['speedrun', 'chill'] });
+  const troom = tr.roomId;
+  await emit(owner.s, 'room:join', { roomId: troom }); await emit(mem.s, 'room:join', { roomId: troom }); await emit(other.s, 'room:join', { roomId: troom });
+  const edEv = ev(other.s, 'chat:edited');
+  const sent = await emit(mem.s, 'chat:send', { text: 'first draft' });
+  const mid = sent.id ?? sent.messageId ?? (await emit(mem.s, 'room:join', { roomId: troom })).room.history.filter((m) => m.text === 'first draft').pop()?.id;
+  await sleep(1100);
+  ok((await emit(mem.s, 'chat:edit', { messageId: mid, text: 'second draft' })).ok, 'author edits a message');
+  const ee = await edEv;
+  ok(ee && ee.editedAt > 0 && ee.text === 'second draft', 'everyone gets the edit with an editedAt (the "edited" tag)');
+  await sleep(1100);
+  await emit(mem.s, 'chat:edit', { messageId: mid, text: 'final text' });
+  const hOwner = await emit(owner.s, 'chat:history', { messageId: mid });
+  ok(hOwner.ok && hOwner.versions.map((v) => v.text).join('|') === 'first draft|second draft' && hOwner.current.text === 'final text', 'room owner sees earlier versions, oldest first', JSON.stringify(hOwner));
+  ok(!(await emit(other.s, 'chat:history', { messageId: mid })).ok, 'regular members cannot see edit history');
+  ok(!(await emit(mem.s, 'chat:history', { messageId: mid })).ok, 'not even the author (mods only)');
+  const hq = await emit(admin.s, 'modq:history', { messageId: mid });
+  ok(hq.ok && hq.versions.length === 2, 'site staff see it from the mod queue without joining the room');
+  ok(!(await emit(other.s, 'modq:history', { messageId: mid })).ok, 'mod-queue history refused for non-mods');
+  const histNow = (await emit(other.s, 'room:join', { roomId: troom })).room.history.find((m) => m.id === mid);
+  ok(histNow?.editedAt > 0 && histNow.text === 'final text', 'history on join keeps the edited tag');
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -143,6 +165,7 @@ try {
     const fresh = async (u) => { try { u.s.disconnect(); } catch { /* */ } u.s = await sock(u.j); sockets.push(u.s); return u.s; };
     // 1. voice room
     {
+      await emit(mem.s, 'room:join', { roomId: vroom });
       await emit(mem.s, 'stage:hand', { up: true });
       await emit(mem.s, 'media:state', { cam: false, mic: true, screen: false });
       const o = await pageFor(owner, width);
@@ -157,6 +180,24 @@ try {
       await fresh(owner); await fresh(mem);
       await emit(owner.s, 'room:join', { roomId: vroom });
       await emit(mem.s, 'room:join', { roomId: vroom });
+    }
+    // 2. edit history dialog (owner)
+    {
+      const o = await pageFor(owner, width);
+      await enterRoom(o.page, troom);
+      const btn = await o.page.waitForSelector('[data-action="edit-history"]', { timeout: 6000 }).catch(() => null);
+      ok(!!btn, `${width}: "(edited)" tag is a button for mods`);
+      if (btn) { await btn.evaluate((b) => { b.scrollIntoView({ block: 'center' }); b.click(); }); }
+      ok(!!(await o.page.waitForSelector('[data-testid="edit-history"]', { timeout: 6000 }).catch(() => null)), `${width}: edit history dialog lists earlier versions`);
+      await shot(o.page, `c2-edit-history-${width}`);
+      await o.ctx.close();
+      const m = await pageFor(other, width);
+      await enterRoom(m.page, troom);
+      ok(!!(await m.page.$('.edited')) && !(await m.page.$('[data-action="edit-history"]')), `${width}: members see "(edited)" but no history button`);
+      await shot(m.page, `c2-edited-tag-${width}`);
+      await m.ctx.close();
+      await fresh(owner); await fresh(other);
+      await emit(owner.s, 'room:join', { roomId: vroom });
     }
     // @@UI-END
   }

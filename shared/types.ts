@@ -271,6 +271,8 @@ export interface ClientToServer {
   'chat:typing': (p: { typing: boolean }) => void;
   'chat:pin': (p: { messageId: string; pinned: boolean }, ack: Ack) => void;
   /** room managers / staff: earlier versions of an edited message, oldest first */
+  /** batch C: same, from the mod queue (staff anywhere; room managers for their own rooms) */
+  'modq:history': (p: { messageId: string }, ack: Ack<{ versions: { text: string; at: number }[]; current: { text: string; at: number } }>) => void;
   'chat:history': (p: { messageId: string }, ack: Ack<{ versions: { text: string; at: number }[]; current: { text: string; at: number } }>) => void;
   // ---- stage mode ----
   /** owner / site staff: turn stage mode on or off, set the speaker cap */
