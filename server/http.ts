@@ -22,6 +22,7 @@ import { brandedHtml, sendMail } from './mail';
 import { emailVerifyRequiredEffective, roomEntryError } from './gate';
 import { clientIp, DEVICE_RE, isHttps, originAllowed, parseCookies, trustSetting } from './net';
 import { KeyedLimiter } from './rateLimit';
+import { makeZip } from './zip';
 import { newRecoveryCodes, newTotpSecret, normalizeRecovery, otpauthUrl, verifyTotp } from './totp';
 import { APPEAL_MIN, APPEAL_MAX, type AppealInfo } from '../shared/appeals';
 import * as repo from './repo';
@@ -71,6 +72,7 @@ import { INVITE_CODE_RE, INVITE_EXPIRY, INVITE_MAX_USES, INVITE_PATH_RE, INVITES
 import { cardVersion, injectMeta, roomCard, roomMeta, siteMeta, variantFor, type CardRoom, type Meta } from './og';
 
 /** Cookie prefix stays camchat so existing sessions and device cookies keep working. */
+const EXPORT_PER_USER = Math.max(1, Number(process.env.EXPORT_PER_HOUR) || 1);
 const slugApp = APP_NAME.toLowerCase().replace(/[^a-z0-9]/g, '') || 'app';
 export const COOKIE_SID = `${slugApp}_sid`;
 export const COOKIE_DID = `${slugApp}_did`;
@@ -2019,6 +2021,39 @@ export function createApp(roomList: () => unknown) {
     repo.logAction(acct?.username ?? 'banned visitor', acct?.id ?? null, 'appeal', `ban #${ban.id}`, null, text.slice(0, 200));
     live.appealFiled({ id: a.id, username: a.username, userId: a.user_id, text, reason: ban.reason });
     res.json({ ok: true, appeal: appealView(a) });
+  });
+
+  // ---------- personal data export (batch D) ----------
+  const exportUserLimiter = new KeyedLimiter(EXPORT_PER_USER, 60 * 60_000);
+  const exportIpLimiter = new KeyedLimiter(10, 60 * 60_000);
+  app.post('/api/me/export', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!exportIpLimiter.take(clientIp(req)) || !exportUserLimiter.take(`u:${a.id}`)) return fail(res, 429, `You can download your data ${EXPORT_PER_USER === 1 ? 'once' : `${EXPORT_PER_USER} times`} an hour. Try again later.`);
+    const data = repo8.exportData(a.id);
+    if (!data) return fail(res, 404, 'No such account');
+    const generatedAt = new Date().toISOString();
+    const meta = { format: 'zeronoise-export/1', generatedAt, username: a.username, counts: { messages: data.messages.length, whispers: data.whispers.length }, truncated: data.truncated,
+      note: 'Burn-after-reading messages, deleted messages, passwords, two-factor secrets and IP addresses are not included.' };
+    repo.logAction(a.username, a.id, 'data-export', a.username, null, `${data.messages.length} messages, ${data.whispers.length} whispers`);
+    const stamp = generatedAt.slice(0, 10);
+    const base = `${slugApp}-${a.username.toLowerCase().replace(/[^a-z0-9_-]/g, '')}-${stamp}`;
+    res.setHeader('Cache-Control', 'no-store');
+    if (req.body?.format === 'json') {
+      res.setHeader('Content-Disposition', `attachment; filename="${base}.json"`);
+      return res.type('application/json').send(JSON.stringify({ ...meta, ...data }, null, 2));
+    }
+    const j = (v: unknown) => JSON.stringify(v, null, 2);
+    const zip = makeZip([
+      { name: 'README.txt', data: `Your ${BRAND_NAME} data, exported ${generatedAt}.\n\nprofile.json   account and profile\nsettings.json  preferences, notifications, blocks, bookmarks\nmessages.json  room messages you sent (${data.messages.length})\nwhispers.json  whispers you sent or received (${data.whispers.length})\n\n${meta.note}\n` },
+      { name: 'export.json', data: j(meta) },
+      { name: 'profile.json', data: j(data.profile) },
+      { name: 'settings.json', data: j(data.settings) },
+      { name: 'messages.json', data: j(data.messages) },
+      { name: 'whispers.json', data: j(data.whispers) },
+    ]);
+    res.setHeader('Content-Disposition', `attachment; filename="${base}.zip"`);
+    res.type('application/zip').send(zip);
   });
 
   app.get('/api/me/xp', (req, res) => {

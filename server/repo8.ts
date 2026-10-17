@@ -104,3 +104,41 @@ export function disableTotp(userId: number) {
     q('UPDATE user_recovery_codes SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(now(), userId);
   });
 }
+
+// ---------------- personal data export (batch D) ----------------
+export const EXPORT_MAX_MESSAGES = 100_000;
+const rows = (sql: string, ...a: (string | number | null)[]) => { try { return q(sql).all(...a) as Record<string, unknown>[]; } catch { return []; } };
+const one = (sql: string, ...a: (string | number | null)[]) => { try { return (q(sql).get(...a) as Record<string, unknown> | undefined) ?? null; } catch { return null; } };
+/** Everything we keep about one account that is theirs to take. Secrets (password hash, 2FA secret, recovery codes, push keys, IPs) are left out. */
+export function exportData(userId: number) {
+  const u = one('SELECT * FROM users WHERE id = ?', userId);
+  if (!u) return null;
+  const links = (() => { try { return JSON.parse(String(u.profile_links ?? '[]')); } catch { return []; } })();
+  const profile = {
+    username: u.username, role: u.role, createdAt: u.created_at, lastLoginAt: u.last_login_at,
+    email: u.email ?? null, emailVerifiedAt: u.email_verified_at ?? null,
+    signIn: { password: !!u.password_hash, google: !!u.google_sub, discord: !!u.discord_id, tiktok: !!u.tiktok_open_id, twoFactor: !!one('SELECT 1 AS x FROM user_totp WHERE user_id = ? AND enabled_at IS NOT NULL', userId) },
+    chatColor: u.chat_color ?? null, chatEffect: u.chat_effect ?? null, hasAvatar: !!u.has_avatar, bio: u.bio ?? null,
+    bannerId: u.banner_id ?? null, links, nowPlaying: u.now_playing ?? null, shownBadges: u.shown_badges ?? null,
+    xp: u.xp ?? 0, level: levelFor(Number(u.xp ?? 0)),
+    badges: rows('SELECT badge, earned_at AS earnedAt FROM user_badges WHERE user_id = ? ORDER BY earned_at', userId),
+    stats: rows('SELECT stat, value FROM user_stats WHERE user_id = ?', userId),
+    friends: rows(`SELECT CASE WHEN f.user_id = ? THEN p.username ELSE o.username END AS username, f.status, f.created_at AS since
+      FROM friendships f JOIN users p ON p.id = f.peer_id JOIN users o ON o.id = f.user_id WHERE f.user_id = ? OR f.peer_id = ?`, userId, userId, userId),
+  };
+  const settings = {
+    showRoom: u.show_room ?? null, videoQuality: u.video_quality ?? null, uiTheme: u.ui_theme ?? null, linkPreviews: u.link_previews ?? null, levelHidden: !!u.xp_hidden,
+    roomNotifications: rows('SELECT room_id AS roomId, level, updated_at AS updatedAt FROM room_notify WHERE user_id = ?', userId),
+    quietHours: one('SELECT start_min AS startMin, end_min AS endMin, tz FROM push_quiet WHERE user_id = ?', userId),
+    blocked: rows('SELECT u.username, b.created_at AS since FROM user_blocks b JOIN users u ON u.id = b.blocked_id WHERE b.user_id = ?', userId),
+    bookmarks: rows('SELECT message_id AS messageId, room_id AS roomId, created_at AS createdAt FROM message_bookmarks WHERE user_id = ?', userId),
+    eventRsvps: rows('SELECT event_id AS eventId, status, updated_at AS updatedAt FROM event_rsvps WHERE user_id = ?', userId),
+  };
+  // burn-after-reading lines are meant to vanish, so they are not exported
+  const messages = rows(`SELECT m.id, m.room_id AS roomId, r.name AS roomName, m.ts, m.nick, m.text, m.parent_id AS parentId, m.edited_at AS editedAt,
+      CASE WHEN m.voice_id IS NOT NULL THEN 1 ELSE 0 END AS voiceNote
+    FROM messages m LEFT JOIN rooms r ON r.id = m.room_id WHERE m.user_id = ? AND m.deleted = 0 AND m.burn_ttl IS NULL ORDER BY m.ts LIMIT ?`, userId, EXPORT_MAX_MESSAGES);
+  const whispers = rows(`SELECT w.id, w.room_id AS roomId, r.name AS roomName, w.ts, w.from_nick AS fromNick, CASE WHEN w.from_user_id = ? THEN 1 ELSE 0 END AS sentByYou, w.text
+    FROM whisper_messages w JOIN whisper_members wm ON wm.message_id = w.id AND wm.user_id = ? LEFT JOIN rooms r ON r.id = w.room_id ORDER BY w.ts LIMIT ?`, userId, userId, EXPORT_MAX_MESSAGES);
+  return { profile, settings, messages, whispers, truncated: messages.length >= EXPORT_MAX_MESSAGES || whispers.length >= EXPORT_MAX_MESSAGES };
+}

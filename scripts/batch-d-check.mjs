@@ -269,6 +269,37 @@ try {
   await sleep(31000);
   const aen2 = await admin.j.req('/api/me/2fa/enable', { code: totpAt(asu2.secret, stepNow()) });
   globalThis.__adminCodes = aen2.recoveryCodes || [];
+
+  // ---------- 9. data export ----------
+  const exRoom = (await emit(mem.s, 'room:join', { roomId: room })).room;
+  await emit(mem.s, 'chat:send', { text: 'export me please, a line for the archive' });
+  const brn = await emit(mem.s, 'chat:send', { text: 'this one burns', burnTtl: 30 });
+  const ownerSid = exRoom.users.find((u) => u.nick === 'DdOwner')?.id;
+  const wst = await emit(mem.s, 'whisper:start', { userIds: [ownerSid] });
+  const wsn = wst.ok ? await emit(mem.s, 'whisper:send', { whisperId: wst.whisper.id, text: 'psst a secret whisper for export' }) : wst;
+  ok(brn.ok && wsn.ok, 'setup: a burn line and a whisper were sent', JSON.stringify({ brn, wsn }).slice(0, 200));
+  await sleep(400);
+  const exRaw = await fetch(BASE + '/api/me/export', { method: 'POST', headers: { 'x-csrf': '1', cookie: mem.j.header(), 'content-type': 'application/json' }, body: '{}' });
+  const zipBuf = Buffer.from(await exRaw.arrayBuffer());
+  ok(exRaw.status === 200 && exRaw.headers.get('content-type').includes('zip') && /attachment; filename=".+\.zip"/.test(exRaw.headers.get('content-disposition')), 'export downloads a ZIP');
+  const zdir = fs.mkdtempSync(path.join(os.tmpdir(), 'zn-exp-'));
+  fs.writeFileSync(path.join(zdir, 'x.zip'), zipBuf);
+  const unz = await new Promise((r) => { const p = spawn('python3', ['-c', 'import zipfile,sys,json; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(json.dumps({n: json.loads(z.read(n)) if n.endswith(".json") else z.read(n).decode() for n in z.namelist()}))', path.join(zdir, 'x.zip')]); let o = ''; p.stdout.on('data', (d) => { o += d; }); p.stderr.on('data', (d) => { o += d; }); p.on('close', () => r(o)); });
+  let Z = null; try { Z = JSON.parse(unz); } catch { /* */ }
+  ok(Z && ['README.txt', 'export.json', 'profile.json', 'settings.json', 'messages.json', 'whispers.json'].every((n) => n in Z), 'ZIP is valid (CRC ok) with profile/settings/messages/whispers', unz.slice(0, 200));
+  ok(Z?.['profile.json'].username === 'DdMember' && Z['profile.json'].links !== undefined && 'twoFactor' in Z['profile.json'].signIn, 'profile.json has the profile');
+  ok(Z?.['messages.json'].some((m) => m.text === 'export me please, a line for the archive'), 'messages.json has my room messages');
+  ok(!Z?.['messages.json'].some((m) => m.text === 'this one burns'), 'burn messages are not exported');
+  ok(!Z?.['messages.json'].some((m) => m.nick && m.nick !== 'DdMember'), 'only my own messages');
+  ok(Z?.['whispers.json'].some((w) => w.text === 'psst a secret whisper for export' && w.sentByYou === 1) && Array.isArray(Z?.['settings.json'].roomNotifications), 'whispers and settings are present');
+  ok(!/password_hash|\$argon|\$scrypt|secret"|code_hash|127\.0\.0\.1/.test(unz), 'no password hash, 2FA secret, recovery codes or IPs in the export');
+  const ex2 = await mem.j.req('/api/me/export', { format: 'json' });
+  ok(ex2.status === 429, 'second export within the hour is rate limited');
+  const exJ = await fetch(BASE + '/api/me/export', { method: 'POST', headers: { 'x-csrf': '1', cookie: other.j.header(), 'content-type': 'application/json' }, body: '{"format":"json"}' });
+  const J = await exJ.json().catch(() => null);
+  ok(exJ.status === 200 && J?.format === 'zeronoise-export/1' && J.profile.username === 'DdOther', 'JSON format works');
+  ok((await jar().req('/api/me/export', {})).status === 401, 'export needs sign-in');
+  ok((await fetch(BASE + '/api/me/export', { method: 'POST', headers: { cookie: other.j.header() } })).status === 403, 'export needs the CSRF header');
   // @@API-END
 
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
@@ -355,6 +386,26 @@ try {
       await shot(g.page, `d8-2fa-gate-${width}`);
       await g.ctx.close();
       await fresh(mem); await emit(mem.s, 'room:join', { roomId: room });
+    }
+    // 9. data export in the Profile dialog
+    {
+      const m = await pageFor(owner, width);
+      await m.page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+      await m.page.waitForSelector('[data-action="profile"]', { timeout: 15000 });
+      await m.page.$eval('[data-action="profile"]', (b) => b.click()); await sleep(400);
+      await m.page.evaluate(() => [...document.querySelectorAll('[role="menu"] button, .profile-actions button')].find((b) => /^\s*Profile\s*$/.test(b.textContent))?.click());
+      const sec = await m.page.waitForSelector('[data-section="export"] [data-action="export-zip"]', { timeout: 8000 }).catch(() => null);
+      ok(!!sec, `${width}: Profile dialog has Download ZIP`);
+      if (sec) {
+        await sec.evaluate((e) => e.closest('.profile-section').scrollIntoView({ block: 'center' }));
+        await sec.click();
+        const msg = await m.page.waitForSelector('[data-testid="export-msg"]', { timeout: 8000 }).catch(() => null);
+        const t = msg ? await msg.evaluate((e) => e.textContent) : '';
+        ok(width === 1366 ? /Downloaded .+\.zip/.test(t) : /once|hour|Downloaded/i.test(t), `${width}: download runs (second time: rate-limit message)`, t);
+        await shot(m.page, `d9-export-${width}`);
+      }
+      await m.ctx.close();
+      await fresh(owner); await emit(owner.s, 'room:join', { roomId: room });
     }
     // @@UI-END
   }
