@@ -277,6 +277,40 @@ try {
     ok(bT.length === n && aT.length === 0, 'W2-6: off is mutual — I neither send nor see typing');
     await emit(B.s, 'dm:settings', { typing: true });
   }
+  // @@W2-7
+  {
+    const bMsg = events(B.s, 'dm:message'), bGone = events(B.s, 'dm:gone');
+    const bad = await emit(B.s, 'dm:disappear', { convoId: globalThis.DIRECT, sec: 60 });
+    ok(!bad.ok, 'W2-7: only off / 1h / 1d / 7d');
+    const on = await emit(B.s, 'dm:disappear', { convoId: globalThis.DIRECT, sec: 3600 });
+    ok(on.ok && await waitFor(() => bMsg.some((m) => m.kind === 'system' && /disappearing messages/.test(m.text))), 'W2-7: either side turns it on, with a visible notice', on.error);
+    const m = await emit(A.s, 'dm:send', { convoId: globalThis.DIRECT, text: `vanish ${R}` });
+    const op = await emit(A.s, 'dm:open', { convoId: globalThis.DIRECT });
+    ok(op.convo.disappearSec === 3600, 'W2-7: the conversation shows the timer');
+    const vm = op.messages.find((x) => x.text === `vanish ${R}`);
+    ok(vm && vm.expiresAt && Math.abs(vm.expiresAt - vm.ts - 3600e3) < 5, 'W2-7: new messages get an expiry');
+    const fd = new FormData(); fd.append('file', new Blob([await png('#aa3355', 80)], { type: 'image/png' }), 'gone.png');
+    const up = await A.j.form(`/api/dm/${globalThis.DIRECT}/files`, fd);
+    await emit(A.s, 'dm:send', { convoId: globalThis.DIRECT, fileId: up.file.id });
+    const fp = path.join(DATA, 'dm-files', up.file.id);
+    ok(fs.existsSync(fp), 'W2-7: (file stored on disk)');
+    const db = new DatabaseSync(path.join(DATA, 'camchat.db'));
+    db.prepare('UPDATE dm_messages SET expires_at = ? WHERE convo_id = ? AND expires_at IS NOT NULL').run(Date.now() - 1000, globalThis.DIRECT);
+    db.close();
+    ok(await waitFor(() => bGone.some((g) => g.convoId === globalThis.DIRECT && g.ids.includes(vm.id)), 5000), 'W2-7: the server deletes expired messages and tells the open conversation');
+    const op2 = await emit(B.s, 'dm:open', { convoId: globalThis.DIRECT });
+    ok(!op2.messages.some((x) => x.text === `vanish ${R}` || x.file?.id === up.file.id), 'W2-7: gone from the history');
+    ok(!fs.existsSync(fp), 'W2-7: the file is deleted from disk too');
+    const f404 = await fetch(BASE + up.file.url, { headers: { cookie: B.j.header() } });
+    ok(f404.status === 404, 'W2-7: and its link stops working');
+    const s2 = await emit(B.s, 'dm:search', { q: `vanish ${R}` });
+    ok(s2.results.length === 0, 'W2-7: and from search');
+    const offR = await emit(A.s, 'dm:disappear', { convoId: globalThis.DIRECT, sec: 0 });
+    const keep = await emit(A.s, 'dm:send', { convoId: globalThis.DIRECT, text: 'kept' });
+    const op3 = await emit(A.s, 'dm:open', { convoId: globalThis.DIRECT });
+    ok(offR.ok && !op3.messages.find((x) => x.text === 'kept')?.expiresAt, 'W2-7: turning it off stops new expiries');
+    void m; void keep;
+  }
   // @@API-END
   browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--lang=en-US'] });
   for (const width of [1366, 390]) {
@@ -382,6 +416,18 @@ try {
       await a.page.keyboard.press('Enter');
       ok(await b.page.waitForFunction(() => !document.querySelector('[data-testid="dm-typing"]'), { timeout: 8000 }).then(() => true, () => false), `${width}: W2-6: the line clears when the message lands`);
       globalThis.BPAGE = b;
+    }
+    {
+      const target = phone ? globalThis.GROUP2 : globalThis.GROUP2;
+      if (phone) await a.page.click('[data-action="dm-back"]').catch(() => {});
+      await sleep(200);
+      await a.page.click(`[data-convo="${target}"]`); await sleep(500);
+      await a.page.click('[data-action="dm-manage"]'); await sleep(200);
+      await a.page.select('[data-field="dm-disappear"]', width === 1366 ? '86400' : '604800');
+      ok(await a.page.waitForFunction(() => [...document.querySelectorAll('[data-kind="system"]')].some((e) => /disappearing messages/.test(e.textContent)), { timeout: 5000 }).then(() => true, () => false), `${width}: W2-7: set the timer from the options; the notice appears`);
+      await shot(a.page, `w7-disappear-${width}`);
+      await a.page.click('[data-action="dm-manage"]'); await sleep(150);
+      ok(/⏱/.test(await a.page.$eval('.dm-thread-title', (e) => e.textContent)), `${width}: W2-7: the header shows the timer`);
     }
     // @@UI-W
     await a.ctx.close();

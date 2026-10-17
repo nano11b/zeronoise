@@ -366,6 +366,14 @@ function Manage({ c, myId, toast, onClose }: { c: DmConvo; myId: number; toast: 
           )}
         </>
       )}
+      {c.state === 'active' && (
+        <label className="field dm-disappear">Disappearing messages
+          <select value={c.disappearSec} onChange={(e) => void act('dm:disappear', { sec: Number(e.target.value) })} data-field="dm-disappear">
+            {DM.disappearOptions.map((sec) => <option key={sec} value={sec}>{disappearLabel(sec)}</option>)}
+          </select>
+          <span className="muted small">Anyone here can change it. New messages and their files are deleted from the server after this time.</span>
+        </label>
+      )}
       <div className="dm-manage-actions">
         <button type="button" className="btn ghost small-btn" onClick={() => { onClose(); void act('dm:leave', {}, c.kind === 'group' ? 'You left the group' : 'Conversation closed'); }} data-action="dm-leave">{c.kind === 'group' ? 'Leave group' : 'Close conversation'}</button>
       </div>
