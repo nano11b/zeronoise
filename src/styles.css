@@ -2478,3 +2478,13 @@ html[data-ui-theme="dark-orange"] {
 .whisper-receipts { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 6px; }
 .whisper-window .whisper-receipts { flex-direction: row; justify-content: flex-start; align-self: flex-start; width: auto; white-space: nowrap; }
 .whisper-window .whisper-receipts input { width: 18px; height: 18px; margin: 0; flex: none; }
+/* batch H6 onboarding */
+.onboarding { max-width: 460px; width: calc(100vw - 24px); box-sizing: border-box; }
+.onboarding h3:focus { outline: none; }
+.onb-progress span { margin-right: 4px; opacity: .4; } .onb-progress span.on { opacity: 1; color: var(--accent); }
+.onb-interests { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.onb-interests .chip { min-height: 40px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.onb-interests .chip.on { border-color: var(--accent); background: rgba(var(--accent-rgb), .15); }
+.onb-rooms { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
+.onb-rooms li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.onb-actions { display: flex; align-items: center; gap: 6px; margin-top: 12px; } .onb-actions .spacer { flex: 1; }

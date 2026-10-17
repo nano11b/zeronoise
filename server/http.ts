@@ -31,6 +31,7 @@ import { backupHealth, backupPath, backupRunning, backupStatus, listBackups, run
 import * as recs from './recordings';
 import * as alerts from './alerts';
 import { getSetting, setSetting } from './settings';
+import { onboardingState, saveOnboarding } from './onboarding';
 import * as restore from './restoreCheck';
 import { live, type BotIdentity, type BotModAction, type BotModBody } from './live';
 import { consumeNativeHandoff, issueNativeHandoff } from './nativeHandoff';
@@ -267,6 +268,18 @@ export function createApp(roomList: () => unknown) {
   app.get('/api/rooms', (_req, res) => res.json({ rooms: roomList() }));
 
   /** Session probe + device id bootstrap (random id kept in localStorage AND an httpOnly cookie). */
+  // batch H6: onboarding state + interests
+  app.get('/api/me/onboarding', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return res.json({ ok: true, needed: false, interests: [] });
+    res.json({ ok: true, ...onboardingState(a.id) });
+  });
+  app.post('/api/me/onboarding', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    saveOnboarding(a.id, req.body?.interests, !!req.body?.done);
+    res.json({ ok: true, ...onboardingState(a.id) });
+  });
   app.get('/api/me', (req, res) => {
     const c = cookiesOf(req)[COOKIE_DID];
     const hdr = req.headers['x-device-id'];

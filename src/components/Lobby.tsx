@@ -1,3 +1,5 @@
+import { Onboarding } from './Onboarding';
+import { api } from '../api';
 import { ROOM_TEMPLATES, TEMPLATE_KEYS, type RoomTemplateKey } from '../../shared/templates';
 import { RoomAppeal } from './RoomAppeal';
 import { FormEvent, useEffect, useRef, useState } from 'react';
@@ -55,6 +57,14 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
   const [newCat, setNewCat] = useState('');
   const [newVoice, setNewVoice] = useState(false);
   const [newTemplate, setNewTemplate] = useState('');
+  // batch H6: first-visit onboarding for new accounts
+  const [onboard, setOnboard] = useState(false);
+  useEffect(() => {
+    if (!account) return;
+    let live = true;
+    api<{ needed: boolean }>('/api/me/onboarding').then((j) => { if (live && j.needed) setOnboard(true); }).catch(() => {});
+    return () => { live = false; };
+  }, [account?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [newTags, setNewTags] = useState('');
   const [busy, setBusy] = useState(false);
   const [askPw, setAskPw] = useState<RoomSummary | null>(null);
@@ -155,6 +165,8 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
   const catCounts = rooms.reduce<Record<string, number>>((acc, r) => { if (r.category) acc[r.category] = (acc[r.category] ?? 0) + 1; return acc; }, {});
 
   return (
+    <>
+    {onboard && roomsLoaded && <Onboarding rooms={rooms} onDone={() => setOnboard(false)} onJoin={(r) => void join(r.id)} />}
     <div className="lobby">
       <SiteBar
         me={me} account={account} onAccount={onAccount} toast={toast} signOut={signOut} openAdmin={openAdmin} wantAccount={wantAccount} showGuestActions
@@ -301,5 +313,6 @@ export function Lobby({ me, account, onJoined, toast, signOut, wantAccount, open
         <Lazy><AvSettings open onClose={() => setAvOpen(false)} onApply={async () => { await applyAudioOutputToDocument(); }} camOn={false} micOn={false} /></Lazy>
       )}
     </div>
+    </>
   );
 }

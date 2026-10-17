@@ -32,6 +32,7 @@ import { gifById } from './gifs';
 import { COOKIE_SID, checkSecret, createApp, deviceIdsOf, hashSecret, iceServers, isStaffRole } from './http';
 import * as recs from './recordings';
 import * as roles from './roles';
+import { onboardingSince } from './onboarding';
 import { ROOM_TEMPLATES, isTemplateKey, type RoomTemplate, type RoomTemplateKey } from '../shared/templates';
 import * as alerts from './alerts';
 import { initRestoreChecks } from './restoreCheck';
@@ -1012,6 +1013,7 @@ live.roomOwnerId = (roomId) => rooms.get(roomId)?.ownerUserId ?? null;
 setInterval(guardTimer('recordings', () => {
   for (const r of recs.idleRecs()) { recs.endRec(r.id, 'done', 'idle'); recEnded(r.room_id, r.started_nick, 'idle'); }
 }), 5_000).unref();
+try { onboardingSince(); } catch (e) { console.error('[onboarding]', (e as Error).message); }
 function sweepClips() {
   // batch G2: clips go when their recording's retention runs out; the chat line stays, saying so
   for (const c of recs.dueClips()) {
