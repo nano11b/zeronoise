@@ -760,6 +760,7 @@ function closePollNow(id: string, by?: string): repo2.PollRow | null {
       const info = pollInfo(fresh);
       const top = Math.max(0, ...info.options.map((o) => o.votes));
       const winners = top > 0 ? info.options.filter((o) => o.votes === top).map((o) => o.text) : [];
+      whEmit(room, 'poll', { action: 'close', poll: { id: info.id, question: info.question, options: info.options.map((o) => ({ text: o.text, votes: o.votes })) }, winners, by: by ?? null }, `poll closed: ${info.question}`);
       systemMsg(room, `📊 Poll closed${by ? ` by ${by}` : ''}: ${row.question}${winners.length ? ` - ${winners.join(' / ')} (${top} vote${top === 1 ? '' : 's'})` : ' - no votes'}`);
     }
     return fresh;
@@ -1126,6 +1127,7 @@ function dropMembership(id: string, s: Session, notice: string) {
   if (s.user) io.to(`room:${room.id}`).emit('chat:typing', { id, nick: s.user.nick, typing: false });
   io.to(`room:${room.id}`).emit('user:left', { id });
   if (s.user) systemMsg(room, `${s.user.nick} ${notice}`);
+  if (s.user && !id.startsWith('bot:')) whEmit(room, 'leave', { user: whUser(s), reason: notice }, `${s.user.nick} ${notice}`);
   if (radioOn.has(id)) radioRoomPing(room);
   if (s.account) lobbyLeft(room, s.account.id);
   maybeRemoveRoom(room);
@@ -1690,6 +1692,17 @@ live.isRoomCreator = (roomId, accountId, deviceIds) => {
   return !!s && isOwner(s, room);
 };
 live.soundsChanged = (roomId) => { publishSounds(roomId); };
+/** webhooks: queue an outgoing event (never for private calls) */
+function whEmit(room: Room | undefined, event: 'message' | 'join' | 'leave' | 'voice' | 'poll' | 'mod', data: Record<string, unknown>, summary = '') {
+  if (!room || room.isPrivate) return;
+  hooks.emitEvent({ id: room.id, name: room.name }, event, data, summary);
+}
+const whUser = (s: Session) => ({ nick: s.user?.nick ?? '', userId: s.account?.id ?? null, role: s.user?.role ?? 'guest' });
+repo.onLogAction((e) => {
+  if (!e.roomId || e.action.startsWith('webhook')) return;
+  whEmit(rooms.get(e.roomId), 'mod', { action: e.action, actor: e.actor, target: e.target, details: e.details }, `${e.actor}: ${e.action}${e.target ? ` ${e.target}` : ''}`);
+});
+hooks.onAutoDisable((h, reason) => repo.logAction('system', null, 'webhook-auto-disable', h.name, h.room_id, reason));
 live.webhookRoom = (roomId) => { const r = rooms.get(roomId); return r ? { id: r.id, name: r.name, isPrivate: r.isPrivate } : null; };
 live.webhookCanManage = (roomId, accountId, role) => {
   const r = rooms.get(roomId);
@@ -2694,6 +2707,7 @@ function onConnection(socket: AppSocket) {
       s.roomId = room.id;
       socket.to(`room:${room.id}`).emit('user:joined', s.user);
       systemMsg(room, `${s.user.nick} joined`);
+      whEmit(room, 'join', { user: whUser(s) }, `${s.user.nick} joined`);
       ack({ ok: true, room: roomState(room, s) });
       if (room.stage.on) emitStage(room);
       broadcastRooms();
@@ -3240,7 +3254,10 @@ function onConnection(socket: AppSocket) {
       socket.emit('chat:message', { ...msg, burn: { ttlSec: burnTtl, mine: true } });
       socket.to(`room:${room.id}`).emit('chat:message', { ...msg, text: '', burn: { ttlSec: burnTtl } });
       scheduleBurnCheck(msg.id, msg.ts + BURN_HARD);
-    } else io.to(`room:${room.id}`).emit('chat:message', msg);
+    } else {
+      io.to(`room:${room.id}`).emit('chat:message', msg);
+      whEmit(room, 'message', { id: msg.id, ts: msg.ts, text, parentId: parentId ?? null, user: whUser(s) }, `${s.user.nick}: ${text.slice(0, 80)}`);
+    }
     statMsg(room, s);
     if (!burnTtl) maybeXp(socket.id, s, room, text);
     {
@@ -3701,8 +3718,10 @@ function onConnection(socket: AppSocket) {
         if (broadcasters >= LIMITS.maxBroadcastersPerRoom) return ack({ ok: false, error: `At most ${LIMITS.maxBroadcastersPerRoom} people can broadcast at once.` });
       }
     }
+    const wasLive = !!(s.user.cam || s.user.mic || s.user.screen);
     s.user = { ...s.user, cam: wantCam && !wantScreen, mic: wantMic, screen: wantScreen };
     io.to(`room:${room.id}`).emit('user:updated', s.user);
+    if (!wasLive && (s.user.cam || s.user.mic || s.user.screen)) whEmit(room, 'voice', { user: whUser(s), cam: s.user.cam, mic: s.user.mic, screen: s.user.screen }, `${s.user.nick} started ${s.user.screen ? 'screen share' : s.user.cam ? 'camera' : 'voice'}`);
     airTrack(socket.id, s);
     ack({ ok: true });
     broadcastRooms();
@@ -4260,6 +4279,7 @@ function onConnection(socket: AppSocket) {
     s.roomId = room.id;
     socket.to(`room:${room.id}`).emit('user:joined', s.user);
     const state = roomState(room, s);
+    whEmit(room, 'join', { user: whUser(s) }, `${s.user.nick} joined`);
     ack({ ok: true, room: state });
   });
 
@@ -4709,6 +4729,7 @@ function onConnection(socket: AppSocket) {
       key: pollVoterKeys(s)[0] ?? repo.userKey(identOf(s)), ip: s.ip, device: s.deviceIds[0] ?? null,
     }, v.value.question, v.value.options, v.value.durationMin ?? null, parentId);
     room.lastChatAt.set(socket.id, Date.now());
+    { const pi = pollInfo(stored); whEmit(room, 'poll', { action: 'create', poll: { id: pi.id, question: pi.question, options: pi.options.map((o) => o.text) }, user: whUser(s) }, `poll: ${pi.question}`); }
     ack({ ok: true, poll: pollInfo(stored, s) });
   });
   socket.on('poll:vote', (p, ackRaw) => {

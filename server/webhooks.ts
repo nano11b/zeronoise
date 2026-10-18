@@ -12,7 +12,8 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { q, tx } from './db';
 import { DATA_DIR } from './env';
-import { checkOutboundUrl, isTestAllowed, safeFetch, FetchError } from './safeFetch';
+import { isIP } from 'node:net';
+import { checkOutboundUrl, isBlockedAddress, isTestAllowed, safeFetch, FetchError } from './safeFetch';
 import * as secretbox from './secretbox';
 import { WEBHOOK, WEBHOOK_EVENTS, type WebhookEmbed, type WebhookEvent, type WebhookInfo, type WebhookLogEntry } from '../shared/webhooks';
 
@@ -60,6 +61,7 @@ export function cleanTargetUrl(raw: unknown): { url: string } | { error: string 
   if (u.protocol !== 'https:' && !isTestAllowed(u)) return { error: 'Outgoing webhooks need an https:// URL' };
   const host = u.hostname.replace(/^\[|\]$/g, '');
   if (/^(localhost|.*\.localhost|.*\.local|.*\.internal)$/i.test(host) && !isTestAllowed(u)) return { error: 'URL not allowed: private host' };
+  if (isIP(host) && isBlockedAddress(host) && !isTestAllowed(u)) return { error: 'URL not allowed: private address' };
   return { url: u.toString() };
 }
 
@@ -303,7 +305,7 @@ async function pump(hookId: string) {
       if (ok || job.attempt > WEBHOOK.retryDelays.length) {
         list.shift();
         if (!ok) finalFailure(h);
-        else if (h.fail_count) q('UPDATE room_webhooks SET fail_count = 0 WHERE id = ?').run(h.id);
+        else q('UPDATE room_webhooks SET fail_count = 0 WHERE id = ?').run(h.id);
       } else {
         job.dueAt = now() + WEBHOOK.retryDelays[job.attempt - 1] * scale;
         job.attempt++;
@@ -312,9 +314,11 @@ async function pump(hookId: string) {
   } finally { busy.delete(hookId); }
 }
 function finalFailure(h: HookRow) {
-  const fails = h.fail_count + 1;
-  q('UPDATE room_webhooks SET fail_count = ? WHERE id = ?').run(fails, h.id);
-  if (fails >= WEBHOOK.maxFails && h.enabled) {
+  q('UPDATE room_webhooks SET fail_count = fail_count + 1 WHERE id = ?').run(h.id);
+  const cur = hookById(h.id);
+  if (!cur) return;
+  const fails = cur.fail_count;
+  if (fails >= WEBHOOK.maxFails && cur.enabled && !cur.revoked_at) {
     const reason = `Turned off after ${fails} failed deliveries in a row`;
     setDisabled(h.id, reason);
     queues.delete(h.id);

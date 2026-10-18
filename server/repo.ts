@@ -504,9 +504,14 @@ export function setReportStatus(id: number, status: 'resolved' | 'dismissed' | '
 }
 
 // ---------------- moderation log ----------------
+type LogListener = (e: { actor: string; action: string; target: string | null; roomId: string | null; details: string | null }) => void;
+let logListener: LogListener | null = null;
+/** webhooks: the room 'mod' event follows the moderation log */
+export function onLogAction(fn: LogListener) { logListener = fn; }
 export function logAction(actor: string, actorUserId: number | null, action: string, target: string | null, roomId: string | null, details?: string | null) {
   q('INSERT INTO mod_log (ts, actor, actor_user_id, action, target, room_id, details) VALUES (?,?,?,?,?,?,?)')
     .run(now(), actor, actorUserId, action, target, roomId, details ?? null);
+  if (logListener) try { logListener({ actor, action, target, roomId, details: details ?? null }); } catch { /* never break the log */ }
 }
 export function listLog(limit = 200, beforeId: number | null = null): AdminLogEntry[] {
   return ((beforeId ? q('SELECT id, ts, actor, action, target, room_id, details FROM mod_log WHERE id < ? ORDER BY id DESC LIMIT ?').all(beforeId, limit)

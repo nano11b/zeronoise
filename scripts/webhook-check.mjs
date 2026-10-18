@@ -173,6 +173,79 @@ try {
     ok(h2?.webhook?.embeds?.length === 1 && h2.from === 'FiveM Server' && h2.fromId.startsWith('hook:'), 'IN: webhook lines keep name, badge and embeds in history');
     void hist;
   }
+  // @@OUTGOING
+  {
+    const bad1 = await O.j.req(`/api/rooms/${ROOM}/webhooks`, { kind: 'outgoing', name: 'o', url: 'http://example.com/x', events: ['message'] });
+    ok(!bad1.ok && /https/.test(bad1.error), 'OUT: plain http refused');
+    for (const u of ['https://127.0.0.1/x', 'https://10.0.0.5/x', 'https://169.254.169.254/latest', 'https://[::1]/x', 'https://localhost/x', 'https://user:pw@example.com/']) {
+      const r = await O.j.req(`/api/rooms/${ROOM}/webhooks`, { kind: 'outgoing', name: 'o', url: u, events: ['message'] });
+      ok(!r.ok, `OUT: SSRF target refused: ${u}`);
+    }
+    const c = await O.j.req(`/api/rooms/${ROOM}/webhooks`, { kind: 'outgoing', name: 'Relay', url: `${RECV}/hook`, events: ['message', 'join', 'leave', 'voice', 'poll', 'mod'] });
+    ok(c.ok && /^whsec_/.test(c.secret || ''), 'OUT: create returns the signing secret once', c.error);
+    const SECRET = c.secret, OID = c.webhook.id; globalThis.OUT_ID = OID;
+    recvHits.length = 0;
+    await emit(M.s, 'chat:send', { text: `outgoing ${R}` });
+    ok(await waitFor(() => recvHits.some((h) => h.headers['x-zn-event'] === 'message')), 'OUT: message event delivered');
+    const h = recvHits.find((x) => x.headers['x-zn-event'] === 'message');
+    const expect = 'sha256=' + crypto.createHmac('sha256', SECRET).update(`${h.headers['x-zn-timestamp']}.${h.body}`).digest('hex');
+    ok(h.headers['x-zn-signature'] === expect, 'OUT: HMAC-SHA256 signature (timestamp.body) verifies');
+    const b = JSON.parse(h.body);
+    ok(b.event === 'message' && b.room.id === ROOM && b.data.text === `outgoing ${R}` && b.data.user.nick === M.nick && h.headers['x-zn-delivery'] === b.id, 'OUT: body has event, room, webhook, data');
+    ok(h.headers['x-zn-webhook-id'] === OID, 'OUT: x-zn-webhook-id header');
+    const wrong = 'sha256=' + crypto.createHmac('sha256', 'nope').update(`${h.headers['x-zn-timestamp']}.${h.body}`).digest('hex');
+    ok(wrong !== h.headers['x-zn-signature'], 'OUT: a wrong secret does not verify');
+    recvHits.length = 0;
+    const Y = await nodeUser(`WhY${R}`); sockets.push(Y.s);
+    await emit(Y.s, 'room:join', { roomId: ROOM });
+    ok(await waitFor(() => recvHits.some((x) => x.headers['x-zn-event'] === 'join' && JSON.parse(x.body).data.user.nick === Y.nick)), 'OUT: join event');
+    await emit(Y.s, 'media:state', { mic: true });
+    ok(await waitFor(() => recvHits.some((x) => x.headers['x-zn-event'] === 'voice')), 'OUT: voice start event');
+    await emit(Y.s, 'room:leave', {});
+    ok(await waitFor(() => recvHits.some((x) => x.headers['x-zn-event'] === 'leave')), 'OUT: leave event');
+    const pc = await emit(O.s, 'poll:create', { question: `Pizza ${R}?`, options: ['yes', 'no'] });
+    ok(pc.ok && await waitFor(() => recvHits.some((x) => x.headers['x-zn-event'] === 'poll' && JSON.parse(x.body).data.action === 'create')), 'OUT: poll create event', pc.error);
+    await emit(O.s, 'poll:close', { pollId: pc.poll?.id });
+    ok(await waitFor(() => recvHits.some((x) => x.headers['x-zn-event'] === 'poll' && JSON.parse(x.body).data.action === 'close')), 'OUT: poll close event');
+    await emit(Y.s, 'room:join', { roomId: ROOM });
+    await emit(O.s, 'room:kick', { userId: Y.s.id });
+    ok(await waitFor(() => recvHits.some((x) => x.headers['x-zn-event'] === 'mod' && JSON.parse(x.body).data.action === 'kick')), 'OUT: mod action event (kick)');
+    // webhook lines themselves are not re-sent as 'message' (no loops)
+    recvHits.length = 0;
+    await post(IN_URL, { content: `loop ${R}` }); await sleep(800);
+    ok(!recvHits.some((x) => x.body.includes(`loop ${R}`)), 'OUT: incoming webhook lines are not relayed out (no loops)');
+    // only subscribed events
+    const c2 = await O.j.req(`/api/rooms/${ROOM}/webhooks`, { kind: 'outgoing', name: 'Joins only', url: `${RECV}/joins`, events: ['join'] });
+    recvHits.length = 0;
+    await emit(M.s, 'chat:send', { text: 'not for joins' }); await sleep(700);
+    ok(c2.ok && !recvHits.some((x) => x.path === '/joins'), 'OUT: hooks only get the events they chose');
+    // test button
+    recvHits.length = 0;
+    const tb = await O.j.req(`/api/rooms/${ROOM}/webhooks/${OID}/test`, {});
+    ok(tb.ok && await waitFor(() => recvHits.some((x) => x.headers['x-zn-event'] === 'test')), 'OUT: test button sends a signed test event');
+    // retries then success
+    recvMode = 'fail'; recvHits.length = 0;
+    await emit(M.s, 'chat:send', { text: `retry ${R}` });
+    await waitFor(() => recvHits.filter((x) => x.body.includes(`retry ${R}`)).length >= 2, 3000);
+    recvMode = 'ok';
+    ok(await waitFor(() => recvHits.filter((x) => x.body.includes(`retry ${R}`)).length >= 3, 5000), `OUT: failed deliveries are retried with backoff (${recvHits.length} tries)`);
+    const lg = await O.j.req(`/api/rooms/${ROOM}/webhooks/${OID}/log`);
+    ok(lg.ok && lg.log.length <= 20 && lg.log.some((e) => e.status === 500) && lg.log.some((e) => e.ok), 'OUT: delivery log shows failures and successes (max 20)');
+    // timeout
+    recvMode = 'slow';
+    await O.j.req(`/api/rooms/${ROOM}/webhooks/${OID}/test`, {});
+    await sleep(6500);
+    const lg2 = await O.j.req(`/api/rooms/${ROOM}/webhooks/${OID}/log`);
+    ok(lg2.log.some((e) => /time/i.test(e.error || '')), 'OUT: slow receivers time out (5 s)');
+    // auto-disable after repeated failures
+    recvMode = 'fail';
+    for (let i = 0; i < 11; i++) await O.j.req(`/api/rooms/${ROOM}/webhooks/${c2.webhook.id}/test`, {});
+    const dis = await (async () => { for (let i = 0; i < 300; i++) { const l = await O.j.req(`/api/rooms/${ROOM}/webhooks`); const w = l.webhooks.find((x) => x.id === c2.webhook.id); if (!w.enabled) return w; await sleep(100); } return null; })();
+    ok(dis && /fail/i.test(dis.disabledReason || ''), 'OUT: auto-disabled after 10 failed deliveries');
+    recvMode = 'ok';
+    const re = await O.j.req(`/api/rooms/${ROOM}/webhooks/${c2.webhook.id}`, { enabled: true }, 'PATCH');
+    ok(re.ok, 'OUT: can be enabled again', re.error);
+  }
   // @@API-END
   // @@UI
 } catch (e) {
