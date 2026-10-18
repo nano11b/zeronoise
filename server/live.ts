@@ -77,6 +77,11 @@ export const live = {
   buildId: '',
   /** Package sha256 + commit (see release.ts). Set once at process start. */
   release: { packageSha256: null, commit: null, branch: null, manifestSha256: null, releasedAt: null, installedAt: null } as ReleaseInfo,
+  /** Room webhooks: post an incoming webhook line into a room. */
+  webhookPost: (_roomId: string, _hook: { id: string; name: string }, _p: { text: string; avatar: string | null; embeds: import('../shared/webhooks').WebhookEmbed[]; fallback?: boolean }): { ok: true; id: string; ts: number } | { ok: false; status: number; error: string } => ({ ok: false, status: 503, error: 'Not ready' }),
+  /** Room webhooks: may this account manage the room's hooks? (owner, site staff, or a custom role with "webhooks") */
+  webhookCanManage: (_roomId: string, _accountId: number, _role: string): boolean => false,
+  webhookRoom: (_roomId: string): null | { id: string; name: string; isPrivate: boolean } => null,
   /** Bearer API: put an allowed bot in a room. Cam, mic, and screen stay off. */
   botJoin: (_roomId: string, _bot: BotIdentity): BotResult => ({ ok: false, status: 503, error: 'Not ready' }),
   /** Bearer API: post a chat line as the bot. Rate-limited by the socket layer. */

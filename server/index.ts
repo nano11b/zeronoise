@@ -32,6 +32,7 @@ import { gifById } from './gifs';
 import { COOKIE_SID, checkSecret, createApp, deviceIdsOf, hashSecret, iceServers, isStaffRole } from './http';
 import * as recs from './recordings';
 import * as roles from './roles';
+import * as hooks from './webhooks';
 import { onboardingSince } from './onboarding';
 import { ROOM_TEMPLATES, isTemplateKey, type RoomTemplate, type RoomTemplateKey } from '../shared/templates';
 import * as alerts from './alerts';
@@ -533,11 +534,11 @@ function chatFromRow(m: repo.MsgRow, reactions?: { emoji: string; count: number;
   };
 }
 /** batch H7: when a whole page of lines is built at once, its users/previews/polls/announcements are fetched in a few queries */
-let pagePrefetch: { users: Map<number, repo.UserRow>; ann: Map<string, string>; pv: ReturnType<typeof repo2.previewsForMessages>; polls: ReturnType<typeof repo2.pollsForMessages> } | null = null;
+let pagePrefetch: { wh?: Map<string, hooks.WebhookLine>; users: Map<number, repo.UserRow>; ann: Map<string, string>; pv: ReturnType<typeof repo2.previewsForMessages>; polls: ReturnType<typeof repo2.pollsForMessages> } | null = null;
 function withPrefetch<T>(rows: repo.MsgRow[], fn: () => T): T {
   const ids = rows.map((m) => m.id);
   try {
-    pagePrefetch = { users: repo.usersByIds(rows.map((m) => m.user_id).filter((x): x is number => x != null)), ann: repo3.announceForMany(ids), pv: repo2.previewsForMessages(ids), polls: repo2.pollsForMessages(ids) };
+    pagePrefetch = { wh: hooks.linesFor(ids), users: repo.usersByIds(rows.map((m) => m.user_id).filter((x): x is number => x != null)), ann: repo3.announceForMany(ids), pv: repo2.previewsForMessages(ids), polls: repo2.pollsForMessages(ids) };
   } catch (err) { console.error('[prefetch]', (err as Error).message); pagePrefetch = null; }
   try { return fn(); } finally { pagePrefetch = null; }
 }
@@ -554,9 +555,11 @@ function chatFromRowRaw(m: repo.MsgRow, reactions?: { emoji: string; count: numb
       burn: { ttlSec: m.burn_ttl, ...(burned ? { burned: true } : {}), ...(mine ? { mine: true } : {}) },
     };
   }
-  const mentions = repo.mentionIds(m.text);
+  const wh = m.user_id == null && m.bot_id == null ? (pagePrefetch?.wh ? pagePrefetch.wh.get(m.id) ?? null : hooks.lineFor(m.id)) : null;
+  const mentions = wh ? [] : repo.mentionIds(m.text);
   return {
-    kind: 'chat', id: m.id, ts: m.ts, fromId: '', from: m.nick, role: (m.role as Role) ?? undefined, text: m.text,
+    ...(wh ? { webhook: wh } : {}),
+    kind: 'chat', id: m.id, ts: m.ts, fromId: wh ? `hook:${wh.hookId}` : '', from: m.nick, role: (m.role as Role) ?? undefined, text: m.text,
     accountId: m.user_id ?? undefined,
     chatColor: u?.chat_color ?? null,
     chatEffect: publicChatEffect(u?.chat_effect),
@@ -1687,6 +1690,30 @@ live.isRoomCreator = (roomId, accountId, deviceIds) => {
   return !!s && isOwner(s, room);
 };
 live.soundsChanged = (roomId) => { publishSounds(roomId); };
+live.webhookRoom = (roomId) => { const r = rooms.get(roomId); return r ? { id: r.id, name: r.name, isPrivate: r.isPrivate } : null; };
+live.webhookCanManage = (roomId, accountId, role) => {
+  const r = rooms.get(roomId);
+  if (!r || r.isPrivate) return false;
+  return role === 'admin' || role === 'moderator' || r.ownerUserId === accountId || roles.hasPerm(r.id, accountId, 'webhooks');
+};
+const webhookPostIds = new Set<string>();
+live.webhookPost = (roomId, hook, p) => {
+  const room = rooms.get(roomId);
+  if (!room || room.isPrivate) return { ok: false, status: 404, error: 'Unknown Channel' };
+  const nick = hook.name;
+  const msg: ChatMessage = {
+    kind: 'chat', id: randomUUID(), ts: Date.now(), fromId: `hook:${hook.id}`, from: nick, role: 'user', text: maskWords(p.text), mentions: [],
+    webhook: { hookId: hook.id, avatar: p.avatar ? `/api/webhook-avatars/${p.avatar}` : null, ...(p.embeds.length ? { embeds: p.embeds } : {}), ...(p.fallback ? { fallback: true } : {}) },
+  };
+  webhookPostIds.add(msg.id);
+  try {
+    hooks.recordMessage(msg.id, hook.id, p.avatar, p.embeds, !!p.fallback);
+    repo.insertMessage({ id: msg.id, room_id: room.id, ts: msg.ts, user_id: null, nick, role: 'user', text: msg.text, ip: null, device_id: null });
+  } finally { webhookPostIds.delete(msg.id); }
+  io.to(`room:${room.id}`).emit('chat:message', msg);
+  if (!room.isPrivate) io.emit('room:activity', { roomId: room.id, mentions: [] });
+  return { ok: true, id: msg.id, ts: msg.ts };
+};
 live.roomThumbInfo = (roomId) => {
   const room = rooms.get(roomId);
   return room ? { ownerUserId: room.ownerUserId, isPrivate: room.isPrivate, thumbId: room.thumbId } : null;

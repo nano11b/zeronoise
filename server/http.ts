@@ -77,6 +77,7 @@ import { levelProgress, XP_COOLDOWN_MS, XP_DAILY_CAP, XP_PER_MESSAGE } from '../
 import { BANNER_ID_RE, bannerPath, bannerUrl, newBannerId, processBanner, retireBanner, writeBanner } from './banners';
 import { BANNER_MAX_BYTES, checkProfileLinks, cleanNowPlaying, NOW_PLAYING_MAX } from '../shared/profile2';
 import { INVITE_CODE_RE, INVITE_EXPIRY, INVITE_MAX_USES, INVITE_PATH_RE, INVITES_PER_ROOM, type InviteExpiry, type InvitePublic } from '../shared/invites';
+import { registerIncoming, registerManage, registerAdmin as registerWebhookAdmin } from './webhookHttp';
 import { cardVersion, injectMeta, roomCard, roomMeta, siteMeta, variantFor, type CardRoom, type Meta } from './og';
 
 /** Cookie prefix stays camchat so existing sessions and device cookies keep working. */
@@ -162,6 +163,9 @@ export function createApp(roomList: () => unknown) {
     res.setHeader('Content-Security-Policy', "frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv; frame-ancestors 'none'");
     next();
   });
+  // room webhooks: the public incoming URL takes JSON / form / multipart from other sites (no CSRF header, no session)
+  const whDeps = { fail, reqAccount, publicBase: (req: Request) => (PUBLIC_URL || `${isHttps(req) ? 'https' : 'http'}://${req.headers.host}`).replace(/\/+$/, '') };
+  registerIncoming(app, whDeps);
   app.use('/api', express.json({ limit: '16kb' }));
   // Bot bearer routes are not the website session. They authenticate with Authorization and must work off-site (no CSRF cookie).
   const botBearerWrite = (req: Request) => req.method === 'POST' && (
@@ -182,6 +186,7 @@ export function createApp(roomList: () => unknown) {
     next();
   });
   app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
+  registerManage(app, whDeps);
 
   const authLimiter = new KeyedLimiter(LIMITS.authAttemptsPerIp, 10 * 60_000);
   /** Confirmation and reset messages: 3 per address and 10 per IP each hour. */
@@ -2216,6 +2221,7 @@ export function createApp(roomList: () => unknown) {
     res.on('close', () => stream.destroy());
     stream.pipe(res);
   });
+  registerWebhookAdmin(admin, whDeps, actor);
   app.use('/api/admin', admin);
 
   // ---------- friends (REST mirror of socket helpers for initial load) ----------

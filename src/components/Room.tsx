@@ -37,6 +37,7 @@ import { fxShowEnabled, fxSoundEnabled, playFxSound, prefersReducedMotion, runFx
 import { fxById, fxSlashCommand, isFxId, type FxId } from '../../shared/fx';
 import type { BurnTtl } from '../../shared/burn';
 import { ChatText } from './ChatText';
+import { WebhookEmbeds } from './WebhookEmbeds';
 import { EmojiPicker } from './EmojiPicker';
 import { GifPicker } from './GifPicker';
 import { REACTION_EMOJIS } from '../../shared/reactions';
@@ -2139,7 +2140,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                   </div>
                 ) : (
                   <div key={m.id} className={`msg line ${m.fromId === me.id || (!m.fromId && m.from === me.nick) ? 'mine' : ''} ${me.accountId && m.mentions?.includes(me.accountId) ? 'mentioned' : ''}${jumpHit === m.id ? ' jump-hit' : ''}`} data-msg={m.id}>
-                    <UserAvatar nick={m.from} accountId={m.accountId} chatColor={m.chatColor} hasAvatar={m.hasAvatar} size={32} />
+                    {m.webhook ? (m.webhook.avatar ? <img className="avatar wh-avatar" src={m.webhook.avatar} alt="" width={32} height={32} loading="lazy" /> : <span className="avatar wh-avatar wh-avatar-ph" aria-hidden="true" style={{ width: 32, height: 32 }}>🔗</span>) : <UserAvatar nick={m.from} accountId={m.accountId} chatColor={m.chatColor} hasAvatar={m.hasAvatar} size={32} />}
                     <div className="msg-body">
                     <span className="msg-meta">
                     {m.from.toLowerCase() === me.nick.toLowerCase() ? (
@@ -2157,13 +2158,14 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                         )}
                       </span>
                     )}
+                    {m.webhook && <> <span className="tag wh-tag" title="Posted by a room webhook" data-testid="wh-tag">webhook</span></>}
                     {m.role && m.role !== 'user' && m.role !== 'guest' && <> <RoleTag role={m.role} /></>}
                     {m.accountId != null && modIds.has(m.accountId) && m.from !== initial.ownerNick && <> <span className="tag room-mod" title="Room moderator">mod</span></>}
                     <span className="ts">{fmtTime(m.ts)}</span>
                     </span>
                     {m.hidden && !canRoomManage ? <span className="msg-hidden" data-hidden="1">Hidden pending review</span> : <>
                     {m.hidden && <span className="tag tag-warn msg-hidden-tag" data-hidden="1" title="Auto-hidden after several reports; others see a collapsed line">Hidden pending review</span>}
-                    {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <>{m.text.startsWith('🎬') && <span className="small muted clip-label" data-clip>🎬 Clip from the room recording</span>}<VoicePlayer voice={m.voice} /></> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <><ChatText text={m.text} className="text" />{translations[m.id] && <TranslationLine t={translations[m.id]} onHide={() => setTranslations((p) => { const n = { ...p }; delete n[m.id]; return n; })} />}</>}
+                    {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <>{m.text.startsWith('🎬') && <span className="small muted clip-label" data-clip>🎬 Clip from the room recording</span>}<VoicePlayer voice={m.voice} /></> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <>{!m.webhook?.fallback && <ChatText text={m.text} className="text" />}{m.webhook?.embeds?.length ? <WebhookEmbeds embeds={m.webhook.embeds} /> : null}{translations[m.id] && <TranslationLine t={translations[m.id]} onHide={() => setTranslations((p) => { const n = { ...p }; delete n[m.id]; return n; })} />}</>}
                     </>}
                     {m.editedAt ? editedMark(m) : null}
                     {m.preview && account?.linkPreviews !== false && !m.burn && !(m.hidden && !canRoomManage) && <LinkPreviewCard messageId={m.id} preview={m.preview} canRemove={mineMsg(m)} onRemove={() => removePreview(m)} />}

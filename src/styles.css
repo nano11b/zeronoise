@@ -2595,3 +2595,15 @@ html[data-ui-theme="dark-orange"] {
 .dm-members li .btn + .btn, .dm-block-after { margin-left: 0 !important; }
 .dm-report { padding: 10px; border-bottom: 1px solid var(--border); display: grid; gap: 6px; margin: 0; background: rgba(127,127,127,.06); }
 .dm-consent { align-items: flex-start; line-height: 1.35; }
+
+/* room webhooks */
+.wh-avatar { border-radius: 50%; object-fit: cover; flex: none; }
+.wh-avatar-ph { display: inline-flex; align-items: center; justify-content: center; background: rgba(127,127,127,.2); font-size: 15px; }
+.wh-tag { background: rgba(88,101,242,.22); color: var(--text); text-transform: lowercase; }
+.wh-embeds { display: grid; gap: 6px; margin-top: 4px; max-width: 520px; }
+.wh-embed { border-left: 4px solid rgba(127,127,127,.5); background: rgba(127,127,127,.1); border-radius: 6px; padding: 8px 10px; display: grid; gap: 4px; overflow-wrap: anywhere; min-width: 0; }
+.wh-embed-title { font-weight: 600; }
+.wh-embed-fields { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.wh-embed-field { flex: 1 1 100%; min-width: 0; }
+.wh-embed-field.inline { flex: 1 1 140px; }
+.wh-embed-fname { font-weight: 600; }

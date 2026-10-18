@@ -947,6 +947,50 @@ const MIGRATIONS: string[] = [
   ALTER TABLE users ADD COLUMN dm_policy TEXT NOT NULL DEFAULT 'requests';
   ALTER TABLE users ADD COLUMN dm_typing INTEGER NOT NULL DEFAULT 1
   `,
+  // 47: room webhooks - incoming (secret URL posts into the room) and outgoing (signed event deliveries)
+  `
+  CREATE TABLE IF NOT EXISTS room_webhooks (
+    id TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    avatar TEXT,
+    token_hash TEXT,
+    url TEXT,
+    secret TEXT,
+    events TEXT NOT NULL DEFAULT '[]',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    fail_count INTEGER NOT NULL DEFAULT 0,
+    disabled_reason TEXT,
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_used_at INTEGER,
+    revoked_at INTEGER,
+    revoked_by TEXT
+  );
+  CREATE INDEX IF NOT EXISTS room_webhooks_room ON room_webhooks(room_id);
+  CREATE TABLE IF NOT EXISTS webhook_deliveries (
+    id TEXT PRIMARY KEY,
+    hook_id TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    direction TEXT NOT NULL,
+    event TEXT,
+    status INTEGER,
+    ok INTEGER NOT NULL DEFAULT 0,
+    attempt INTEGER NOT NULL DEFAULT 1,
+    duration_ms INTEGER,
+    error TEXT,
+    summary TEXT
+  );
+  CREATE INDEX IF NOT EXISTS webhook_deliveries_hook ON webhook_deliveries(hook_id, ts);
+  CREATE TABLE IF NOT EXISTS webhook_messages (
+    message_id TEXT PRIMARY KEY,
+    hook_id TEXT NOT NULL,
+    avatar TEXT,
+    embeds TEXT
+  )
+  `,
 ];
 
 /**

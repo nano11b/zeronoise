@@ -14,6 +14,12 @@ import net from 'net';
 /** Test-only escape hatch: exact "host:port" pairs allowed even though they resolve to loopback. Never set in production. */
 const TEST_ALLOW = new Set((process.env.OUTBOUND_TEST_ALLOW || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean));
 
+/** True for an exact test-allowed host:port (tests only; empty in production). */
+export function isTestAllowed(u: URL): boolean {
+  const port = u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80;
+  return TEST_ALLOW.has(`${u.hostname.replace(/^\[|\]$/g, '').toLowerCase()}:${port}`);
+}
+
 function v4ToInt(ip: string): number {
   return ip.split('.').reduce((a, o) => (a << 8) + Number(o), 0) >>> 0;
 }

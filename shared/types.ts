@@ -218,6 +218,8 @@ export type ChatMessage =
       announce?: { by: string };
       /** auto-hidden pending review: reviewers still get the text, everyone else an empty line */
       hidden?: boolean;
+      /** room webhooks: posted by an incoming webhook (name is `from`); shown with a webhook badge */
+      webhook?: { hookId: string; avatar: string | null; embeds?: import('./webhooks').WebhookEmbed[]; /** text is only a plain fallback of the embeds */ fallback?: boolean };
     }
   | { kind: 'system'; id: string; ts: number; text: string };
 
@@ -733,5 +735,5 @@ export interface RoomAnalytics {
 }
 
 /** Batch G4: custom room roles */
-export type RoomRolePerm = 'messages' | 'pin' | 'mute' | 'kick' | 'floor';
+export type RoomRolePerm = 'messages' | 'pin' | 'mute' | 'kick' | 'floor' | 'webhooks';
 export interface RoomRoleInfo { id: number; name: string; color: string | null; perms: RoomRolePerm[] }
