@@ -1051,6 +1051,14 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS room_game_scores_board ON room_game_scores(room_id, game, points DESC);
   `,
+  // 53 batch MC2: recurring room events. Only the next occurrence exists; when it starts the following one is created.
+  `
+  ALTER TABLE room_events ADD COLUMN recur TEXT;
+  ALTER TABLE room_events ADD COLUMN recur_until INTEGER;
+  ALTER TABLE room_events ADD COLUMN recur_tz TEXT;
+  ALTER TABLE room_events ADD COLUMN series_id TEXT;
+  ALTER TABLE room_events ADD COLUMN spawned_next INTEGER;
+  `,
 ];
 
 /**

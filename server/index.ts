@@ -62,7 +62,7 @@ import { roomEntryError } from './gate';
 import { crashTestHooks, guardSocketHandlers, guardTimer, installProcessGuards, guardHooks } from './guard';
 import { initBackups } from './backup';
 import * as repo2 from './repo2';
-import { EVENT_KEEP_PAST_MS, EVENT_MAX_UPCOMING, EVENT_REMIND_LEAD_MS, EVENT_SOON_MS, isRsvp, reminderStages, validateEvent } from '../shared/events';
+import { EVENT_KEEP_PAST_MS, EVENT_MAX_UPCOMING, EVENT_REMIND_LEAD_MS, EVENT_SOON_MS, isRecur, isRsvp, nextOccurrence, reminderStages, validateEvent, validateRecur } from '../shared/events';
 import { pollFallbackText, validatePoll } from '../shared/polls';
 import { firstPreviewUrl, getPreview, previewInfo } from './linkPreview';
 import { pushToUser } from './push';
@@ -711,6 +711,7 @@ function eventInfos(rows: repo2.EventRow[], viewerId: number | null): RoomEventI
       going: going.length, maybe: mine.filter((x) => x.status === 'maybe').length, notGoing: mine.filter((x) => x.status === 'no').length,
       goingUsers: going.slice(0, 8).map((x) => ({ accountId: x.user_id, nick: x.username, hasAvatar: !!x.has_avatar, chatColor: x.chat_color ?? null })),
       ...(me ? { myRsvp: me.status } : {}),
+      ...(isRecur(r.recur) ? { recur: r.recur, ...(r.recur_until ? { recurUntil: r.recur_until } : {}) } : {}),
     };
   });
 }
@@ -728,13 +729,29 @@ function sendReminder(row: repo2.EventRow, stage: 'soon' | 'start') {
   // same system line as before (kept in history like other system lines); old clients and tests rely on this text
   if (room) systemMsg(room, stage === 'start' ? `📅 ${row.title} is starting!` : `📅 ${row.title} starts in 15 minutes`);
 }
+/** batch MC2: create the following occurrence of a repeating event (once; survives restarts). */
+function spawnNext(row: repo2.EventRow): string | null {
+  if (!isRecur(row.recur) || !repo2.claimSpawn(row.id)) return null;
+  const tz = row.recur_tz || 'UTC';
+  const anchor = row.recur === 'monthly' ? Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, day: 'numeric' }).format(new Date(repo2.eventById(row.series_id ?? row.id)?.starts_at ?? row.starts_at))) : undefined;
+  let next = nextOccurrence(row.starts_at, row.recur, tz, anchor);
+  // skip occurrences already in the past (server was down)
+  for (let i = 0; i < 400 && next <= Date.now(); i++) next = nextOccurrence(next, row.recur, tz, anchor);
+  if (row.recur_until != null && next > row.recur_until) return null;
+  const id = randomUUID();
+  repo2.insertEvent({ id, room_id: row.room_id, title: row.title, description: row.description, starts_at: next, duration_min: row.duration_min, created_by_user: row.created_by_user, created_by_nick: row.created_by_nick });
+  repo2.setEventRecur(id, { recur: row.recur, recur_until: row.recur_until ?? null, recur_tz: tz, series_id: row.series_id ?? row.id });
+  repo2.copyRsvps(row.id, id);
+  eventsChanged(row.room_id);
+  return id;
+}
 /** Due-reminder check. Each stage is claimed in SQLite first, so a restart never re-sends. */
 function eventTick(at = Date.now()) {
   try {
     for (const row of repo2.eventsPendingReminder(at + EVENT_LEAD)) {
       const st = reminderStages({ startsAt: row.starts_at, remindedSoon: row.reminded_soon != null, remindedStart: row.reminded_start != null }, at, EVENT_LEAD);
       if (st.soon && repo2.claimReminder(row.id, 'soon', at) && st.soon === 'send') sendReminder(row, 'soon');
-      if (st.start && repo2.claimReminder(row.id, 'start', at) && st.start === 'send') sendReminder(row, 'start');
+      if (st.start && repo2.claimReminder(row.id, 'start', at)) { if (st.start === 'send') sendReminder(row, 'start'); spawnNext(row); }
     }
   } catch (err) { console.error('[events] tick failed', (err as Error).message); }
   if (refreshEventCaches()) broadcastRooms();
@@ -4660,6 +4677,8 @@ function onConnection(socket: AppSocket) {
     if (!eventRl.take()) return ack({ ok: false, error: 'Too many event changes. Try again in a few minutes.', status: 429 });
     const v = validateEvent(p, Date.now());
     if (!v.ok) return ack({ ok: false, error: v.error, status: 400 });
+    const rv = validateRecur(p, v.value.startsAt);
+    if (!rv.ok) return ack({ ok: false, error: rv.error, status: 400 });
     if (hasFilteredWord(v.value.title)) return ack({ ok: false, error: 'Please pick another title.', status: 400 });
     const upcoming = repo2.upcomingEventCount(c.room.id);
     if ((!existing || existing.starts_at <= Date.now()) && upcoming >= EVENT_MAX_UPCOMING) return ack({ ok: false, error: `A room can have at most ${EVENT_MAX_UPCOMING} upcoming events.`, status: 409 });
@@ -4671,6 +4690,7 @@ function onConnection(socket: AppSocket) {
       id = randomUUID();
       repo2.insertEvent({ id, room_id: c.room.id, title: v.value.title, description: maskWords(v.value.description), starts_at: v.value.startsAt, duration_min: v.value.durationMin, created_by_user: c.s.account?.id ?? null, created_by_nick: c.s.user!.nick });
     }
+    repo2.setEventRecur(id, { recur: rv.value.recur, recur_until: rv.value.recurUntil, recur_tz: rv.value.recurTz, series_id: rv.value.recur ? (existing?.series_id ?? id) : null });
     repo.logAction(actorLabel(c.s), c.s.account?.id ?? null, existing ? 'event-edit' : 'event-create', null, c.room.id, v.value.title);
     ack({ ok: true, event: eventInfos([repo2.eventById(id)!], c.s.account?.id ?? null)[0] });
     eventsChanged(c.room.id);
@@ -4690,8 +4710,10 @@ function onConnection(socket: AppSocket) {
     const row = repo2.eventById(String(p?.id ?? ''));
     if (!row || row.room_id !== c.room.id) return ack({ ok: false, error: 'Event not found', status: 404 });
     if (!eventRl.take()) return ack({ ok: false, error: 'Too many event changes. Try again in a few minutes.', status: 429 });
+    // a repeating event: "occurrence" skips this one (the next is scheduled first); "series" (default) ends it
+    if (p?.scope === 'occurrence' && isRecur(row.recur)) spawnNext(row);
     repo2.deleteEvent(row.id);
-    repo.logAction(actorLabel(c.s), c.s.account?.id ?? null, 'event-cancel', null, c.room.id, row.title);
+    repo.logAction(actorLabel(c.s), c.s.account?.id ?? null, p?.scope === 'occurrence' ? 'event-skip' : 'event-cancel', null, c.room.id, row.title);
     ack({ ok: true });
     eventsChanged(c.room.id);
   });

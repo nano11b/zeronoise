@@ -82,7 +82,19 @@ export function bookmarkHolders(messageIds: string[]): { user_id: number; messag
 }
 
 // ---------------- scheduled room events ----------------
-export interface EventRow { id: string; room_id: string; title: string; description: string; starts_at: number; duration_min: number | null; created_by_user: number | null; created_by_nick: string; created_at: number; updated_at: number; reminded_soon: number | null; reminded_start: number | null }
+/** batch MC2: recurrence fields (set after insert / update so the older column list stays untouched) */
+export function setEventRecur(id: string, v: { recur: string | null; recur_until: number | null; recur_tz: string | null; series_id: string | null }) {
+  q('UPDATE room_events SET recur = ?, recur_until = ?, recur_tz = ?, series_id = ? WHERE id = ?').run(v.recur, v.recur_until, v.recur_tz, v.series_id, id);
+}
+/** claim "next occurrence created" once; true only for the first caller */
+export function claimSpawn(id: string): boolean {
+  return Number(q('UPDATE room_events SET spawned_next = 1 WHERE id = ? AND spawned_next IS NULL').run(id).changes) === 1;
+}
+/** carry going / maybe answers over to the next occurrence, so reminders keep reaching them */
+export function copyRsvps(fromId: string, toId: string, at = now()) {
+  q(`INSERT OR IGNORE INTO event_rsvps (event_id, user_id, status, updated_at) SELECT ?, user_id, status, ? FROM event_rsvps WHERE event_id = ? AND status IN ('going','maybe')`).run(toId, at, fromId);
+}
+export interface EventRow { id: string; room_id: string; title: string; description: string; starts_at: number; duration_min: number | null; created_by_user: number | null; created_by_nick: string; created_at: number; updated_at: number; reminded_soon: number | null; reminded_start: number | null; recur?: string | null; recur_until?: number | null; recur_tz?: string | null; series_id?: string | null; spawned_next?: number | null }
 export function insertEvent(e: Omit<EventRow, 'created_at' | 'updated_at' | 'reminded_soon' | 'reminded_start'>, at = now()) {
   q('INSERT INTO room_events (id, room_id, title, description, starts_at, duration_min, created_by_user, created_by_nick, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
     .run(e.id, e.room_id, e.title, e.description, e.starts_at, e.duration_min, e.created_by_user, e.created_by_nick, at, at);

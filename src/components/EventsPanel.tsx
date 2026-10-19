@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { EVENT_DESC_MAX, EVENT_TITLE_MAX, eventEnd, eventIcs, relativeTime } from '../../shared/events';
+import { EVENT_DESC_MAX, EVENT_RECURS, EVENT_TITLE_MAX, RECUR_LABELS, eventEnd, eventIcs, relativeTime } from '../../shared/events';
 import type { RoomEventInfo } from '../../shared/types';
 import { call, socket } from '../socket';
 import { ChatText } from './ChatText';
@@ -22,11 +22,14 @@ function EventForm({ initial, onDone, toast }: { initial?: RoomEventInfo; onDone
   const [description, setDescription] = useState(initial?.description ?? '');
   const [when, setWhen] = useState(initial ? toLocalInput(initial.startsAt) : toLocalInput(Math.ceil((Date.now() + 3_600_000) / 900_000) * 900_000));
   const [duration, setDuration] = useState(initial?.durationMin ?? 0);
+  const [recur, setRecur] = useState<string>(initial?.recur ?? 'none');
+  const [until, setUntil] = useState(initial?.recurUntil ? toLocalInput(initial.recurUntil).slice(0, 10) : '');
   const [busy, setBusy] = useState(false);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const startsAt = new Date(when).getTime(); // parsed in the creator's local zone, sent as UTC ms
-    const body = { title: title.trim(), description: description.trim(), startsAt, durationMin: duration || null };
+    const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return 'UTC'; } })();
+    const body = { title: title.trim(), description: description.trim(), startsAt, durationMin: duration || null, recur: recur === 'none' ? null : recur, recurUntil: recur !== 'none' && until ? new Date(`${until}T23:59`).getTime() : null, recurTz: tz };
     setBusy(true);
     try {
       if (initial) await call((ack) => socket.emit('events:update', { id: initial.id, ...body }, ack));
@@ -50,6 +53,18 @@ function EventForm({ initial, onDone, toast }: { initial?: RoomEventInfo; onDone
           </select>
         </label>
       </div>
+      <div className="event-form-row">
+        <label className="small">Repeats
+          <select value={recur} onChange={(e) => setRecur(e.target.value)} aria-label="Repeats" data-field="recur">
+            <option value="none">Does not repeat</option>
+            {EVENT_RECURS.map((r) => <option key={r} value={r}>{RECUR_LABELS[r]}</option>)}
+          </select>
+        </label>
+        {recur !== 'none' && <label className="small">Until (optional)
+          <input type="date" value={until} onChange={(e) => setUntil(e.target.value)} aria-label="Repeat until" data-field="recur-until" />
+        </label>}
+      </div>
+      {recur !== 'none' && <p className="small muted">Only the next date is listed; the one after is scheduled when it starts, and people who said going or maybe stay on the list (and keep getting reminders). Repeats for up to a year.</p>}
       <div className="modal-actions">
         <button type="button" className="btn ghost" onClick={onDone}>Cancel</button>
         <button className="btn primary" disabled={busy || !title.trim() || !when} data-action="event-save">{initial ? 'Save' : 'Schedule'}</button>
@@ -81,9 +96,9 @@ export function EventsPanel({ events, canManage, registered, roomName, toast }: 
     try { await call((ack) => socket.emit('events:rsvp', { id: ev.id, status: ev.myRsvp === status ? null : status }, ack)); }
     catch (e) { toast((e as Error).message, 'error'); }
   };
-  const cancel = async (ev: RoomEventInfo) => {
-    if (!window.confirm(`Cancel "${ev.title}"?`)) return;
-    try { await call((ack) => socket.emit('events:cancel', { id: ev.id }, ack)); toast('Event cancelled'); }
+  const cancel = async (ev: RoomEventInfo, scope: 'occurrence' | 'series' = 'series') => {
+    if (!window.confirm(ev.recur ? (scope === 'occurrence' ? `Skip "${ev.title}" on ${fmtEventTime(ev.startsAt)}? The next one is scheduled.` : `End the repeating "${ev.title}"? No more dates will be scheduled.`) : `Cancel "${ev.title}"?`)) return;
+    try { await call((ack) => socket.emit('events:cancel', { id: ev.id, scope }, ack)); toast(scope === 'occurrence' ? 'Skipped; next date scheduled' : 'Event cancelled'); }
     catch (e) { toast((e as Error).message, 'error'); }
   };
   return (
@@ -101,7 +116,7 @@ export function EventsPanel({ events, canManage, registered, roomName, toast }: 
             return (
               <li key={ev.id} className={`event-item${live ? ' live' : ''}`} data-event={ev.id}>
                 <div className="event-top">
-                  <strong className="event-title">{ev.title}</strong>
+                  <strong className="event-title">{ev.title}{ev.recur && <span className="event-recur small" data-recur={ev.recur} title={ev.recurUntil ? `until ${new Date(ev.recurUntil).toLocaleDateString()}` : undefined}> ↻ {RECUR_LABELS[ev.recur]}</span>}</strong>
                   <span className="muted small event-when" title={new Date(ev.startsAt).toString()}>
                     {fmtEventTime(ev.startsAt)}{ev.durationMin ? ` · ${ev.durationMin < 60 ? `${ev.durationMin} min` : `${ev.durationMin / 60} h`}` : ''} · {live ? 'happening now' : relativeTime(ev.startsAt, now)}
                   </span>
@@ -123,7 +138,8 @@ export function EventsPanel({ events, canManage, registered, roomName, toast }: 
                   ) : <span className="muted small">Sign in to RSVP.</span>}
                   <button type="button" className="btn small-btn ghost" data-action="event-ics" title="Add to calendar (.ics)" onClick={() => downloadIcs(ev, roomName)}>📅 .ics</button>
                   {canManage && <button type="button" className="btn small-btn ghost" data-action="event-edit" onClick={() => setEditing(ev)}>Edit</button>}
-                  {canManage && <button type="button" className="btn small-btn ghost danger" data-action="event-cancel" onClick={() => cancel(ev)}>Cancel event</button>}
+                  {canManage && ev.recur && <button type="button" className="btn small-btn ghost" data-action="event-skip" onClick={() => cancel(ev, 'occurrence')}>Skip this date</button>}
+                  {canManage && <button type="button" className="btn small-btn ghost danger" data-action="event-cancel" onClick={() => cancel(ev)}>{ev.recur ? 'End series' : 'Cancel event'}</button>}
                 </div>
                 <div className="muted small">by {ev.createdBy}</div>
               </li>

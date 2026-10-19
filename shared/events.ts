@@ -84,3 +84,60 @@ export function eventIcs(e: { id: string; title: string; description: string; st
   ];
   return lines.map(fold).join('\r\n') + '\r\n';
 }
+
+// ---- batch MC2: recurring schedules ----
+export const EVENT_RECURS = ['daily', 'weekly', 'biweekly', 'monthly'] as const;
+export type EventRecur = (typeof EVENT_RECURS)[number];
+export const isRecur = (v: unknown): v is EventRecur => (EVENT_RECURS as readonly unknown[]).includes(v);
+export const RECUR_LABELS: Record<EventRecur, string> = { daily: 'Every day', weekly: 'Every week', biweekly: 'Every 2 weeks', monthly: 'Every month' };
+/** a series may run at most this far past its first start */
+export const EVENT_RECUR_MAX_MS = 366 * 86_400_000;
+export function validTimeZone(tz: unknown): string | null {
+  if (typeof tz !== 'string' || tz.length > 64 || !/^[A-Za-z0-9_+\-/]+$/.test(tz)) return null;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } catch { return null; }
+}
+function partsIn(ts: number, tz: string) {
+  const f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+  const o: Record<string, number> = {};
+  for (const p of f.formatToParts(new Date(ts))) if (p.type !== 'literal') o[p.type] = Number(p.value);
+  return { y: o.year, m: o.month, d: o.day, h: o.hour % 24, mi: o.minute, s: o.second };
+}
+/** UTC ms for a wall-clock time in `tz` (DST-safe: two correction passes). */
+function wallToUtc(y: number, m: number, d: number, h: number, mi: number, tz: string): number {
+  let guess = Date.UTC(y, m - 1, d, h, mi);
+  for (let i = 0; i < 2; i++) {
+    const p = partsIn(guess, tz);
+    const asUtc = Date.UTC(p.y, p.m - 1, p.d, p.h, p.mi);
+    guess += Date.UTC(y, m - 1, d, h, mi) - asUtc;
+  }
+  return guess;
+}
+/** Next start after `ts`, keeping the same local wall-clock time in `tz` (so DST does not shift it). Monthly clamps to the month's last day. */
+export function nextOccurrence(ts: number, recur: EventRecur, tz = 'UTC', anchorDay?: number): number {
+  const p = partsIn(ts, tz);
+  if (recur === 'monthly') {
+    const want = anchorDay ?? p.d;
+    const y = p.m === 12 ? p.y + 1 : p.y; const m = p.m === 12 ? 1 : p.m + 1;
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    return wallToUtc(y, m, Math.min(want, last), p.h, p.mi, tz);
+  }
+  const days = recur === 'daily' ? 1 : recur === 'weekly' ? 7 : 14;
+  const base = new Date(Date.UTC(p.y, p.m - 1, p.d + days));
+  return wallToUtc(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), p.h, p.mi, tz);
+}
+export interface RecurInput { recur: EventRecur | null; recurUntil: number | null; recurTz: string | null }
+export function validateRecur(raw: unknown, startsAt: number): { ok: true; value: RecurInput } | { ok: false; error: string } {
+  const p = (raw ?? {}) as Record<string, unknown>;
+  if (p.recur === undefined || p.recur === null || p.recur === '' || p.recur === 'none') return { ok: true, value: { recur: null, recurUntil: null, recurTz: null } };
+  if (!isRecur(p.recur)) return { ok: false, error: 'Unknown repeat option.' };
+  const tz = p.recurTz === undefined ? 'UTC' : validTimeZone(p.recurTz);
+  if (!tz) return { ok: false, error: 'Unknown time zone.' };
+  let until: number | null = null;
+  if (p.recurUntil !== undefined && p.recurUntil !== null && p.recurUntil !== '') {
+    const u = Number(p.recurUntil);
+    if (!Number.isFinite(u) || u <= startsAt) return { ok: false, error: 'The repeat end must be after the first start.' };
+    until = Math.round(u);
+  }
+  const cap = startsAt + EVENT_RECUR_MAX_MS;
+  return { ok: true, value: { recur: p.recur, recurUntil: Math.min(until ?? cap, cap), recurTz: tz } };
+}

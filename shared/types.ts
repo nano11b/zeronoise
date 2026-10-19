@@ -399,9 +399,9 @@ export interface ClientToServer {
   'bookmark:toggle': (p: { messageId: string; on?: boolean }, ack: Ack<{ bookmarked: boolean }>) => void;
   'bookmark:list': (ack: Ack<{ bookmarks: BookmarkEntry[]; ids: string[] }>) => void;
   'events:list': (ack: Ack<{ events: RoomEventInfo[]; canManage: boolean }>) => void;
-  'events:create': (p: { title: string; description?: string; startsAt: number; durationMin?: number | null }, ack: Ack<{ event: RoomEventInfo }>) => void;
-  'events:update': (p: { id: string; title: string; description?: string; startsAt: number; durationMin?: number | null }, ack: Ack<{ event: RoomEventInfo }>) => void;
-  'events:cancel': (p: { id: string }, ack: Ack) => void;
+  'events:create': (p: { title: string; description?: string; startsAt: number; durationMin?: number | null; recur?: string | null; recurUntil?: number | null; recurTz?: string }, ack: Ack<{ event: RoomEventInfo }>) => void;
+  'events:update': (p: { id: string; title: string; description?: string; startsAt: number; durationMin?: number | null; recur?: string | null; recurUntil?: number | null; recurTz?: string }, ack: Ack<{ event: RoomEventInfo }>) => void;
+  'events:cancel': (p: { id: string; scope?: 'occurrence' | 'series' }, ack: Ack) => void;
   'events:rsvp': (p: { id: string; status: 'going' | 'maybe' | 'no' | null }, ack: Ack<{ event: RoomEventInfo }>) => void;
   /** room owner (or site staff): appoint / remove a room moderator by account id */
   'room:mod': (p: { accountId: number; on: boolean }, ack: Ack<{ mods: RoomModInfo[] }>) => void;
@@ -679,6 +679,9 @@ export interface RoomEventInfo {
   /** first few people going (for avatars) */
   goingUsers: { accountId: number; nick: string; hasAvatar: boolean; chatColor: string | null }[];
   myRsvp?: 'going' | 'maybe' | 'no';
+  /** batch MC2: repeating schedule */
+  recur?: 'daily' | 'weekly' | 'biweekly' | 'monthly';
+  recurUntil?: number;
 }
 export interface EventReminder {
   eventId: string;

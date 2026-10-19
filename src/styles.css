@@ -2734,3 +2734,4 @@ html.no-avatar-fx .user-avatar.avatar-fx { box-shadow: none !important; animatio
 .mq-list li { display: flex; align-items: center; gap: 6px; } .mq-list li a { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .mq-list img { border-radius: 4px; flex: none; } .mq-list li .btn { margin-left: auto; }
 .mq-now { margin: 0; }
+.event-recur { font-weight: 500; color: var(--muted); margin-left: 4px; white-space: nowrap; }
