@@ -308,7 +308,7 @@ try {
   const kdir = fs.mkdtempSync(path.join(os.tmpdir(), 'zn-kit-'));
   fs.writeFileSync(path.join(kdir, 'kit.zip'), kbuf);
   const kls = await new Promise((r) => { const p = spawn('python3', ['-c', 'import zipfile,sys; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; z.extractall(sys.argv[2]); print(" ".join(sorted(z.namelist())))', path.join(kdir, 'kit.zip'), kdir]); let o = ''; p.stdout.on('data', (d) => { o += d; }); p.stderr.on('data', (d) => { o += d; }); p.on('close', () => r(o.trim())); });
-  ok(kz.status === 200 && kls === 'zeronoise-bridge-kit/README.md zeronoise-bridge-kit/bridge.mjs zeronoise-bridge-kit/config.example.json', 'bridge kit ZIP downloads with README, script and example config', kls);
+  ok(kz.status === 200 && kls === 'zeronoise-bridge-kit/README.md zeronoise-bridge-kit/bridge.mjs zeronoise-bridge-kit/config.example.json zeronoise-bridge-kit/webhook-verify.lua', 'bridge kit ZIP downloads with README, script, example config and the Lua webhook verifier', kls);
   const docsMd = await (await fetch(BASE + '/docs/bots.md')).text();
   const docsHtml = await (await fetch(BASE + '/docs/bots')).text();
   const llms = await (await fetch(BASE + '/llms.txt')).text();
