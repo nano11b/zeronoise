@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { translateText, TranslateUnavailable } from '../translate';
 import { getTts, onQueue, onTts, queueState, roomMuted, setTts, speakable, ttsSay, ttsSkip, ttsStop, ttsSupported, ttsUser } from '../tts';
 import type { RolesState } from './RolesPanel';
@@ -308,6 +309,25 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
     socket.on('chat:message', onChat);
     return () => { socket.off('chat:message', onChat); window.clearTimeout(timer); };
   }, [me.nick]);
+  /** MC2: the person menu is portalled to <body> so the people list can't clip it. Desktop: placed at the
+   *  pointer (or under the row for keyboard/click) and flipped to stay inside the viewport. Phones: bottom sheet (CSS). */
+  const menuAnchor = useRef<{ x: number; y: number } | null>(null);
+  const placePersonMenu = (el: HTMLDivElement | null) => {
+    focusFirstOnOpen(el);
+    if (!el) return;
+    if (window.matchMedia('(max-width: 800px)').matches) { el.style.left = el.style.top = el.style.maxHeight = ''; return; }
+    const row = document.querySelector<HTMLElement>(`[aria-controls="${el.id}"]`)?.getBoundingClientRect();
+    const a = menuAnchor.current ?? (row ? { x: row.left + 12, y: row.bottom + 2 } : { x: 16, y: 16 });
+    const vw = window.innerWidth, vh = window.innerHeight, m = 8;
+    el.style.maxHeight = `${vh - 2 * m}px`;
+    const w = el.offsetWidth, h = el.offsetHeight;
+    let x = a.x, y = a.y;
+    if (x + w > vw - m) x = Math.max(m, (menuAnchor.current ? a.x : row ? row.right : a.x) - w);
+    if (y + h > vh - m) y = Math.max(m, (menuAnchor.current ? a.y : row ? row.top - 2 : a.y) - h);
+    if (y + h > vh - m) y = Math.max(m, vh - m - h);
+    el.style.left = `${Math.round(x)}px`; el.style.top = `${Math.round(y)}px`;
+    el.dataset.flipX = String(x < a.x); el.dataset.flipY = String(y < a.y);
+  };
   const focusFirstOnOpen = (el: HTMLDivElement | null) => { if (el && !el.contains(document.activeElement)) requestAnimationFrame(() => el.querySelector<HTMLElement>('button')?.focus({ preventScroll: true })); };
   // batch H10: read messages aloud
   const [ttsP, setTtsP] = useState(getTts());
@@ -1856,21 +1876,21 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   /** batch X: click = whisper (yourself = profile); right-click, long-press, Shift+F10 or the Menu key = actions menu */
   const personHandlers = (u: UserInfo) => ({
     onClick: (e: ReactMouseEvent) => {
-      e.stopPropagation();
+      e.stopPropagation(); menuAnchor.current = null;
       if (longPressed.current) { longPressed.current = false; if (Date.now() - pressEndAt.current < 700) return; }
       if (u.id === me.id) { if (me.registered) openProfile(me.nick); else setMenuFor(menuFor === u.id ? null : u.id); return; }
       if (canInboxWhisper(u)) { setMenuFor(null); setPeopleOpen(false); openWhispers(u.nick); return; }
       setMenuFor(menuFor === u.id ? null : u.id);
     },
-    onContextMenu: (e: ReactMouseEvent) => { e.preventDefault(); e.stopPropagation(); setMenuFor(u.id); },
-    onKeyDown: (e: ReactKeyboardEvent) => { if ((e.shiftKey && e.key === 'F10') || e.key === 'ContextMenu') { e.preventDefault(); e.stopPropagation(); setMenuFor(u.id); } },
+    onContextMenu: (e: ReactMouseEvent) => { e.preventDefault(); e.stopPropagation(); menuAnchor.current = e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : null; setMenuFor(u.id); },
+    onKeyDown: (e: ReactKeyboardEvent) => { if ((e.shiftKey && e.key === 'F10') || e.key === 'ContextMenu') { e.preventDefault(); e.stopPropagation(); menuAnchor.current = null; setMenuFor(u.id); } },
     onPointerDown: (e: ReactPointerEvent) => {
       if (e.pointerType === 'mouse') return;
       longPressed.current = false;
       const x = e.clientX, y = e.clientY;
       if (pressTimer.current) window.clearTimeout(pressTimer.current);
       pressStart.current = { x, y };
-      pressTimer.current = window.setTimeout(() => { longPressed.current = true; pressTimer.current = null; setMenuFor(u.id); try { navigator.vibrate?.(15); } catch { /* */ } }, 500);
+      pressTimer.current = window.setTimeout(() => { longPressed.current = true; pressTimer.current = null; menuAnchor.current = null; setMenuFor(u.id); try { navigator.vibrate?.(15); } catch { /* */ } }, 500);
     },
     onPointerMove: (e: ReactPointerEvent) => { const p = pressStart.current; if (pressTimer.current && p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) { window.clearTimeout(pressTimer.current); pressTimer.current = null; } },
     onPointerUp: () => { if (pressTimer.current) { window.clearTimeout(pressTimer.current); pressTimer.current = null; } if (longPressed.current) pressEndAt.current = Date.now(); },
@@ -1909,8 +1929,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                       <span className="tag cam">cam</span>
                     </button>
                   )}
-                {menuFor === u.id && (
-                  <div className="menu person-menu" id={`umenu-${u.id}`} role="group" aria-label={`Actions for ${u.nick}`} ref={focusFirstOnOpen} onClick={(e) => e.stopPropagation()} onClickCapture={(e) => { if (Date.now() - pressEndAt.current < 700) { e.preventDefault(); e.stopPropagation(); } }} data-person-menu={u.nick}>
+                {menuFor === u.id && createPortal(
+                  <div className="menu person-menu" id={`umenu-${u.id}`} role="group" aria-label={`Actions for ${u.nick}`} ref={placePersonMenu} onClick={(e) => e.stopPropagation()} onClickCapture={(e) => { if (Date.now() - pressEndAt.current < 700) { e.preventDefault(); e.stopPropagation(); } }} data-person-menu={u.nick}>
                     {!u.id.startsWith('bot:') && <BadgeCard ids={u.badges} />}
                     {u.registered && u.accountId != null && !u.id.startsWith('bot:') && <button data-action="view-profile" onClick={() => openProfile(u.nick)}>👤 {u.id === me.id ? 'Your profile' : 'View profile'}</button>}
                     {u.id !== me.id && canInboxWhisper(u) && <button data-action="dm-whisper" onClick={() => { setMenuFor(null); setPeopleOpen(false); openWhispers(u.nick); }}>✉️ Whisper</button>}
@@ -1951,8 +1971,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                         {isStaff && <button className="danger" onClick={() => siteBan(u)} data-action="site-ban">Site ban…</button>}
                       </>
                     )}
-                  </div>
-                )}
+                  </div>, document.body)}
               </li>
   );
   const peopleDock = (

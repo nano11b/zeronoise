@@ -32,7 +32,7 @@ laneD() { run batch-e node scripts/batch-e-check.mjs "$L/batch-e"; run batch-f n
   run batch-g node scripts/batch-g-check.mjs "$GH"; run batch-h node scripts/batch-h-check.mjs "$GH"
   A11Y_SHOTS="$GH" run a11y node scripts/a11y-check.mjs "$L/a11y"; run secretbox node scripts/secretbox-check.mjs "$L/secretbox"; run alerts node scripts/alerts-check.mjs "$L/alerts"; }
 laneE() { run batch-w node scripts/batch-w-check.mjs "$W"; }  # batch W: whispers (own lane; ~2 min)
-laneF() { run webhooks node scripts/webhook-check.mjs "$WH"; run people node scripts/people-check.mjs "$WH"; }  # room webhooks + batch X people list (own lane; ~2 min)
+laneF() { run webhooks node scripts/webhook-check.mjs "$WH"; run people node scripts/people-check.mjs "$WH"; run msgcolor2 node scripts/msgcolor2-check.mjs "${MC2:-$WH}"; }  # room webhooks + batch X people list (own lane; ~2 min)
 laneA & laneB & laneC & laneD & laneE & laneF & wait
 echo "ALLDONE in $((SECONDS - T0))s" >> "$S"
 grep -q "exit [1-9]" "$S" && exit 1 || exit 0

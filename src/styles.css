@@ -2636,9 +2636,6 @@ html[data-ui-theme="dark-orange"] {
 .wh-admin-wrap { overflow-x: auto; max-width: 100%; } .wh-admin-wrap code { overflow-wrap: anywhere; } .admin-webhooks .ok { color: var(--accent); } .admin-webhooks .bad { color: var(--danger, #d33); }
 .user-row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
 @media (max-width: 800px) {
-  .users .menu.person-menu { position: fixed; left: 8px; right: 8px; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); top: auto; width: auto; max-height: calc(100dvh - 140px); overflow-y: auto; z-index: 1200; box-shadow: 0 -8px 30px rgba(0,0,0,.45); }
-  /* the drawer is moved with transform, which would trap the fixed sheet inside it */
-  .room.people-open .users:has(.person-menu) { transform: none; }
 }
 /* batch X: message colour */
 .msg-color-previews { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px; margin-top: 6px; }
@@ -2672,3 +2669,12 @@ html[data-ui-theme="dark-orange"] {
 .msg-style-pop .msg-color-custom input[type="color"] { width: 40px; height: 30px; }
 .msg-style-pop .check-row { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; } .msg-style-pop .check-row input { width: auto; flex: none; margin-top: 3px; }
 .msg-style-pop .msg-color-previews { grid-template-columns: 1fr 1fr; }
+/* MC2: person menu lives in <body> (portal). Desktop: fixed at the pointer, flipped by JS to stay on screen. */
+.menu.person-menu { position: fixed; right: auto; top: 0; left: 0; z-index: 1200; min-width: 200px; max-width: min(320px, calc(100vw - 16px)); overflow-y: auto; overscroll-behavior: contain; }
+@media (max-width: 800px) {
+  /* Phones: bottom sheet above the call bar, two columns so every action (mod ones included) fits without scrolling on 360-390px phones */
+  .menu.person-menu { left: 8px; right: 8px; top: auto; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); width: auto; max-width: none; max-height: calc(100dvh - 140px);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2px; box-shadow: 0 -8px 30px rgba(0,0,0,.45); }
+  .menu.person-menu > :not(button) { grid-column: 1 / -1; }
+  .menu.person-menu > button { min-height: 44px; padding: 8px 10px; text-align: left; font-size: .92rem; line-height: 1.2; overflow-wrap: anywhere; }
+}

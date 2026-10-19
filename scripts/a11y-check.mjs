@@ -208,12 +208,12 @@ try {
       ok(rowFocused, `${width}: keyboard: people list rows are focusable`);
       if (rowFocused) {
         await a.page.keyboard.down('Shift'); await a.page.keyboard.press('F10'); await a.page.keyboard.up('Shift'); await sleep(400); // batch X: Enter whispers; Shift+F10 opens the menu
-        const menu = await a.page.evaluate(() => { const m = document.querySelector('.users .menu[role="group"]'); return m && m.contains(document.activeElement) ? [...m.querySelectorAll('button')].length : 0; });
+        const menu = await a.page.evaluate(() => { const m = document.querySelector('.menu.person-menu[role="group"]'); return m && m.contains(document.activeElement) ? [...m.querySelectorAll('button')].length : 0; });
         ok(menu > 2, `${width}: keyboard: Shift+F10 opens the user menu with focus on its first item`, String(menu));
         await shot(a.page, `h8-keyboard-user-menu-${width}`);
         await audit(a.page, `${width} user menu`);
         await a.page.keyboard.press('Escape'); await sleep(300);
-        ok(await a.page.evaluate(() => !document.querySelector('.users .menu[role="group"]') && document.activeElement?.classList.contains('user-row')), `${width}: keyboard: Escape closes the user menu and returns focus`);
+        ok(await a.page.evaluate(() => !document.querySelector('.menu.person-menu[role="group"]') && document.activeElement?.classList.contains('user-row')), `${width}: keyboard: Escape closes the user menu and returns focus`);
       }
       await a.ctx.close(); await fresh(mem);
     }
