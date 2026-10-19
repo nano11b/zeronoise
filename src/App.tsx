@@ -1,3 +1,4 @@
+import './avatarFxPref';
 import { BanAppeal } from './components/BanAppeal';
 import { WhatsNewNotice } from './components/WhatsNew';
 import { TwoFactorGate } from './components/TwoFactor';

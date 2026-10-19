@@ -24,6 +24,7 @@ export interface UserInfo {
   chatColor?: string | null;
   /** batch X: message text colour (#rrggbb, readable on every theme) */
   msgColor?: string | null;
+  avatarFx?: string | null;
   /** preset effect id: glow | gradient | pulse; guests and "none" omit */
   chatEffect?: string | null;
   hasAvatar?: boolean;
@@ -57,6 +58,7 @@ export interface MeResponse {
     hasAvatar: boolean;
     /** batch X: message text colour */
     msgColor?: string | null;
+  avatarFx?: string | null;
     /** The signed-in user's own address. Never copied onto other people. */
     email: string | null;
     emailVerified: boolean;
@@ -199,7 +201,7 @@ export interface RoomState {
 export type ChatMessage =
   | {
       kind: 'chat'; id: string; ts: number; fromId: string; from: string; role?: Role; text: string;
-      accountId?: number; chatColor?: string | null; msgColor?: string | null; chatEffect?: string | null; hasAvatar?: boolean; reactions?: ReactionCount[];
+      accountId?: number; chatColor?: string | null; msgColor?: string | null; avatarFx?: string | null; chatEffect?: string | null; hasAvatar?: boolean; reactions?: ReactionCount[];
       /** batch D: author's XP level (omitted when hidden) */
       level?: number;
       /** set on a thread reply; omitted on top-level lines */

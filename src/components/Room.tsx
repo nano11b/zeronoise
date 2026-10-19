@@ -928,9 +928,9 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
         else m.renamePeer(from, to);
       });
     };
-    const applyProfile = <T extends { kind?: string; accountId?: number; chatColor?: string | null; chatEffect?: string | null; hasAvatar?: boolean }>(m: T, u: UserInfo): T =>
+    const applyProfile = <T extends { kind?: string; accountId?: number; chatColor?: string | null; chatEffect?: string | null; avatarFx?: string | null; hasAvatar?: boolean }>(m: T, u: UserInfo): T =>
       m.kind === 'chat' && u.accountId != null && m.accountId === u.accountId
-        ? { ...m, chatColor: u.chatColor, chatEffect: u.chatEffect, hasAvatar: u.hasAvatar }
+        ? { ...m, chatColor: u.chatColor, chatEffect: u.chatEffect, hasAvatar: u.hasAvatar, avatarFx: u.avatarFx }
         : m;
     const onUpdated = (u: UserInfo) => {
       setUsers((prev) => prev.map((x) => (x.id === u.id ? u : x)));
@@ -1900,7 +1900,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
               <li key={u.id} className={`user ${isIgnored(u.nick) ? 'ignored' : ''}`}>
                 <button className="user-row" {...personHandlers(u)} data-nick={u.nick} aria-haspopup="menu" aria-expanded={menuFor === u.id} aria-controls={menuFor === u.id ? `umenu-${u.id}` : undefined}
                   title={u.id === me.id ? 'Your profile (right-click for more)' : canInboxWhisper(u) ? `Whisper ${u.nick} (right-click or Shift+F10 for more)` : `${u.nick} (right-click or Shift+F10 for actions)`}>
-                  <UserAvatar nick={u.nick} accountId={u.accountId} chatColor={u.chatColor} hasAvatar={u.hasAvatar} size={28} />
+                  <UserAvatar nick={u.nick} accountId={u.accountId} chatColor={u.chatColor} hasAvatar={u.hasAvatar} avatarFx={u.avatarFx} size={28} />
                   <span className="user-id">
                     <NickLabel nick={u.nick} chatColor={roleOfAcct(u.accountId)?.color ?? u.chatColor} chatEffect={u.chatEffect} className="nick" /><LevelBadge level={u.level} /><RoleChip role={roleOfAcct(u.accountId)} />
                     <span className="user-badges">
@@ -2189,7 +2189,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                   </div>
                 ) : (
                   <div key={m.id} className={`msg line ${m.fromId === me.id || (!m.fromId && m.from === me.nick) ? 'mine' : ''} ${me.accountId && m.mentions?.includes(me.accountId) ? 'mentioned' : ''}${jumpHit === m.id ? ' jump-hit' : ''}`} data-msg={m.id}>
-                    {m.webhook ? (m.webhook.avatar ? <img className="user-avatar wh-avatar" src={m.webhook.avatar} alt="" width={32} height={32} loading="lazy" /> : <span className="user-avatar wh-avatar wh-avatar-ph" aria-hidden="true" style={{ width: 32, height: 32 }}>🔗</span>) : <UserAvatar nick={m.from} accountId={m.accountId} chatColor={m.chatColor} hasAvatar={m.hasAvatar} size={32} />}
+                    {m.webhook ? (m.webhook.avatar ? <img className="user-avatar wh-avatar" src={m.webhook.avatar} alt="" width={32} height={32} loading="lazy" /> : <span className="user-avatar wh-avatar wh-avatar-ph" aria-hidden="true" style={{ width: 32, height: 32 }}>🔗</span>) : <UserAvatar nick={m.from} accountId={m.accountId} chatColor={m.chatColor} hasAvatar={m.hasAvatar} avatarFx={m.avatarFx} size={32} />}
                     <div className="msg-body">
                     <span className="msg-meta">
                     {m.from.toLowerCase() === me.nick.toLowerCase() ? (

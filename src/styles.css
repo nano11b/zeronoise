@@ -2679,3 +2679,20 @@ html[data-ui-theme="dark-orange"] {
   .menu.person-menu > :not(button) { grid-column: 1 / -1; }
   .menu.person-menu > button { min-height: 44px; padding: 8px 10px; text-align: left; font-size: .92rem; line-height: 1.2; overflow-wrap: anywhere; }
 }
+/* batch MC2: profile effects - subtle frames/glows around avatars (box-shadow only; never changes layout) */
+.user-avatar.avatar-fx { border-radius: 50%; }
+.avatar-fx-ring { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px #9fd8ff; }
+.avatar-fx-double { box-shadow: 0 0 0 1.5px #ffd166, 0 0 0 3px var(--panel), 0 0 0 4.5px #ffd166; }
+.avatar-fx-glow { box-shadow: 0 0 0 1.5px #d7b8ff99, 0 0 10px 1px #d7b8ff66; }
+.avatar-fx-sunrise { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px #ffc49b, 0 0 8px 2px #ff9fb255; }
+.avatar-fx-aurora { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px #b9f6ca, 0 0 9px 2px #9fd8ff55; }
+.avatar-fx-breathe { box-shadow: 0 0 0 1.5px #b9f6ca99, 0 0 8px 1px #b9f6ca55; }
+@media (prefers-reduced-motion: no-preference) {
+  .avatar-fx-breathe { animation: avatar-breathe 3.2s ease-in-out infinite; }
+}
+@keyframes avatar-breathe { 50% { box-shadow: 0 0 0 1.5px #b9f6cacc, 0 0 13px 3px #b9f6ca77; } }
+html.no-avatar-fx .user-avatar.avatar-fx { box-shadow: none !important; animation: none !important; }
+.avatar-fx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; margin-top: 6px; }
+.avatar-fx-pick { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 6px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--text); font-size: .8rem; }
+.avatar-fx-pick.on { border-color: var(--accent, #4caf50); background: color-mix(in srgb, var(--accent, #4caf50) 12%, transparent); }
+.avatar-fx-section .check-row { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; } .avatar-fx-section .check-row input { width: auto; flex: none; margin-top: 3px; }

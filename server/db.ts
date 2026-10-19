@@ -995,6 +995,10 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE users ADD COLUMN msg_color TEXT;
   `,
+  // 49 batch MC2: profile effect (avatar frame / glow), whitelisted id
+  `
+  ALTER TABLE users ADD COLUMN avatar_fx TEXT;
+  `,
 ];
 
 /**

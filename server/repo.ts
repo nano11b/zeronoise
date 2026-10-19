@@ -1,3 +1,4 @@
+import { publicAvatarFx } from '../shared/avatarFx';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { publicChatEffect } from '../shared/colors';
 import { LIMITS, RESERVED_NAMES } from '../shared/config';
@@ -11,6 +12,8 @@ export interface Account {
   email: string | null; emailVerified: boolean;
   /** batch X (migration 48) */
   msgColor: string | null;
+  /** MC2 (migration 49) */
+  avatarFx: string | null;
 }
 /** Who someone is, for ban / mute / room-ban matching. */
 export interface Ident { userId: number | null; nick: string; ip: string; deviceIds: string[] }
@@ -26,6 +29,7 @@ export interface UserRow {
   tiktok_open_id: string | null;
   created_at: number; last_login_at: number | null; chat_color: string | null; chat_effect: string | null; has_avatar: number;
   msg_color?: string | null;
+  avatar_fx?: string | null;
   email: string | null; email_lower: string | null; email_verified_at: number | null;
   /** batch D (migration 42) */
   xp?: number; xp_hidden?: number;
@@ -48,7 +52,7 @@ export function setUiTheme(id: number, v: string | null) {
 }
 const toAccount = (r: UserRow): Account => ({
   id: r.id, username: r.username, role: r.role, chatColor: r.chat_color ?? null, chatEffect: publicChatEffect(r.chat_effect), hasAvatar: !!r.has_avatar,
-  email: r.email ?? null, emailVerified: !!r.email_verified_at, msgColor: r.msg_color ?? null,
+  email: r.email ?? null, emailVerified: !!r.email_verified_at, msgColor: r.msg_color ?? null, avatarFx: publicAvatarFx(r.avatar_fx),
 });
 
 export function userByName(name: string): UserRow | undefined {
@@ -119,6 +123,9 @@ export function setRole(id: number, role: AccountRole) {
 }
 export function setChatColor(id: number, color: string | null) {
   q('UPDATE users SET chat_color = ? WHERE id = ?').run(color, id);
+}
+export function setAvatarFx(id: number, fx: string | null) {
+  q('UPDATE users SET avatar_fx = ? WHERE id = ?').run(fx, id);
 }
 export function setMsgColor(id: number, color: string | null) {
   q('UPDATE users SET msg_color = ? WHERE id = ?').run(color, id);

@@ -1,3 +1,4 @@
+import { publicAvatarFx } from '../shared/avatarFx';
 import './quiet';
 import http from 'http';
 import { createHash, randomBytes, randomUUID } from 'crypto';
@@ -308,9 +309,9 @@ function canModerate(actor: Session, target: Session, room: Room | null, ownerAl
   return false;
 }
 function actorLabel(s: Session) { return s.account?.username ?? s.user?.nick ?? 'unknown'; }
-function profileOf(account: repo.Account | null): Pick<UserInfo, 'accountId' | 'chatColor' | 'msgColor' | 'chatEffect' | 'hasAvatar'> {
+function profileOf(account: repo.Account | null): Pick<UserInfo, 'accountId' | 'chatColor' | 'msgColor' | 'chatEffect' | 'hasAvatar' | 'avatarFx'> {
   if (!account) return {};
-  return { accountId: account.id, chatColor: account.chatColor, msgColor: account.msgColor ?? null, chatEffect: publicChatEffect(account.chatEffect), hasAvatar: account.hasAvatar };
+  return { accountId: account.id, chatColor: account.chatColor, msgColor: account.msgColor ?? null, chatEffect: publicChatEffect(account.chatEffect), hasAvatar: account.hasAvatar, avatarFx: account.avatarFx ?? null };
 }
 function makeUser(socketId: string, nick: string, role: Role, registered: boolean, account: repo.Account | null): UserInfo {
   const u: UserInfo = { id: socketId, nick, cam: false, mic: false, screen: false, role, registered, ...profileOf(account) };
@@ -565,6 +566,7 @@ function chatFromRowRaw(m: repo.MsgRow, reactions?: { emoji: string; count: numb
     msgColor: u?.msg_color ?? null,
     chatEffect: publicChatEffect(u?.chat_effect),
     hasAvatar: !!u?.has_avatar,
+    avatarFx: publicAvatarFx(u?.avatar_fx),
     ...(repo8.shownLevel(u) ? { level: repo8.shownLevel(u) } : {}),
     reactions: reactions ?? [],
     parentId: m.parent_id || undefined,
@@ -624,7 +626,7 @@ function compactMsg(m: ChatMessage): ChatMessage {
   const o = { ...m } as Record<string, unknown>;
   // Only fields the client treats as optional (null/false == missing). reactions, mentions and fromId stay: the
   // client reads them directly (stripping fromId broke the name button / profile card on history messages).
-  for (const k of ['chatColor', 'chatEffect', 'msgColor']) if (o[k] == null) delete o[k];
+  for (const k of ['chatColor', 'chatEffect', 'msgColor', 'avatarFx']) if (o[k] == null) delete o[k];
   if (o.hasAvatar === false) delete o.hasAvatar;
   return o as unknown as ChatMessage;
 }
@@ -2103,6 +2105,7 @@ live.profileChanged = (userId) => {
     if (s.user) {
       s.user.chatColor = fresh.chatColor;
       s.user.msgColor = fresh.msgColor ?? null;
+      s.user.avatarFx = fresh.avatarFx ?? null;
       s.user.chatEffect = fresh.chatEffect;
       s.user.hasAvatar = fresh.hasAvatar;
       s.user.accountId = fresh.id;

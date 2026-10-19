@@ -1,3 +1,4 @@
+import { publicAvatarFx } from '../shared/avatarFx';
 import { isVideoQuality } from '../shared/videoQuality';
 import { isUiTheme } from '../shared/uiTheme';
 import * as repo6 from './repo6';
@@ -636,6 +637,18 @@ export function createApp(roomList: () => unknown) {
     repo.setMsgColor(a.id, r.value);
     live.profileChanged(a.id);
     res.json({ ok: true, msgColor: r.value, adjusted: r.adjusted });
+  });
+  /** MC2: profile effect (avatar frame / glow). body { fx: id | null } */
+  app.patch('/api/me/avatar-fx', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const raw = (req.body as { fx?: unknown })?.fx;
+    const fx = raw == null || raw === '' || raw === 'none' ? null : publicAvatarFx(raw);
+    if (raw != null && raw !== '' && raw !== 'none' && !fx) return fail(res, 400, 'Pick one of the profile effects');
+    repo.setAvatarFx(a.id, fx);
+    live.profileChanged(a.id);
+    res.json({ ok: true, avatarFx: fx });
   });
   app.patch('/api/me/color', (req, res) => {
     const a = reqAccount(req);

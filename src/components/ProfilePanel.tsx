@@ -1,3 +1,4 @@
+import { AvatarFxSection } from './AvatarFxSection';
 import { useEffect, useRef, useState } from 'react';
 import { Profile2Section } from './Profile2';
 import { LevelSection } from './Level';
@@ -129,12 +130,13 @@ export function ProfileDialogBody({ account, onAccount, toast }: { account: Acco
   return (
     <div className="profile-dialog" data-panel="profile">
       <div className="profile-preview">
-        <UserAvatar nick={account.username} accountId={account.id} chatColor={account.chatColor} hasAvatar={account.hasAvatar} size={48} />
+        <UserAvatar nick={account.username} accountId={account.id} chatColor={account.chatColor} hasAvatar={account.hasAvatar} avatarFx={account.avatarFx} size={48} />
         <div>
           <NickLabel nick={account.username} chatColor={account.chatColor} chatEffect={account.chatEffect} />
           <p className="muted small">Name color and effect are on the chat bar. Shown in chat, the people list, and friends.</p>
         </div>
       </div>
+      <AvatarFxSection account={account} onAccount={onAccount} toast={toast} />
       <div className="profile-section">
         <div className="muted small">Avatar (JPEG/PNG/WebP, max 512 KB)</div>
         <div className="row-actions">

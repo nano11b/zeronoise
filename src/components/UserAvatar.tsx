@@ -1,3 +1,4 @@
+import { publicAvatarFx } from '../../shared/avatarFx';
 import { msgStyleCss, safeMsgStyle } from '../../shared/msgColor';
 import { chatColorClass, chatColorHex, chatEffectClass, isChatColorId } from '../../shared/colors';
 import { colorFor } from '../util';
@@ -8,6 +9,7 @@ export function UserAvatar({
   accountId,
   chatColor,
   hasAvatar,
+  avatarFx,
   size = 22,
   className = '',
 }: {
@@ -15,9 +17,13 @@ export function UserAvatar({
   accountId?: number | null;
   chatColor?: string | null;
   hasAvatar?: boolean;
+  /** MC2 profile effect (frame / glow); hidden by html.no-avatar-fx */
+  avatarFx?: string | null;
   size?: number;
   className?: string;
 }) {
+  const fxId = publicAvatarFx(avatarFx);
+  if (fxId) className = `${className} avatar-fx avatar-fx-${fxId}`;
   const letter = (nick || '?').slice(0, 1).toUpperCase();
   const id = isChatColorId(chatColor) ? chatColor : null;
   const bg = chatColorHex(id) || colorFor(nick);
