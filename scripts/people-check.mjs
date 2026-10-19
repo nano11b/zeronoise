@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { execFileSync } from 'node:child_process';
 
@@ -212,7 +212,79 @@ try {
     const kj = await k.json();
     ok(k.status === 200 && kj.ok, `A1: the hidden mod bot can still kick (${k.status} ${kj.error || ''})`);
   }
-  // @@A4
+  // @@A4 message colour
+  {
+    const D = await nodeUser(`PpD${R}`), E = await nodeUser(`PpE${R}`); sockets.push(D.s, E.s);
+    const rc2 = await emit(D.s, 'room:create', { name: `colours ${R}`, topic: 't', category: 'gaming' });
+    const CR = rc2.roomId;
+    for (const u of [D, E]) await emit(u.s, 'room:join', { roomId: CR });
+    const dark = await D.j.req('/api/me/msg-color', { color: '#101010' }, 'PATCH');
+    ok(dark.ok && dark.adjusted === true && dark.msgColor !== '#101010', `A4: an unreadable colour is lightened (#101010 -> ${dark.msgColor})`);
+    const bad = await D.j.req('/api/me/msg-color', { color: 'url(javascript:1)' }, 'PATCH');
+    ok(bad.status === 400, 'A4: anything that is not a #rrggbb colour is refused');
+    const g = await D.j.req('/api/me/msg-color', { color: '#ffd166' }, 'PATCH');
+    ok(g.ok && g.msgColor === '#ffd166' && g.adjusted === false, 'A4: a readable colour is kept as is');
+    // contrast on all four themes (independent check)
+    const { UI_PALETTES } = await import(pathToFileURL(path.join(ROOT, 'dist/server/shared/uiTheme.js')).href).catch(() => ({}));
+    if (UI_PALETTES) {
+      const lum = (h) => { const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+      const cr = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+      const worst = Math.min(...Object.values(UI_PALETTES).flatMap((p) => [p.bg, p.bg2, p.panel, p.panel2, p.primaryBg].map((b) => Math.min(cr(dark.msgColor, b), cr('#ffd166', b)))));
+      ok(worst >= 4.5, `A4: saved colours keep 4.5:1 on all four themes (worst ${worst.toFixed(2)})`);
+    }
+    const eMsg = events(E.s, 'chat:message');
+    await emit(D.s, 'chat:send', { text: `coloured ${R}` });
+    ok(await waitFor(() => eMsg.some((m) => m.text === `coloured ${R}` && m.msgColor === '#ffd166')), 'A4: live room lines carry the colour');
+    const hist = (await emit(E.s, 'room:join', { roomId: CR })).room?.history ?? [];
+    void hist;
+    // whisper (DM) between D and E
+    await emit(D.s, 'friends:request', { username: E.nick }); await emit(E.s, 'friends:respond', { userId: D.id, accept: true });
+    const st = await emit(D.s, 'dm:start', { usernames: [E.nick] });
+    await emit(D.s, 'dm:send', { convoId: st.convo?.id, text: `dm coloured ${R}` });
+    ok(st.ok && st.convo.members.some((m) => m.userId === D.id && m.msgColor === '#ffd166'), 'A4: whisper members carry the colour');
+    for (const width of [1366, 390]) {
+      const phone = width < 800;
+      const { ctx, page } = await pageFor(E, width);
+      await page.goto(`${BASE}/?room=${encodeURIComponent(CR)}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForSelector('.chat-log', { timeout: 15000 }); await dismiss(page); await sleep(700);
+      const col = await page.evaluate((t) => { const el = [...document.querySelectorAll('.chat-log .md')].find((e) => e.textContent.includes(t)); return el ? { attr: el.dataset.msgColor, color: getComputedStyle(el.querySelector('p') || el).color } : null; }, `coloured ${R}`);
+      ok(col?.attr === '#ffd166' && col.color === 'rgb(255, 209, 102)', `A4 ${width}: the room line is shown in the sender's colour`, JSON.stringify(col));
+      await shot(page, `x-msg-color-room-${width}`);
+      // every theme
+      for (const theme of ['dark-red', 'dark-green', 'dark-orange']) {
+        await page.evaluate((th) => document.documentElement.setAttribute('data-ui-theme', th), theme); await sleep(150);
+        const c2 = await page.evaluate((t) => getComputedStyle([...document.querySelectorAll('.chat-log .md')].find((e) => e.textContent.includes(t))).color, `coloured ${R}`);
+        ok(c2 === 'rgb(255, 209, 102)', `A4 ${width}: colour holds on ${theme}`);
+        if (width === 1366) await shot(page, `x-msg-color-${theme}-${width}`);
+      }
+      await page.evaluate(() => document.documentElement.removeAttribute('data-ui-theme'));
+      // Profile dialog: section + viewer opt-out
+      await page.$eval('[data-action="profile"]', (b) => b.click()); await sleep(500);
+      await page.waitForSelector('[data-action="open-profile"]', { timeout: 6000 });
+      await page.$eval('[data-action="open-profile"]', (b) => b.click());
+      await page.waitForSelector('[data-section="msg-color"]', { timeout: 6000 });
+      await page.$eval('[data-section="msg-color"]', (d) => d.scrollIntoView({ block: 'start' }));
+      // type an unreadable custom colour: the dialog warns it will be lightened
+      await page.$eval('[data-field="msg-color"]', (i) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, '#202020'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); });
+      await sleep(200);
+      ok(!!(await page.$('[data-testid="msg-color-adjusted"]')), `A4 ${width}: the dialog warns before saving a colour that would be lightened`);
+      const ov = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+      ok(!ov, `A4 ${width}: the Profile dialog fits`);
+      await shot(page, `x-msg-color-profile-${width}`);
+      await page.$eval('[data-action="ignore-msg-colors"]', (c) => c.click()); await sleep(200);
+      await page.keyboard.press('Escape'); await sleep(300);
+      const after = await page.evaluate((t) => { const el = [...document.querySelectorAll('.chat-log .md')].find((e) => e.textContent.includes(t)); return el?.dataset.msgColor ?? null; }, `coloured ${R}`);
+      ok(after === null, `A4 ${width}: "ignore custom message colours" shows the line in the normal colour`);
+      await page.evaluate(() => localStorage.removeItem('zn.ignoreMsgColors'));
+      // whispers
+      await page.goto(`${BASE}/?whispers=${encodeURIComponent(D.nick)}`, { waitUntil: 'domcontentloaded' }); await sleep(1200); await dismiss(page);
+      const dmc = await page.waitForFunction((t) => { const el = [...document.querySelectorAll('[data-testid="dm-log"] .md')].find((e) => e.textContent.includes(t)); return el && el.dataset.msgColor; }, { timeout: 8000 }, `dm coloured ${R}`).then((h) => h.jsonValue(), () => null);
+      ok(dmc === '#ffd166', `A4 ${width}: whispers show the sender's colour (${dmc})`);
+      await shot(page, `x-msg-color-whisper-${width}`);
+      void phone;
+      await ctx.close();
+    }
+  }
 } catch (e) {
   failed++; console.log('FAIL  crashed:', e.stack || e.message);
 } finally {

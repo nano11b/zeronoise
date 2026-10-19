@@ -229,7 +229,7 @@ export function memberView(rows: MemberRow[], convo: ConvoRow, online: (id: numb
   return rows.map((r) => {
     const u = users.get(r.user_id);
     return {
-      userId: r.user_id, username: u?.username ?? 'deleted', chatColor: u?.chat_color ?? null, hasAvatar: !!u?.has_avatar,
+      userId: r.user_id, username: u?.username ?? 'deleted', chatColor: u?.chat_color ?? null, msgColor: u?.msg_color ?? null, hasAvatar: !!u?.has_avatar,
       ...(r.left_at != null ? { left: true } : {}), online: online(r.user_id),
       ...(withRead ? { readTs: r.read_ts } : {}), ...(convo.kind === 'group' && convo.created_by === r.user_id ? { owner: true } : {}),
     };

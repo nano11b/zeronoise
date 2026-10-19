@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { DM, DM_FILE_TYPES, disappearLabel, type DmConvo, type DmMessage, type DmPolicy } from '../../shared/dm';
+import { useMsgColor } from '../msgColorPref';
 import { dmCall, dmSock, loadDm, loadOlder, markRead, openConvo, requestCount, setDmPrefs, totalUnread, useDm, blockLocally, type WhisperStart } from '../dmStore';
 import { call, socket } from '../socket';
 import { fmtTime } from '../util';
@@ -250,7 +251,7 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
       <div className="dm-log" ref={logRef} role="log" aria-live="polite" aria-relevant="additions" data-testid="dm-log">
         {s.more && <button type="button" className="linklike small" onClick={() => void loadOlder()} data-action="dm-older">Load older</button>}
         {s.messages.map((m) => (
-          <Line key={m.id} m={m} mine={m.fromId === myId} canAct={c.state === 'active'} menuOpen={menuFor === m.id} onMenu={(o) => setMenuFor(o ? m.id : null)}
+          <Line key={m.id} m={m} mine={m.fromId === myId} color={c.members.find((x) => x.userId === m.fromId)?.msgColor} canAct={c.state === 'active'} menuOpen={menuFor === m.id} onMenu={(o) => setMenuFor(o ? m.id : null)}
             onReply={() => { setEditing(null); setReplyTo(m); setMenuFor(null); taRef.current?.focus(); }}
             onEdit={() => { setReplyTo(null); setEditing(m); setText(m.text); setMenuFor(null); taRef.current?.focus(); }}
             onDelete={() => { setMenuFor(null); if (window.confirm('Delete this message for everyone?')) void dmCall('dm:delete', { convoId: c.id, messageId: m.id }).catch((e) => toast((e as Error).message, 'error')); }}
@@ -280,10 +281,11 @@ function Thread({ c, myId, toast, onJoinCall }: { c: DmConvo; myId: number; toas
 }
 
 const QUICK = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
-function Line({ m, mine, children, canAct, menuOpen, onMenu, onReply, onEdit, onDelete, onReact, onReport }: {
-  m: DmMessage; mine: boolean; children?: ReactNode; canAct?: boolean; menuOpen?: boolean; onMenu?: (open: boolean) => void;
+function Line({ m, mine, color, children, canAct, menuOpen, onMenu, onReply, onEdit, onDelete, onReact, onReport }: {
+  m: DmMessage; mine: boolean; color?: string | null; children?: ReactNode; canAct?: boolean; menuOpen?: boolean; onMenu?: (open: boolean) => void;
   onReply?: () => void; onEdit?: () => void; onDelete?: () => void; onReact?: (emoji: string) => void; onReport?: () => void;
 }) {
+  const paint = useMsgColor(color);
   if (m.kind === 'system') return <div className="dm-system small muted" data-msg={m.id} data-kind="system">{m.text}</div>;
   const live = canAct && !m.deleted;
   return (
@@ -291,7 +293,7 @@ function Line({ m, mine, children, canAct, menuOpen, onMenu, onReply, onEdit, on
       <div className="dm-bubble">
         {!mine && <span className="dm-from small">{m.from}</span>}
         {m.replyTo && <div className="dm-quote small" data-testid="dm-quote"><strong>{m.replyTo.from}</strong> {m.replyTo.text.slice(0, 120)}</div>}
-        {m.deleted ? <em className="muted">Message deleted</em> : m.file ? <FileView f={m.file} /> : m.voice ? <span data-testid="dm-voice"><VoicePlayer voice={{ id: m.voice.url.split('/').pop() ?? m.id, url: m.voice.url, durationMs: m.voice.durationMs, mime: 'audio/webm' }} /></span> : <ChatText text={m.text} className="dm-text" />}
+        {m.deleted ? <em className="muted">Message deleted</em> : m.file ? <FileView f={m.file} /> : m.voice ? <span data-testid="dm-voice"><VoicePlayer voice={{ id: m.voice.url.split('/').pop() ?? m.id, url: m.voice.url, durationMs: m.voice.durationMs, mime: 'audio/webm' }} /></span> : <ChatText text={m.text} className="dm-text" color={paint} />}
         <span className="dm-meta small muted">{m.expiresAt ? '⏱ ' : ''}{fmtTime(m.ts)}{m.editedAt && !m.deleted ? ' · edited' : ''}</span>
         {live && <button type="button" className="dm-more" aria-label="Message actions" aria-expanded={!!menuOpen} onClick={() => onMenu?.(!menuOpen)} data-action="dm-msg-menu">⋯</button>}
       </div>

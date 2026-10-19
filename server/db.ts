@@ -991,6 +991,10 @@ const MIGRATIONS: string[] = [
     embeds TEXT
   )
   `,
+  // 48 batch X: chatter-chosen message text colour (#rrggbb, contrast-checked on every theme)
+  `
+  ALTER TABLE users ADD COLUMN msg_color TEXT;
+  `,
 ];
 
 /**

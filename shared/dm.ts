@@ -20,7 +20,7 @@ export const DM_FILE_TYPES: Record<string, string> = {
   'application/pdf': 'file', 'text/plain': 'file', 'application/zip': 'file',
   'audio/mpeg': 'file', 'audio/ogg': 'file', 'video/mp4': 'file',
 };
-export interface DmMember { userId: number; username: string; chatColor?: string | null; hasAvatar?: boolean; left?: boolean; online?: boolean; readTs?: number; owner?: boolean }
+export interface DmMember { userId: number; username: string; chatColor?: string | null; msgColor?: string | null; hasAvatar?: boolean; left?: boolean; online?: boolean; readTs?: number; owner?: boolean }
 export interface DmConvo {
   id: string; kind: 'direct' | 'group'; name: string | null; createdBy: number;
   members: DmMember[]; lastTs: number; lastText: string | null; unread: number;

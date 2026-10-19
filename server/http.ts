@@ -38,6 +38,7 @@ import { consumeNativeHandoff, issueNativeHandoff } from './nativeHandoff';
 import { registerDownloads } from './downloads';
 import { privacyHtml, termsHtml } from './legal';
 import { botApiHtml, botApiMarkdown, llmsTxt } from './botDocs';
+import { readableMsgColor } from '../shared/msgColor';
 import { isValidNick, normalizeEmail } from './validate';
 import { hasFilteredWord } from './moderation';
 import { clientPrecompressed, clientTextAssets, sendIndexHtml, staticHeaders } from './staticAssets';
@@ -620,6 +621,19 @@ export function createApp(roomList: () => unknown) {
     res.json({ ok: true, colors: CHAT_COLORS });
   });
 
+  /** batch X: message text colour. body { color: '#rrggbb' | null }. Unreadable picks come back lightened (adjusted: true). */
+  app.patch('/api/me/msg-color', (req, res) => {
+    const a = reqAccount(req);
+    if (!a) return fail(res, 401, 'Sign in first');
+    if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
+    const raw = (req.body as { color?: unknown })?.color;
+    if (raw === null || raw === '') { repo.setMsgColor(a.id, null); live.profileChanged(a.id); return res.json({ ok: true, msgColor: null, adjusted: false }); }
+    const r = readableMsgColor(raw);
+    if (!r) return fail(res, 400, 'Pick a colour (#rrggbb)');
+    repo.setMsgColor(a.id, r.color);
+    live.profileChanged(a.id);
+    res.json({ ok: true, msgColor: r.color, adjusted: r.adjusted });
+  });
   app.patch('/api/me/color', (req, res) => {
     const a = reqAccount(req);
     if (!a) return fail(res, 401, 'Sign in first');

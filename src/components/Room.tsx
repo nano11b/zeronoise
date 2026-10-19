@@ -5,6 +5,8 @@ import { RoleChip } from './RoleChip';
 import { TranslationLine, type TranslationState } from './TranslationLine';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { openWhispers } from '../dmStore';
+import { useIgnoreMsgColors } from '../msgColorPref';
+import { safeMsgColor } from '../../shared/msgColor';
 import { useTileFit } from '../useTileFit';
 import { APP_NAME, LIMITS } from '../../shared/config';
 import type { ChatMessage, RoomState, RoomSummary, SignalData, UserInfo, WatchState, WhisperInfo, WhisperMessage } from '../../shared/types';
@@ -258,6 +260,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const [bigId, setBigId] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const ignoreMsgColors = useIgnoreMsgColors();
+  const lineColor = (m: { msgColor?: string | null; webhook?: unknown }) => (ignoreMsgColors || m.webhook ? null : safeMsgColor(m.msgColor));
   const longPressed = useRef(false);
   const pressTimer = useRef<number | null>(null);
   const pressStart = useRef<{ x: number; y: number } | null>(null);
@@ -2190,7 +2194,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     </span>
                     {m.hidden && !canRoomManage ? <span className="msg-hidden" data-hidden="1">Hidden pending review</span> : <>
                     {m.hidden && <span className="tag tag-warn msg-hidden-tag" data-hidden="1" title="Auto-hidden after several reports; others see a collapsed line">Hidden pending review</span>}
-                    {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <>{m.text.startsWith('🎬') && <span className="small muted clip-label" data-clip>🎬 Clip from the room recording</span>}<VoicePlayer voice={m.voice} /></> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <>{!m.webhook?.fallback && <ChatText text={m.text} className="text" />}{m.webhook?.embeds?.length ? <WebhookEmbeds embeds={m.webhook.embeds} /> : null}{translations[m.id] && <TranslationLine t={translations[m.id]} onHide={() => setTranslations((p) => { const n = { ...p }; delete n[m.id]; return n; })} />}</>}
+                    {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <>{m.text.startsWith('🎬') && <span className="small muted clip-label" data-clip>🎬 Clip from the room recording</span>}<VoicePlayer voice={m.voice} /></> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <>{!m.webhook?.fallback && <ChatText text={m.text} className="text" color={lineColor(m)} />}{m.webhook?.embeds?.length ? <WebhookEmbeds embeds={m.webhook.embeds} /> : null}{translations[m.id] && <TranslationLine t={translations[m.id]} onHide={() => setTranslations((p) => { const n = { ...p }; delete n[m.id]; return n; })} />}</>}
                     </>}
                     {m.editedAt ? editedMark(m) : null}
                     {m.preview && account?.linkPreviews !== false && !m.burn && !(m.hidden && !canRoomManage) && <LinkPreviewCard messageId={m.id} preview={m.preview} canRemove={mineMsg(m)} onRemove={() => removePreview(m)} />}
@@ -2342,7 +2346,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                           )}
                         </span>
                       )}{' '}
-                      {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <>{m.text.startsWith('🎬') && <span className="small muted clip-label" data-clip>🎬 Clip from the room recording</span>}<VoicePlayer voice={m.voice} /></> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <><ChatText text={m.text} className="text" />{translations[m.id] && <TranslationLine t={translations[m.id]} onHide={() => setTranslations((p) => { const n = { ...p }; delete n[m.id]; return n; })} />}</>}
+                      {m.burn ? <BurnBody id={m.id} text={m.text} burn={m.burn} onLocalBurn={onLocalBurn} toast={toast} /> : m.voice ? <>{m.text.startsWith('🎬') && <span className="small muted clip-label" data-clip>🎬 Clip from the room recording</span>}<VoicePlayer voice={m.voice} /></> : m.poll ? <PollCard poll={m.poll} canClose={mineMsg(m) || canRoomManage} toast={toast} onPoll={applyMyPoll} /> : <><ChatText text={m.text} className="text" color={lineColor(m)} />{translations[m.id] && <TranslationLine t={translations[m.id]} onHide={() => setTranslations((p) => { const n = { ...p }; delete n[m.id]; return n; })} />}</>}
                       {m.kind === 'chat' && m.editedAt ? editedMark(m) : null}
                       {m.preview && !m.burn && <LinkPreviewCard messageId={m.id} preview={m.preview} canRemove={mineMsg(m)} onRemove={() => removePreview(m)} />}
                     </div>

@@ -11,6 +11,7 @@ import { BioSection, PrivacySection, PushSection } from './ProfileExtras';
 import { Icon } from '../icons';
 import { useInstallOffer } from '../pwa';
 import { ThemePicker } from './ThemePicker';
+import { MessageColorSection } from './MessageColor';
 import type { UiTheme } from '../../shared/uiTheme';
 import { useMentions } from '../mentions';
 
@@ -134,6 +135,7 @@ export function ProfileDialogBody({ account, onAccount, toast }: { account: Acco
           <p className="muted small">Name color and effect are on the chat bar. Shown in chat, the people list, and friends.</p>
         </div>
       </div>
+      <MessageColorSection account={account} onAccount={onAccount} toast={toast} />
       <div className="profile-section">
         <div className="muted small">Avatar (JPEG/PNG/WebP, max 512 KB)</div>
         <div className="row-actions">

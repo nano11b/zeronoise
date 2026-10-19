@@ -2638,3 +2638,12 @@ html[data-ui-theme="dark-orange"] {
 @media (max-width: 800px) {
   .users .menu.person-menu { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); top: auto; width: auto; max-height: 70vh; overflow-y: auto; z-index: 1200; box-shadow: 0 -8px 30px rgba(0,0,0,.45); }
 }
+/* batch X: message colour */
+.msg-color-previews { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px; margin-top: 6px; }
+.msg-color-preview { border: 1px solid; border-radius: 8px; padding: 6px 8px; font-size: .9em; }
+.msg-color-preview b { display: block; font-size: .75em; font-weight: 600; }
+.msg-color-custom { align-items: center; flex-wrap: wrap; }
+.msg-color-custom input[type="color"] { width: 44px; height: 32px; padding: 0; vertical-align: middle; }
+.warn-text { color: var(--accent-2); }
+.md.msg-colored p, .md.msg-colored li, .md.msg-colored blockquote { color: inherit; }
+.msg-color-section .check-row { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; } .msg-color-section .check-row input { width: auto; flex: none; margin-top: 3px; }

@@ -9,6 +9,8 @@ export type AccountRole = Exclude<Role, 'guest'>;
 export interface Account {
   id: number; username: string; role: AccountRole; chatColor: string | null; chatEffect: string | null; hasAvatar: boolean;
   email: string | null; emailVerified: boolean;
+  /** batch X (migration 48) */
+  msgColor: string | null;
 }
 /** Who someone is, for ban / mute / room-ban matching. */
 export interface Ident { userId: number | null; nick: string; ip: string; deviceIds: string[] }
@@ -23,6 +25,7 @@ export interface UserRow {
   id: number; username: string; role: AccountRole; password_hash: string | null; google_sub: string | null; discord_id: string | null;
   tiktok_open_id: string | null;
   created_at: number; last_login_at: number | null; chat_color: string | null; chat_effect: string | null; has_avatar: number;
+  msg_color?: string | null;
   email: string | null; email_lower: string | null; email_verified_at: number | null;
   /** batch D (migration 42) */
   xp?: number; xp_hidden?: number;
@@ -45,7 +48,7 @@ export function setUiTheme(id: number, v: string | null) {
 }
 const toAccount = (r: UserRow): Account => ({
   id: r.id, username: r.username, role: r.role, chatColor: r.chat_color ?? null, chatEffect: publicChatEffect(r.chat_effect), hasAvatar: !!r.has_avatar,
-  email: r.email ?? null, emailVerified: !!r.email_verified_at,
+  email: r.email ?? null, emailVerified: !!r.email_verified_at, msgColor: r.msg_color ?? null,
 });
 
 export function userByName(name: string): UserRow | undefined {
@@ -116,6 +119,9 @@ export function setRole(id: number, role: AccountRole) {
 }
 export function setChatColor(id: number, color: string | null) {
   q('UPDATE users SET chat_color = ? WHERE id = ?').run(color, id);
+}
+export function setMsgColor(id: number, color: string | null) {
+  q('UPDATE users SET msg_color = ? WHERE id = ?').run(color, id);
 }
 export function setChatEffect(id: number, effect: string | null) {
   q('UPDATE users SET chat_effect = ? WHERE id = ?').run(effect, id);
