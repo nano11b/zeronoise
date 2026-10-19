@@ -30,6 +30,7 @@ import { INVITE_PATH_RE } from '../shared/inviteCode';
 // Heavy or rarely used screens load on demand. The room preloads once you are signed in.
 const loadRoom = () => import('./components/Room');
 const Room = lazyNamed(loadRoom, 'Room');
+import { ShortcutsHost } from './components/Shortcuts';
 const AdminPanel = lazyNamed(() => import('./components/AdminPanel'), 'AdminPanel');
 const Browse = lazyNamed(() => import('./components/Browse'), 'Browse');
 const PmDock = lazyNamed(() => import('./components/PmDock'), 'PmDock');
@@ -755,6 +756,7 @@ export default function App() {
         {toasts.map((t) => <div key={t.id} className={`toast ${t.tone ?? ''}`}>{t.text}</div>)}
       </div>
       </div>
+      <ShortcutsHost />
       {gamesUsed && <Lazy><GamesDock open={gamesOpen} onClose={() => setGamesOpen(false)} toast={toast} trivia={{ roomId: me && room ? room.id : null, canStop: !!room && (room.isOwner || room.canModerate), me: me?.nick }} /></Lazy>}
     </div>
   );

@@ -83,6 +83,7 @@ export function ProfilePanel({
         <button type="button" data-action="open-notifications" onClick={() => onOpen('notifications')}><Icon name="bell" /> Notifications</button>
         <InstallItem />
         <a href="/download" data-action="get-app-menu"><Icon name="download" /> Get the app</a>
+        <button type="button" data-action="open-shortcuts" onClick={() => window.dispatchEvent(new Event('zn:shortcuts'))}><Icon name="board" /> Keyboard shortcuts <kbd className="menu-kbd" aria-hidden="true">?</kbd></button>
         <a href="/updates" data-action="whats-new-menu"><Icon name="bell" /> What's new</a>
       </div>
       <ThemePicker onSaved={saveTheme} />

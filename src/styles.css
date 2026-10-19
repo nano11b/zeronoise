@@ -2737,3 +2737,13 @@ html.no-avatar-fx .user-avatar.avatar-fx { box-shadow: none !important; animatio
 .event-recur { font-weight: 500; color: var(--muted); margin-left: 4px; white-space: nowrap; }
 .saved-dialog .saved-filters input { flex: 1; min-width: 0; }
 .saved-dialog .hit-list { max-height: min(60vh, 520px); overflow-y: auto; }
+/* batch MC2: keyboard shortcuts */
+.shortcuts { display: grid; gap: 12px; }
+.shortcuts h4 { margin: 0 0 4px; }
+.shortcuts dl { margin: 0; display: grid; gap: 4px; }
+.sc-row { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 10px; align-items: baseline; }
+.sc-row dt { white-space: nowrap; } .sc-row dd { margin: 0; color: var(--muted); }
+.shortcuts kbd, .menu-kbd { display: inline-block; min-width: 1.6em; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: var(--bg-2); font: 600 12px/1.5 ui-monospace, monospace; text-align: center; color: var(--text); }
+.menu-kbd { margin-left: auto; }
+.sc-off { display: flex; gap: 8px; align-items: flex-start; }
+.shortcuts label.sc-off { display: flex !important; grid-template-columns: none; justify-content: flex-start; text-align: left; } .shortcuts label.sc-off input { width: auto; flex: none; margin-top: 2px; } .shortcuts label.sc-off span, .shortcuts label.sc-off { white-space: normal; }
