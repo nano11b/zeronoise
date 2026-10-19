@@ -2,6 +2,31 @@
   "about": "Public changelog for /updates. Newest first. Add one entry per release: id (unique, used for the What's new notice), date (YYYY-MM-DD, Eastern time), title, optional period (shown instead of the date), and sections of short, user-facing items. No internal details: no secrets, server names, addresses, file paths or signing details.",
   "entries": [
     {
+      "id": "2026-10-19-rooms-plus",
+      "date": "2026-10-19",
+      "title": "Gradient colours, stickers, room games, a music queue and more",
+      "sections": [
+        { "heading": "Colours and profile", "items": [
+          "Message colour now lives in the chat bar's + menu, next to name colour, and can be a gradient of 2 or 3 colours (presets or your own). Every colour is checked for contrast on all four themes and lightened if it would be hard to read.",
+          "Names can use gradients too, in the same picker.",
+          "Gradients never animate, turn solid when a message is selected or highlighted, and the \"Ignore custom colours\" setting switches them off.",
+          "Subtle avatar frames and glows under Profile → Avatar effect. Anyone can turn effects off for themselves; motion only plays if your device allows animation."
+        ]},
+        { "heading": "Chat", "items": [
+          "Commands: /me, /shrug, /roll 2d6, /flip, plus up to 20 text commands per room that the owner sets up. Type / to see the list.",
+          "Sticker packs per room: owners upload up to 3 packs of 24 stickers. Staff review each sticker before members can send it.",
+          "Saved messages: everything you bookmark, from any room or thread, in one private list under Your profile → Saved messages.",
+          "Press ? for keyboard shortcuts (and / to jump to the message box). Single-key shortcuts can be turned off."
+        ]},
+        { "heading": "Rooms", "items": [
+          "Room games under Games → Room games: tic-tac-toe against another member and word-chain rounds, with room leaderboards (trivia included).",
+          "Watch together has a shared music queue: anyone can queue YouTube links; the owner, or a role with music control, can skip and remove songs.",
+          "Events can repeat every day, week, two weeks or month. RSVPs and reminders carry over to each new date, and owners can skip one date or end the series.",
+          "The person menu no longer gets cut off at the edge of the people list, and on phones the moderation actions sit in an easy-to-reach sheet."
+        ]}
+      ]
+    },
+    {
       "id": "2026-10-18-webhooks",
       "date": "2026-10-18",
       "title": "Room webhooks, a friendlier people list and message colours",
