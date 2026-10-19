@@ -3,7 +3,7 @@ import type { TriviaScore, TriviaState } from '../../shared/types';
 import { TRIVIA_CATEGORIES, TRIVIA_COUNTS, TRIVIA_DEFAULT_COUNT, TRIVIA_LABELS, type TriviaPick } from '../../shared/trivia';
 import { socket } from '../socket';
 
-export interface TriviaCtx { roomId: string | null; canStop: boolean }
+export interface TriviaCtx { roomId: string | null; canStop: boolean; me?: string }
 type Toast = (t: string, tone?: 'error' | 'info') => void;
 
 interface Live {

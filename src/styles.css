@@ -2717,3 +2717,13 @@ html.no-avatar-fx .user-avatar.avatar-fx { box-shadow: none !important; animatio
 .sticker-pack-edit { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; }
 .admin-sticker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
 .admin-sticker { margin: 0; border: 1px solid var(--line); border-radius: 10px; padding: 8px; } .admin-sticker img { object-fit: contain; background: var(--bg-2); border-radius: 8px; }
+/* batch MC2: room games */
+.room-games { display: grid; gap: 14px; }
+.room-games h4 { margin: 0 0 6px; }
+.rg-ttt-grid { display: grid; grid-template-columns: repeat(3, 56px); gap: 6px; margin-top: 6px; }
+.rg-cell { width: 56px; height: 56px; font-size: 26px; font-weight: 700; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-2); color: var(--text); }
+.rg-cell:not(:disabled):hover { background: color-mix(in srgb, var(--text) 8%, var(--bg-2)); }
+.rg-cell.win { outline: 2px solid var(--ok, #34d399); }
+.rg-letter { font-size: 1.15em; }
+.rg-words, .rg-top { margin: 6px 0 0; padding-left: 1.4em; }
+.rg-top li span { color: var(--muted); }

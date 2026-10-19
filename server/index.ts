@@ -45,6 +45,7 @@ import { live, type BotFeedQuery, type BotIdentity, type BotModBody, type BotMod
 import { deleteRoomSoundFiles, soundPlayAllowed } from './sounds';
 import { deleteVoiceForMessages, deleteVoiceForRoom, isVoiceUploader, sweepVoiceNotes } from './voiceNotes';
 import { TriviaRound, pickQuestions, type TriviaPlayer } from './trivia';
+import { RoomGames, gameTop } from './roomGames';
 import { canPlayTrivia, isTriviaCount, isTriviaPick, TRIVIA_PAUSE_MS, TRIVIA_QUESTION_MS, TRIVIA_TOP } from '../shared/trivia';
 import { BADGES, badgeById, crossedBadges, hourIn, isNightOwlHour, isValidTimeZone, shownBadges, type BadgeDef, type BadgeStat } from '../shared/badges';
 import { fxCooldown, isFxId, fxSlashCommand } from '../shared/fx';
@@ -956,6 +957,13 @@ function sweepBurns() {
   try { for (const row of repo.liveBurnMessages()) checkBurn(row.id, row); } catch (err) { console.error('[burn] sweep failed', err); }
 }
 
+// ---------- room games (batch MC2) ----------
+const roomGames = new Map<string, RoomGames>();
+function gamesOf(room: Room): RoomGames {
+  let g = roomGames.get(room.id);
+  if (!g) { g = new RoomGames(room.id, (st) => io.to(`room:${room.id}`).emit('game:state', st)); roomGames.set(room.id, g); }
+  return g;
+}
 // ---------- trivia ----------
 /** Test-only overrides (default 15 s / 4 s). */
 const TRIVIA_Q_MS = Math.min(60_000, Math.max(500, Number(process.env.TRIVIA_QUESTION_MS) || TRIVIA_QUESTION_MS));
@@ -1129,6 +1137,7 @@ function dropMembership(id: string, s: Session, notice: string) {
   if (room.members.size === 0) { room.stage.speakers.clear(); room.stage.hands.clear(); }
   else if (room.stage.on) emitStage(room);
   if (room.trivia && triviaHumans(room) === 0) stopTrivia(room, null);
+  if (room.members.size === 0) { roomGames.get(room.id)?.dispose(); roomGames.delete(room.id); }
   if (room.members.size === 0) { room.board = []; room.watch = null; room.whispers.clear(); room.triviaGuests.clear(); }
   if (s.user) io.to(`room:${room.id}`).emit('chat:typing', { id, nick: s.user.nick, typing: false });
   io.to(`room:${room.id}`).emit('user:left', { id });
@@ -2937,6 +2946,35 @@ function onConnection(socket: AppSocket) {
     if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited' });
     const round = room.trivia?.active ? room.trivia : null;
     ack({ ok: true, state: round ? round.publicState() : null, myChoice: round ? round.myChoice(triviaPlayerOf(s).key) : null, board: triviaBoard(room) });
+  });
+
+  const gameRl = new RateLimiter(6, 3000);
+  socket.on('game:act', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = triviaCtx();
+    if ('error' in c) return ack({ ok: false, error: c.error === 'Bots cannot play trivia' ? 'Bots cannot play games' : c.error });
+    if (!gameRl.take()) return ack({ ok: false, error: 'Slow down', status: 429 });
+    const starts = (p?.game === 'ttt' && p.action === 'open') || (p?.game === 'chain' && p.action === 'start');
+    if (starts && limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited', status: 429 });
+    const g = gamesOf(c.room);
+    const pl = triviaPlayerOf(c.s);
+    const mgr = isStaff(c.s) || isOwner(c.s, c.room);
+    let r: { ok: true } | { ok: false; error: string; status?: number };
+    if (p?.game === 'ttt') {
+      r = p.action === 'open' ? g.tttOpen(pl) : p.action === 'join' ? g.tttJoin(pl) : p.action === 'move' ? g.tttMove(pl, Number(p.cell), p.gameId) : p.action === 'end' ? g.tttEnd(pl, mgr) : { ok: false, error: 'Unknown action' };
+    } else if (p?.game === 'chain') {
+      r = p.action === 'start' ? g.chainStart(pl) : p.action === 'play' ? g.chainPlay(pl, p.word) : p.action === 'stop' ? g.chainStop(pl, mgr) : { ok: false, error: 'Unknown action' };
+    } else r = { ok: false, error: 'Unknown game' };
+    ack(r);
+  });
+  socket.on('game:get', (ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const s = session();
+    const room = s.roomId ? rooms.get(s.roomId) : undefined;
+    if (!s.user || !room || !room.members.has(socket.id)) return ack({ ok: false, error: 'Not in a room' });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited' });
+    const st = roomGames.get(room.id)?.state() ?? { ttt: null, chain: null };
+    ack({ ok: true, state: st, boards: { ttt: gameTop(room.id, 'ttt'), chain: gameTop(room.id, 'chain'), trivia: triviaBoard(room).map((t) => ({ name: t.name, points: t.points, wins: t.wins, played: t.rounds })) } });
   });
 
   socket.on('chat:voice', (p, ackRaw) => {

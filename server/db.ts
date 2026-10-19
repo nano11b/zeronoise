@@ -1037,6 +1037,20 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS room_stickers_pack ON room_stickers(pack_id);
   CREATE INDEX IF NOT EXISTS room_stickers_status ON room_stickers(status);
   `,
+  // 52 batch MC2: per-room leaderboards for room games (tic-tac-toe, word chain); trivia keeps trivia_scores
+  `
+  CREATE TABLE IF NOT EXISTS room_game_scores (
+    room_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    game TEXT NOT NULL,
+    points INTEGER NOT NULL DEFAULT 0,
+    wins INTEGER NOT NULL DEFAULT 0,
+    played INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, user_id, game)
+  );
+  CREATE INDEX IF NOT EXISTS room_game_scores_board ON room_game_scores(room_id, game, points DESC);
+  `,
 ];
 
 /**

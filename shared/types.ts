@@ -278,6 +278,8 @@ export interface ClientToServer {
   'trivia:start': (p: { count: number; category: string }, ack: Ack<{ state: TriviaState }>) => void;
   'trivia:answer': (p: { roundId: string; index: number; choice: number }, ack: Ack) => void;
   'trivia:stop': (ack: Ack) => void;
+  'game:act': (p: { game: 'ttt' | 'chain'; action: 'open' | 'join' | 'move' | 'end' | 'start' | 'play' | 'stop'; cell?: number; gameId?: string; word?: string }, ack: Ack) => void;
+  'game:get': (ack: Ack<{ state: import('./roomGames').RoomGamesState; boards: Record<'ttt' | 'chain' | 'trivia', import('./roomGames').GameBoardRow[]> }>) => void;
   'trivia:get': (ack: Ack<{ state: TriviaState | null; myChoice: number | null; board: TriviaScore[] }>) => void;
   'fx:play': (p: { id: string }, ack: Ack) => void;
   'board:stroke': (p: { id: string; color: BoardColor; points: [number, number][] }) => void;
@@ -513,6 +515,7 @@ export interface ServerToClient {
   'whisper:seen': (p: { whisperId: string; messageId: string; by: string; nick: string }) => void;
   /** You are no longer in this whisper (it ended, or you left / left the room). */
   'whisper:ended': (p: { whisperId: string; reason: 'ended' | 'left' }) => void;
+  'game:state': (s: import('./roomGames').RoomGamesState) => void;
   'trivia:state': (s: TriviaState) => void;
   'trivia:progress': (p: { roundId: string; index: number; answered: number; players: number }) => void;
   'trivia:ended': (p: { state: TriviaState; winner: TriviaScore | null; board: TriviaScore[]; stopped: boolean; by?: string }) => void;

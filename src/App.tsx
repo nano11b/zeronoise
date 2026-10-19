@@ -755,7 +755,7 @@ export default function App() {
         {toasts.map((t) => <div key={t.id} className={`toast ${t.tone ?? ''}`}>{t.text}</div>)}
       </div>
       </div>
-      {gamesUsed && <Lazy><GamesDock open={gamesOpen} onClose={() => setGamesOpen(false)} toast={toast} trivia={{ roomId: me && room ? room.id : null, canStop: !!room && (room.isOwner || room.canModerate) }} /></Lazy>}
+      {gamesUsed && <Lazy><GamesDock open={gamesOpen} onClose={() => setGamesOpen(false)} toast={toast} trivia={{ roomId: me && room ? room.id : null, canStop: !!room && (room.isOwner || room.canModerate), me: me?.nick }} /></Lazy>}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { Icon } from '../icons';
 import { subscribeGamesSlot } from './GamesSlot';
 import { useEscape } from '../a11y';
 import { TriviaPanel, useTrivia, type TriviaCtx } from './TriviaPanel';
+import { RoomGamesPanel } from './RoomGamesPanel';
 
 const KEY = 'camchat.games';
 type Scores = { duckBest: number; reactBest: number | null; ttt: { x: number; o: number; draws: number } };
@@ -284,7 +285,7 @@ export function GamesDock({ open, onClose, trivia, toast }: {
   trivia: TriviaCtx;
   toast: (t: string, tone?: 'error' | 'info') => void;
 }) {
-  const [tab, setTab] = useState<'duck' | 'react' | 'ttt' | 'trivia'>('duck');
+  const [tab, setTab] = useState<'duck' | 'react' | 'ttt' | 'trivia' | 'room'>('duck');
   const { live: triviaLive, answer: triviaAnswer } = useTrivia(trivia.roomId, toast, open && tab === 'trivia');
   const [scores, setScores] = useState<Scores>(loadScores);
   const [slot, setSlot] = useState<HTMLElement | null>(null);
@@ -341,10 +342,12 @@ export function GamesDock({ open, onClose, trivia, toast }: {
         <button type="button" className={`tab ${tab === 'react' ? 'active' : ''}`} onClick={() => setTab('react')}>Reaction tap</button>
         <button type="button" className={`tab ${tab === 'ttt' ? 'active' : ''}`} onClick={() => setTab('ttt')}>Tic-tac-toe</button>
         <button type="button" className={`tab ${tab === 'trivia' ? 'active' : ''}`} onClick={() => setTab('trivia')} data-tab="trivia">Trivia{triviaLive.state && tab !== 'trivia' ? ' •' : ''}</button>
+        <button type="button" className={`tab ${tab === 'room' ? 'active' : ''}`} onClick={() => setTab('room')} data-tab="room-games">Room games</button>
       </div>
       {open && tab === 'duck' && <DuckShoot best={scores.duckBest} onBest={(n) => patch({ ...scores, duckBest: n })} />}
       {open && tab === 'react' && <ReactionTap best={scores.reactBest} onBest={(ms) => patch({ ...scores, reactBest: ms })} />}
       {open && tab === 'ttt' && <TicTacToe tally={scores.ttt} onTally={(ttt) => patch({ ...scores, ttt })} />}
+      {open && tab === 'room' && <RoomGamesPanel roomId={trivia.roomId} me={trivia.me ?? ''} toast={toast} />}
       {open && tab === 'trivia' && <TriviaPanel ctx={trivia} live={triviaLive} answer={triviaAnswer} toast={toast} />}
     </aside>
   );
