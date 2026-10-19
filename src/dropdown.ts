@@ -55,5 +55,9 @@ export function placeFixedBelow(anchor: HTMLElement, panel: HTMLElement) {
   panel.style.left = `${viewLeft}px`;
   const top = Math.min(Math.max(pad, a.bottom + 6), Math.max(pad, window.innerHeight - pad));
   panel.style.top = `${top}px`;
-  panel.style.maxHeight = `${Math.max(120, window.innerHeight - top - pad)}px`;
+  // batch MC2: stop above a bar pinned to the bottom of the screen (the phone call bar), so the last item stays tappable
+  let bottom = window.innerHeight;
+  const bar = document.querySelector<HTMLElement>('.people-media.is-bar');
+  if (bar) { const r = bar.getBoundingClientRect(); if (r.height > 0 && r.top > top && r.bottom >= window.innerHeight - 2) bottom = r.top; }
+  panel.style.maxHeight = `${Math.max(120, bottom - top - pad)}px`;
 }
