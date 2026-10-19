@@ -171,6 +171,200 @@ The body is always \`{"ok": false, "error": "..."}\`.
 ## 9. What bots can't do
 
 Regular bots can only join, send chat, send GIFs, and read rooms they are allowed in. They cannot kick, ban, mute, delete messages, or read other rooms. Only the site's one moderator bot has moderation access, and that API is not part of this page.
+
+## 10. Room webhooks
+
+Webhooks need no bot account. A room owner, or a member whose custom role includes **Manage webhooks**, creates them under **Room settings → Webhooks**. A room can have up to 10. Every change goes in the room's moderation log. Site staff can see and turn off any room's webhooks.
+
+### Incoming: post into a room (Discord-compatible)
+
+Creating an incoming webhook gives you a secret URL, shown **once**:
+
+\`\`\`
+https://chat.nano11bravo.com/api/webhooks/<id>/<token>
+\`\`\`
+
+Anyone who has the URL can post, so treat it like a password. **New URL** in the room settings replaces it, and the old one stops working at once. POST JSON to it:
+
+\`\`\`bash
+curl -sS -X POST "$ZN_WEBHOOK_URL" -H 'Content-Type: application/json' \\
+  -d '{"content":"Server restarted ✅","username":"FiveM","avatar_url":"https://example.com/logo.png"}'
+# 204 No Content
+\`\`\`
+
+| field | notes |
+| --- | --- |
+| \`content\` | Up to 2000 characters. Markdown is rendered by the chat's own sanitizer; HTML is shown as text. |
+| \`username\` | Optional. Overrides the webhook's name for this line (80 characters). |
+| \`avatar_url\` | Optional, https. Fetched once by the server and cached; viewers never load it from your host. |
+| \`embeds\` | Optional, up to 10 (6000 characters in total): \`title\`, \`url\`, \`description\`, \`color\`, \`fields[{name,value,inline}]\`, \`author{name,url}\`, \`footer{text}\`, \`timestamp\`, \`image{url}\`/\`thumbnail{url}\` (shown as links). |
+| \`?wait=true\` | Returns the created message as JSON (\`id\`, \`channel_id\`, \`webhook_id\`, \`content\`) instead of 204. |
+
+Lines show the webhook's name and avatar with a **webhook** badge. \`@everyone\`, \`@here\` and other mass mentions are defused, and webhook lines never notify anyone. Discord markup such as \`<@123>\`, \`<:emoji:123>\` and \`<t:1700000000:F>\` is turned into plain text. \`multipart/form-data\` with \`payload_json\` works too (attached files are ignored), so most "Discord webhook" tools work if you paste this URL in, including FiveM resources and CI notifiers. A GET on the URL returns the webhook object, as Discord does.
+
+Variants:
+
+- \`…/slack\`: Slack-style \`{"text": "…"}\`, with \`<url|label>\` links converted.
+- \`…/github\`: point a GitHub repository webhook here (content type \`application/json\`). It handles push, issues, pull requests, comments, releases, stars and ping.
+
+Limits and errors (Discord-shaped JSON):
+
+| status | when |
+| --- | --- |
+| 204 / 200 | Posted (200 with \`?wait=true\`) |
+| 400 \`code 50006\` | Empty message |
+| 400 \`code 50035\` | Too long or invalid fields |
+| 403 | The webhook is turned off |
+| 404 \`code 10015\` | Unknown webhook or wrong token |
+| 429 | Over 5 posts per 2 seconds or 30 per minute per webhook, or 60 per minute per room. The body has \`retry_after\` (seconds), and the response also has a \`Retry-After\` header. |
+
+FiveM (server-side Lua):
+
+\`\`\`lua
+local hook = GetConvar('zn_webhook', '') -- set zn_webhook "https://…/api/webhooks/<id>/<token>" in server.cfg
+local function zn(text)
+  PerformHttpRequest(hook, function(status) if status >= 400 then print('zeronoise webhook', status) end end, 'POST',
+    json.encode({ content = text, username = GetConvar('sv_projectName', 'FiveM') }), { ['Content-Type'] = 'application/json' })
+end
+AddEventHandler('playerJoining', function() zn(('➕ %s joined'):format(GetPlayerName(source))) end)
+\`\`\`
+
+### Outgoing: receive room events
+
+An outgoing webhook sends a signed \`POST\` to your **https** URL when the events you chose happen:
+
+| event | when | \`data\` |
+| --- | --- | --- |
+| \`message\` | Someone posts in the room (not burn-after-reading lines, bots or other webhooks) | \`id\`, \`ts\`, \`text\`, \`parentId\`, \`user{nick,userId,role}\` |
+| \`join\` / \`leave\` | Someone enters or leaves | \`user\`, \`reason\` (leave) |
+| \`voice\` | Someone turns on mic, camera or screen share | \`user\`, \`mic\`, \`cam\`, \`screen\` |
+| \`poll\` | A poll is created or closed | \`action\`, \`poll\`, \`winners\` (close) |
+| \`mod\` | A moderation action in the room (kick, ban, mute, delete…) | \`action\`, \`actor\`, \`target\`, \`details\` |
+| \`test\` | The **Test** button | \`message\`, \`by\` |
+
+Body:
+
+\`\`\`json
+{ "id": "6d0c…", "event": "message", "ts": 1792300000000, "room": { "id": "…", "name": "driftzone" },
+  "webhook": { "id": "…", "name": "Relay" }, "data": { "text": "hi", "user": { "nick": "Dreamer", "userId": 7, "role": "user" } } }
+\`\`\`
+
+Headers: \`x-zn-event\`, \`x-zn-delivery\` (same as \`id\`; retries reuse it), \`x-zn-webhook-id\`, \`x-zn-timestamp\` (Unix seconds) and \`x-zn-signature\`.
+
+**Signature:** \`x-zn-signature\` = \`sha256=\` + hex HMAC-SHA256 of \`timestamp + "." + rawBody\`, keyed with the webhook's signing secret (\`whsec_…\`, shown once). Check it against the **raw** body before parsing, and refuse timestamps more than 5 minutes old.
+
+Node:
+
+\`\`\`js
+import crypto from 'node:crypto';
+import http from 'node:http';
+const SECRET = process.env.ZN_WEBHOOK_SECRET;
+function verify(ts, body, sig) {
+  if (!ts || !sig || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
+  const want = Buffer.from('sha256=' + crypto.createHmac('sha256', SECRET).update(\`\${ts}.\${body}\`).digest('hex'));
+  const got = Buffer.from(String(sig));
+  return want.length === got.length && crypto.timingSafeEqual(want, got);
+}
+http.createServer((req, res) => {
+  let body = ''; req.on('data', (c) => { body += c; });
+  req.on('end', () => {
+    if (!verify(req.headers['x-zn-timestamp'], body, req.headers['x-zn-signature'])) return res.writeHead(401).end();
+    const e = JSON.parse(body);
+    console.log(e.event, e.data);
+    res.writeHead(200).end();
+  });
+}).listen(8080);
+\`\`\`
+
+Lua 5.4 (FiveM \`SetHttpHandler\`, no libraries; the same file is \`webhook-verify.lua\` in the bridge kit):
+
+\`\`\`lua
+-- zeronoise outgoing webhook signature check for FiveM (Lua 5.4, no libraries).
+-- x-zn-signature = "sha256=" .. hex(HMAC_SHA256(secret, timestamp .. "." .. rawBody))
+local K = {
+  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2 }
+local M = 0xffffffff
+local function rotr(x, n) return ((x >> n) | (x << (32 - n))) & M end
+local function sha256(msg)
+  local h = { 0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19 }
+  local len = #msg
+  msg = msg .. "\\128" .. string.rep("\\0", (55 - len) % 64) .. string.pack(">I8", len * 8)
+  for c = 1, #msg, 64 do
+    local w = {}
+    for i = 0, 15 do w[i] = string.unpack(">I4", msg, c + i * 4) end
+    for i = 16, 63 do
+      local s0 = rotr(w[i-15], 7) ~ rotr(w[i-15], 18) ~ (w[i-15] >> 3)
+      local s1 = rotr(w[i-2], 17) ~ rotr(w[i-2], 19) ~ (w[i-2] >> 10)
+      w[i] = (w[i-16] + s0 + w[i-7] + s1) & M
+    end
+    local a, b, cc, d, e, f, g, hh = table.unpack(h)
+    for i = 0, 63 do
+      local S1 = rotr(e, 6) ~ rotr(e, 11) ~ rotr(e, 25)
+      local ch = (e & f) ~ (~e & g)
+      local t1 = (hh + S1 + ch + K[i + 1] + w[i]) & M
+      local S0 = rotr(a, 2) ~ rotr(a, 13) ~ rotr(a, 22)
+      local mj = (a & b) ~ (a & cc) ~ (b & cc)
+      local t2 = (S0 + mj) & M
+      hh, g, f, e, d, cc, b, a = g, f, e, (d + t1) & M, cc, b, a, (t1 + t2) & M
+    end
+    local v = { a, b, cc, d, e, f, g, hh }
+    for i = 1, 8 do h[i] = (h[i] + v[i]) & M end
+  end
+  return string.pack(">I4I4I4I4I4I4I4I4", table.unpack(h))
+end
+local function hmac_sha256(key, msg)
+  if #key > 64 then key = sha256(key) end
+  key = key .. string.rep("\\0", 64 - #key)
+  local ipad = key:gsub(".", function(ch) return string.char(ch:byte() ~ 0x36) end)
+  local opad = key:gsub(".", function(ch) return string.char(ch:byte() ~ 0x5c) end)
+  return sha256(opad .. sha256(ipad .. msg))
+end
+local function tohex(s) return (s:gsub(".", function(ch) return string.format("%02x", ch:byte()) end)) end
+
+--- true when the delivery is genuine and fresh (timestamp in Unix seconds, within 5 minutes)
+function VerifyZeronoise(secret, timestamp, rawBody, signature)
+  if type(signature) ~= "string" or type(timestamp) ~= "string" then return false end
+  local ts = tonumber(timestamp)
+  if not ts or math.abs(os.time() - ts) > 300 then return false end
+  local want = "sha256=" .. tohex(hmac_sha256(secret, timestamp .. "." .. rawBody))
+  if #want ~= #signature then return false end
+  local diff = 0
+  for i = 1, #want do diff = diff | (want:byte(i) ~ signature:byte(i)) end
+  return diff == 0
+end
+
+
+-- in a FiveM resource (expose it through your HTTPS proxy: https://your-host/<resource>/zn)
+SetHttpHandler(function(req, res)
+  if req.method ~= 'POST' then res.writeHead(404) return res.send('') end
+  req.setDataHandler(function(body)
+    local h = req.headers
+    if not VerifyZeronoise(GetConvar('zn_webhook_secret', ''), h['x-zn-timestamp'] or h['X-Zn-Timestamp'], body, h['x-zn-signature'] or h['X-Zn-Signature']) then
+      res.writeHead(401) return res.send('')
+    end
+    local e = json.decode(body)
+    if e.event == 'message' then TriggerClientEvent('chat:addMessage', -1, { args = { e.data.user.nick, e.data.text } }) end
+    res.writeHead(200) res.send('ok')
+  end)
+end)
+\`\`\`
+
+Test with curl, replacing the secret:
+
+\`\`\`bash
+TS=$(date +%s); BODY='{"event":"test"}'
+SIG="sha256=$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$ZN_WEBHOOK_SECRET" | sed 's/^.* //')"
+curl -sS -X POST https://your-host/zn -H "x-zn-timestamp: $TS" -H "x-zn-signature: $SIG" -d "$BODY"
+\`\`\`
+
+**Delivery:** return any 2xx within 5 seconds. Redirects are not followed. On failure the delivery is retried after 10 s, 1 min and 5 min. After 10 deliveries fail in a row, the webhook turns itself off; the owner sees why and can turn it back on. Targets must be public https hosts: private, loopback and link-local addresses are refused, and so are URLs with a username or password. The room settings show the last 20 deliveries and requests, each with its status.
 `;
 
 function esc(s: string): string {
@@ -258,7 +452,8 @@ export function renderBotMarkdown(src: string): string {
     const h = /^(#{1,3}) (.+)$/.exec(line);
     if (h) {
       const level = h[1].length;
-      out.push(`<h${level}>${inline(h[2])}</h${level}>`);
+      const slug = h[2].replace(/^\d+\.\s*/, '').toLowerCase().replace(/^room\s+/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      out.push(`<h${level} id="${esc(slug)}">${inline(h[2])}</h${level}>`);
       i++;
       continue;
     }
@@ -372,6 +567,7 @@ export function llmsTxt(publicUrl: string): string {
 
 - [Bot API (Markdown)](${md}): token, allow a bot in a room, join, chat, GIFs, read messages, errors, and limits.
 - [Bot API (HTML)](${html})
+- [Room webhooks](${md}): Discord-compatible incoming URL (\`POST {content, username, avatar_url, embeds}\`), signed outgoing events (HMAC-SHA256 of \`timestamp.body\`), Node and Lua verification. Section 10.
 - [Game bridge kit (ZIP)](${base}/docs/bots/bridge-kit.zip): Node script + README with a configurable poll/post loop for FiveM, BeamMP, log files and webhooks. [README](${base}/docs/bots/bridge-kit/README.md)
 
 Joins are saved on the server and survive restarts. Join once; on 403 \`Join the room first\`, join again and retry once.

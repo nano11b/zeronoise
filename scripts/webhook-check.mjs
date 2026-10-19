@@ -292,6 +292,66 @@ try {
     const xl2 = await O.j.req(`/api/rooms/${ROOM}/webhooks`);
     ok(xl2.webhooks.length < 10, 'ROLE: the role holder can delete hooks');
   }
+  // @@DOCS
+  {
+    const md = await (await fetch(BASE + '/docs/bots.md')).text();
+    const html = await (await fetch(BASE + '/docs/bots')).text();
+    const llms = await (await fetch(BASE + '/llms.txt')).text();
+    ok(md.includes('## 10. Room webhooks') && md.includes('x-zn-signature') && md.includes('VerifyZeronoise') && md.includes('curl -sS -X POST "$ZN_WEBHOOK_URL"'), 'DOCS: /docs/bots.md has the webhooks section (curl, Node, Lua)');
+    ok(html.includes('id="webhooks"') && html.includes('SetHttpHandler'), 'DOCS: /docs/bots has the section with a #webhooks anchor');
+    ok(/Room webhooks\]\(/.test(llms), 'DOCS: llms.txt links the webhooks section');
+    const lua = await fetch(BASE + '/docs/bots/bridge-kit/webhook-verify.lua');
+    const zip = Buffer.from(await (await fetch(BASE + '/docs/bots/bridge-kit.zip')).arrayBuffer());
+    ok(lua.status === 200 && zip.includes(Buffer.from('zeronoise-bridge-kit/webhook-verify.lua')), 'DOCS: bridge kit ships webhook-verify.lua');
+    ok(!/10\.0\.10\.|\/etc\/camchat|\/home\/manager/.test(md + llms), 'DOCS: no internal addresses or paths');
+    // run the Node verifier exactly as printed in the docs
+    const block = /Node:\n\n```js\n([\s\S]*?)```/.exec(md)[1].replace('.listen(8080)', '.listen(0, "127.0.0.1", function () { console.log("PORT " + this.address().port); })');
+    const f = path.join(DATA, 'doc-verify.mjs'); fs.writeFileSync(f, block);
+    const secret = 'whsec_doc_' + R;
+    const child = spawn(process.execPath, [f], { env: { ...process.env, ZN_WEBHOOK_SECRET: secret } });
+    const dport = await new Promise((res) => child.stdout.on('data', (d) => { const m = /PORT (\d+)/.exec(String(d)); if (m) res(Number(m[1])); }));
+    const ts = String(Math.floor(Date.now() / 1000)); const body = JSON.stringify({ event: 'test', data: {} });
+    const sig = 'sha256=' + crypto.createHmac('sha256', secret).update(`${ts}.${body}`).digest('hex');
+    const good = await fetch(`http://127.0.0.1:${dport}/`, { method: 'POST', headers: { 'x-zn-timestamp': ts, 'x-zn-signature': sig }, body });
+    const badSig = await fetch(`http://127.0.0.1:${dport}/`, { method: 'POST', headers: { 'x-zn-timestamp': ts, 'x-zn-signature': sig.replace(/.$/, (c) => (c === '0' ? '1' : '0')) }, body });
+    const stale = await fetch(`http://127.0.0.1:${dport}/`, { method: 'POST', headers: { 'x-zn-timestamp': String(Number(ts) - 600), 'x-zn-signature': 'sha256=' + crypto.createHmac('sha256', secret).update(`${Number(ts) - 600}.${body}`).digest('hex') }, body });
+    child.kill();
+    ok(good.status === 200 && badSig.status === 401 && stale.status === 401, 'DOCS: the Node verification sample accepts real signatures and refuses forged or stale ones');
+    // the openssl recipe gives the same signature
+    try {
+      const osig = execFileSync('bash', ['-c', `printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$S" | sed 's/^.* //'`], { env: { ...process.env, TS: ts, BODY: body, S: secret } }).toString().trim();
+      ok('sha256=' + osig === sig, 'DOCS: the curl/openssl signing recipe matches');
+    } catch { console.log('SKIP  openssl not found'); }
+    // Lua verifier
+    const lr = (() => { try { return { code: 0, out: execFileSync(process.execPath, [path.join(ROOT, 'scripts/webhook-lua-check.mjs')]).toString() }; } catch (e) { return { code: 1, out: String(e.stdout) }; } })();
+    ok(lr.code === 0, `DOCS: Lua webhook-verify.lua matches Node HMAC (${lr.out.trim().split('\n').pop()})`);
+  }
+  // @@BRIDGE
+  {
+    const kit = path.join(ROOT, 'bridge-kit/bridge.mjs');
+    const run = (env, args, ms = 8000) => new Promise((res) => { const c = spawn(process.execPath, [kit, ...args], { env: { PATH: process.env.PATH, ...env }, cwd: DATA }); let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); const t = setTimeout(() => c.kill(), ms); c.on('exit', (code) => { clearTimeout(t); res({ code, out }); }); });
+    await sleep(2100);
+    const once = await run({ ZN_WEBHOOK_URL: IN_URL }, ['/nonexistent.json', '--once']);
+    ok(once.code === 0 && await waitFor(() => mMsg.some((m) => m.text === 'bridge self-test ✔' && m.webhook)), `BRIDGE: posts through ZN_WEBHOOK_URL without a bot token (${once.out.trim().split('\n').pop()})`);
+    fs.writeFileSync(path.join(DATA, 'bad.json'), JSON.stringify({ webhookUrl: 'x', room: 'r' }));
+    const refuse = await run({ ZN_WEBHOOK_URL: IN_URL }, [path.join(DATA, 'bad.json'), '--once']);
+    ok(refuse.code === 2 && /ZN_WEBHOOK_URL/.test(refuse.out), 'BRIDGE: refuses a webhook URL in the config file');
+    // zn-events receiver
+    const bport = await freePort();
+    const secret = 'whsec_bridge_' + R;
+    fs.writeFileSync(path.join(DATA, 'zn.json'), JSON.stringify({ sources: [{ type: 'zn-events', host: '127.0.0.1', port: bport, path: '/zn' }], chatToGame: { mode: 'stdout', format: 'GAME {event} {author}: {text}' } }));
+    const c = spawn(process.execPath, [kit, path.join(DATA, 'zn.json')], { env: { PATH: process.env.PATH, ZN_WEBHOOK_URL: IN_URL, ZN_WEBHOOK_SECRET: secret }, cwd: DATA });
+    let bout = ''; c.stdout.on('data', (d) => { bout += d; });
+    await waitFor(() => bout.includes('zn-events listening'), 5000);
+    const ts = String(Math.floor(Date.now() / 1000));
+    const body = JSON.stringify({ id: 'd1', event: 'message', data: { text: 'hello game', user: { nick: 'Dreamer' } } });
+    const sig = 'sha256=' + crypto.createHmac('sha256', secret).update(`${ts}.${body}`).digest('hex');
+    const send = (s, id = 'd1') => fetch(`http://127.0.0.1:${bport}/zn`, { method: 'POST', headers: { 'x-zn-timestamp': ts, 'x-zn-signature': s, 'x-zn-delivery': id }, body });
+    const r1 = await send(sig); const r2 = await send(sig); const r3 = await send('sha256=00');
+    await sleep(300); c.kill();
+    ok(r1.status === 200 && r3.status === 401 && (bout.match(/GAME message Dreamer: hello game/g) || []).length === 1, 'BRIDGE: zn-events verifies signatures, de-duplicates retries, and forwards to the game');
+    void r2;
+  }
   // @@API-END
   // @@UI
   fs.mkdirSync(OUT, { recursive: true });
@@ -347,6 +407,15 @@ try {
     const n = await page.$$eval('[data-admin-webhook]', (r) => r.length);
     ok(n >= 3, `ADMIN UI ${width}: webhooks tab lists hooks (${n})`);
     await shot(page, `wh-admin-${width}`);
+    await ctx.close();
+  }
+  for (const width of [1366, 390]) {
+    const { ctx, page } = await pageFor(M, width);
+    await page.goto(BASE + '/docs/bots#webhooks', { waitUntil: 'domcontentloaded' }); await sleep(500);
+    await page.$eval('#webhooks', (h) => h.scrollIntoView({ block: 'start' }));
+    const ov = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+    ok(!ov, `DOCS ${width}: webhooks docs fit without sideways scroll`);
+    await shot(page, `wh-docs-${width}`);
     await ctx.close();
   }
   // a member without the permission sees no webhooks section

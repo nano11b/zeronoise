@@ -2729,7 +2729,7 @@ export function createApp(roomList: () => unknown) {
   app.get('/docs/bots', publicDoc(botApiHtml(), 'text/html; charset=utf-8'));
   // batch D: game bridge kit (bridge-kit/ in the release), as a ZIP and as plain files
   const kitDir = path.resolve(__dirname, '../../../bridge-kit');
-  const KIT_FILES = ['README.md', 'bridge.mjs', 'config.example.json'];
+  const KIT_FILES = ['README.md', 'bridge.mjs', 'config.example.json', 'webhook-verify.lua'];
   const kitText = (f: string) => { try { return fs.readFileSync(path.join(kitDir, f), 'utf8'); } catch { return null; } };
   if (KIT_FILES.every((f) => kitText(f) != null)) {
     const kitZip = makeZip(KIT_FILES.map((f) => ({ name: `zeronoise-bridge-kit/${f}`, data: kitText(f)! })), new Date(2026, 9, 16));

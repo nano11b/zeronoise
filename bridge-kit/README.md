@@ -60,7 +60,31 @@ Set `chatToGame.mode`:
 
 The bridge reads with the documented cursor, starts at "now" (no history replay), and skips every line where `isBot` is true so it never echoes itself. Reads are every 2 s (the API allows 120 per minute per bot).
 
+## 5. Room webhooks (no bot needed)
+
+A room owner (or a member whose custom role has **Manage webhooks**) can create webhooks under **Room settings → Webhooks**.
+
+**Post into the room through an incoming webhook.** Copy the URL (it is shown once) and run the bridge with it instead of a bot token:
+
+```sh
+ZN_WEBHOOK_URL='https://chat.example.com/api/webhooks/<id>/<token>' node bridge.mjs config.json
+```
+
+Lines then appear under the webhook's name and avatar with a **webhook** badge. Set `"webhookName"` in the config to override the name per line. The limits are 2000 characters, and 5 posts per 2 seconds or 30 per minute per hook. On **429** the bridge waits `retry_after`. Reading chat (`chatToGame` polling) still needs a bot token; use `zn-events` below instead.
+
+**Receive room events through an outgoing webhook.** Add a source:
+
+```json
+{ "type": "zn-events", "host": "127.0.0.1", "port": 30123, "path": "/zn", "events": ["message", "join", "leave"] }
+```
+
+Put the signing secret (`whsec_…`, shown once) in `ZN_WEBHOOK_SECRET`. The outgoing webhook's target must be **https**, so put the bridge behind your HTTPS reverse proxy (for example `https://game.example.com/zn` proxied to `127.0.0.1:30123/zn`). Every delivery is checked with HMAC-SHA256, deliveries older than 5 minutes are refused, retries are de-duplicated by `x-zn-delivery`, and events go to your `chatToGame` output (`{author}`, `{text}`, `{event}`).
+
+**Check signatures in FiveM Lua yourself.** `webhook-verify.lua` is a dependency-free SHA-256/HMAC for Lua 5.4. Use `VerifyZeronoise(secret, timestamp, body, signature)` from a `SetHttpHandler` resource.
+
 ## Safety
+
+- The webhook URL and the signing secret are passwords: keep them in environment variables, never in `config.json` (the bridge refuses `webhookUrl` there). If one leaks, use **New URL** / **New secret** in the room settings.
 
 - Keep the token in `ZN_BOT_TOKEN` (env var or a systemd `EnvironmentFile` readable only by the service user). Rotate it from **Chat bots** if it leaks.
 - The webhook listens on `127.0.0.1` by default. Do not expose it publicly; it needs `BRIDGE_SECRET` either way.
