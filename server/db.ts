@@ -1011,6 +1011,32 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (room_id, name)
   );
   `,
+  // 51 batch MC2: sticker packs per room (images stored like custom emoji; staff review before use)
+  `
+  CREATE TABLE IF NOT EXISTS room_sticker_packs (
+    id TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_by INTEGER,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS room_sticker_packs_room ON room_sticker_packs(room_id);
+  CREATE TABLE IF NOT EXISTS room_stickers (
+    id TEXT PRIMARY KEY,
+    pack_id TEXT NOT NULL,
+    room_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    animated INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    reviewed_by INTEGER,
+    reviewed_at INTEGER,
+    review_note TEXT
+  );
+  CREATE INDEX IF NOT EXISTS room_stickers_pack ON room_stickers(pack_id);
+  CREATE INDEX IF NOT EXISTS room_stickers_status ON room_stickers(status);
+  `,
 ];
 
 /**

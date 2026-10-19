@@ -1,3 +1,5 @@
+import { sendable } from './stickers';
+import { stickerToken } from '../shared/stickers';
 import { expandCommand } from './extras';
 import { publicAvatarFx } from '../shared/avatarFx';
 import './quiet';
@@ -3231,8 +3233,14 @@ function onConnection(socket: AppSocket) {
       if (!isBurnTtl(p.burnTtl)) return ack({ ok: false, error: 'Burn timer must be 10, 30 or 60 seconds' });
       burnTtl = p.burnTtl;
     }
+    // MC2: stickers (approved, from this room) are sent as an exact token
+    if (p?.sticker !== undefined) {
+      const st = sendable(s.roomId!, p.sticker);
+      if (!st) return ack({ ok: false, error: 'That sticker is not available in this room' });
+      p = { ...p, text: stickerToken(st.id) };
+    }
     // MC2: /me, /shrug, /roll, /flip and the room's own text commands
-    const cmd = expandCommand(s.roomId!, s.user.nick, p?.text);
+    const cmd = p?.sticker !== undefined ? null : expandCommand(s.roomId!, s.user.nick, p?.text);
     if (cmd && 'error' in cmd) return ack({ ok: false, error: cmd.error });
     const prepared = prepareChatText(s, cmd ? cmd.text : p?.text);
     if ('error' in prepared) return ack({ ok: false, error: prepared.error });

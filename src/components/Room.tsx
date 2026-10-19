@@ -9,6 +9,7 @@ import { openWhispers } from '../dmStore';
 import { useIgnoreMsgColors } from '../msgColorPref';
 import { MessageColorPicker } from './MessageColor';
 import { CommandHints } from './CommandsPanel';
+import { StickerPicker } from './Stickers';
 import { safeMsgStyle } from '../../shared/msgColor';
 import { useTileFit } from '../useTileFit';
 import { APP_NAME, LIMITS } from '../../shared/config';
@@ -105,6 +106,7 @@ const FiltersPanel = lazyNamed(loadManage, 'FiltersPanel');
 const RolesPanel = lazyNamed(() => import('./RolesPanel'), 'RolesPanel');
 const WebhooksPanel = lazyNamed(() => import('./WebhooksPanel'), 'WebhooksPanel');
 const CommandsPanel = lazyNamed(() => import('./CommandsPanel'), 'CommandsPanel');
+const StickersPanel = lazyNamed(() => import('./Stickers'), 'StickersPanel');
 const TemplatePicker = lazyNamed(() => import('./TemplatePicker'), 'TemplatePicker');
 const EventsPanel = lazyNamed(() => import('./EventsPanel'), 'EventsPanel');
 const panelFallback = <p className="muted small" aria-busy="true">Loading…</p>;
@@ -2335,6 +2337,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
               <div className="composer-tools">
                 <GifPicker enabled={!!gifs} value={text} onChange={setText} inputRef={chatInputRef} />
                 <EmojiPicker value={text} onChange={setText} inputRef={chatInputRef} emotes={emotes} />
+                {!initial.isPrivate && me.registered && <StickerPicker roomId={initial.id} onSend={(id) => { void call((ack) => socket.emit('chat:send', { text: '', sticker: id }, ack)).catch((e) => toast((e as Error).message, 'error')); }} />}
                 {ttsSupported() && <button type="button" className={`btn ghost icon-act tts-toggle${ttsP.mode !== 'off' ? ' on' : ''}`} aria-pressed={ttsP.mode !== 'off'} data-action="tts-toggle" onClick={ttsToggle}
                   title={ttsP.mode === 'off' ? 'Read messages aloud (off)' : `Reading ${ttsP.mode === 'all' ? 'all messages' : 'mentions and whispers'} aloud. Click to turn off.`} aria-label="Read messages aloud">{ttsP.mode === 'off' ? '🔇' : '🔈'}</button>}
                 {!editingId && burnOn && <button type="button" className="btn ghost burn-btn on" data-action="burn-disarm" title={`Burn on: next message disappears ${burnTtl}s after viewing. Click to turn off.`} aria-label="Turn off burn after reading" onClick={() => setBurnOn(false)}>🔥</button>}
@@ -2515,6 +2518,12 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                 <details className="manage-sec" data-section="roles">
                   <summary>Custom roles{roomRoles.roles.length ? ` · ${roomRoles.roles.length}` : ''}</summary>
                   <Lazy fallback={panelFallback} inline><RolesPanel state={roomRoles} people={people} ownerNick={initial.ownerNick ?? null} toast={toast} /></Lazy>
+                </details>
+              )}
+              {!initial.isPrivate && canManageRoom && (
+                <details className="manage-sec" data-section="stickers">
+                  <summary>Sticker packs</summary>
+                  <Lazy fallback={panelFallback} inline><StickersPanel roomId={initial.id} toast={toast} /></Lazy>
                 </details>
               )}
               {!initial.isPrivate && canManageRoom && (

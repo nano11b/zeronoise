@@ -1,3 +1,4 @@
+import { registerStickers, registerStickerAdmin } from './stickers';
 import { registerExtras } from './extras';
 import { publicAvatarFx } from '../shared/avatarFx';
 import { isVideoQuality } from '../shared/videoQuality';
@@ -192,6 +193,7 @@ export function createApp(roomList: () => unknown) {
   app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
   registerManage(app, whDeps);
   registerExtras(app, { fail, reqAccount });
+  registerStickers(app, { fail, reqAccount });
 
   const authLimiter = new KeyedLimiter(LIMITS.authAttemptsPerIp, 10 * 60_000);
   /** Confirmation and reset messages: 3 per address and 10 per IP each hour. */
@@ -2263,6 +2265,7 @@ export function createApp(roomList: () => unknown) {
     stream.pipe(res);
   });
   registerWebhookAdmin(admin, whDeps, actor);
+  registerStickerAdmin(admin, actor);
   app.use('/api/admin', admin);
 
   // ---------- friends (REST mirror of socket helpers for initial load) ----------
