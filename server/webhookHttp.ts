@@ -237,8 +237,9 @@ export function registerAdmin(admin: Router, d: Deps, actor: (req: Request) => r
     const h = hooks.hookById(String(req.params.id));
     if (!h || h.revoked_at) return d.fail(res, 404, 'Webhook not found');
     const a = actor(req);
-    hooks.setDisabled(h.id, `Turned off by staff (${a.username})`);
-    repo.logAction(a.username, a.id, 'webhook-disable', h.name, h.room_id, 'by staff');
+    const why = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, 200) : '';
+    hooks.setDisabled(h.id, `Turned off by staff${why ? `: ${why}` : ''}`);
+    repo.logAction(a.username, a.id, 'webhook-disable', h.name, h.room_id, `by staff${why ? `: ${why}` : ''}`);
     res.json({ ok: true });
   });
 }

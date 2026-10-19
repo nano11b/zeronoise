@@ -246,6 +246,52 @@ try {
     const re = await O.j.req(`/api/rooms/${ROOM}/webhooks/${c2.webhook.id}`, { enabled: true }, 'PATCH');
     ok(re.ok, 'OUT: can be enabled again', re.error);
   }
+  // @@ADMIN
+  {
+    const S = await nodeUser('WhAdmin'); sockets.push(S.s); globalThis.S = S;
+    const no = await O.j.req('/api/admin/webhooks');
+    ok(no.status === 403 || no.status === 401, 'ADMIN: room owners cannot list every room\'s hooks');
+    const all = await S.j.req('/api/admin/webhooks');
+    ok(all.ok && all.webhooks.some((h) => h.id === IN_ID && h.roomName.startsWith('hooks')) && !JSON.stringify(all).includes('whsec_'), 'ADMIN: staff see all hooks (no secrets)');
+    const d = await S.j.req(`/api/admin/webhooks/${IN_ID}/disable`, { reason: 'spam test' });
+    ok(d.ok, 'ADMIN: staff can turn a hook off');
+    const r = await post(IN_URL, { content: 'after staff disable' });
+    ok(r.status === 403, `ADMIN: a turned-off incoming hook refuses posts (${r.status})`);
+    const lg = await S.j.req('/api/admin/log');
+    ok(lg.log.some((e) => e.action === 'webhook-disable' && /staff: spam test/.test(e.details || '')), 'ADMIN: staff action is in the action log');
+    ok(['webhook-create', 'webhook-test', 'webhook-auto-disable', 'webhook-enable'].every((a) => lg.log.some((e) => e.action === a)), 'AUDIT: create / test / auto-disable / enable are logged');
+    await O.j.req(`/api/rooms/${ROOM}/webhooks/${IN_ID}`, { enabled: true }, 'PATCH');
+    // regenerate + revoke
+    const rg = await O.j.req(`/api/rooms/${ROOM}/webhooks/${IN_ID}/regenerate`, {});
+    const old = await post(IN_URL, { content: 'old url' });
+    const nu = BASE + new URL(rg.url).pathname;
+    ok(rg.ok && old.status === 404 && (await post(nu, { content: `new url ${R}` })).status === 204, 'MANAGE: regenerate kills the old URL; the new one works');
+    globalThis.IN_URL = nu;
+    const dl = await O.j.req(`/api/rooms/${ROOM}/webhooks/${OUT_ID}`, undefined, 'DELETE');
+    const after = await O.j.req(`/api/rooms/${ROOM}/webhooks`);
+    ok(dl.ok && !after.webhooks.some((h) => h.id === OUT_ID), 'MANAGE: delete removes it from the list (soft revoke)');
+    const lg2 = await S.j.req('/api/admin/log');
+    ok(lg2.log.some((e) => e.action === 'webhook-revoke') && lg2.log.some((e) => e.action === 'webhook-regenerate'), 'AUDIT: regenerate and delete are logged');
+    const db = new DatabaseSync(path.join(DATA, 'camchat.db'));
+    const row = db.prepare('SELECT revoked_at, token_hash FROM room_webhooks WHERE id = ?').get(OUT_ID);
+    db.close();
+    ok(row && row.revoked_at > 0, 'MANAGE: deleted hooks stay in the database as revoked (nothing is hard-deleted)');
+    // the 10 limit
+    const have = after.webhooks.length;
+    const made = [];
+    for (let i = have; i < 10; i++) made.push((await O.j.req(`/api/rooms/${ROOM}/webhooks`, { kind: 'incoming', name: `fill ${i}` })).ok);
+    const over = await O.j.req(`/api/rooms/${ROOM}/webhooks`, { kind: 'incoming', name: 'eleven' });
+    ok(made.every(Boolean) && !over.ok && /10/.test(over.error), 'MANAGE: at most 10 webhooks per room');
+    // custom role permission
+    const role = await emit(O.s, 'roles:save', { name: 'Hook keeper', color: '#3399ff', perms: ['webhooks'] });
+    const asg = await emit(O.s, 'roles:assign', { roleId: role.role?.id, accountId: X.id });
+    const xl = await X.j.req(`/api/rooms/${ROOM}/webhooks`);
+    ok(xl.ok && xl.webhooks.length === 10, `ROLE: a custom role with "Manage webhooks" can manage hooks (${role.error || ''} ${asg.error || ''} ${xl.error || ''})`);
+    // the role holder can also act (and it is logged); then make room for the UI tests
+    for (const h of xl.webhooks.filter((w) => w.name.startsWith('fill '))) await X.j.req(`/api/rooms/${ROOM}/webhooks/${h.id}`, undefined, 'DELETE');
+    const xl2 = await O.j.req(`/api/rooms/${ROOM}/webhooks`);
+    ok(xl2.webhooks.length < 10, 'ROLE: the role holder can delete hooks');
+  }
   // @@API-END
   // @@UI
   fs.mkdirSync(OUT, { recursive: true });
@@ -271,7 +317,7 @@ try {
     await page.$eval('details[data-section="webhooks"]', (d) => { d.open = true; d.scrollIntoView({ block: 'start' }); });
     await page.waitForSelector('.wh-row', { timeout: 6000 });
     const rows = await page.$$eval('.wh-row', (r) => r.length);
-    ok(rows >= 3, `UI ${width}: settings list the room's webhooks (${rows})`);
+    ok(rows >= 2, `UI ${width}: settings list the room's webhooks (${rows})`);
     await page.type('[data-field="wh-name"]', `UI hook ${width}`);
     await page.$eval('[data-action="wh-create"]', (b) => { b.scrollIntoView({ block: 'center' }); b.click(); });
     await page.waitForSelector('[data-testid="wh-secret"]', { timeout: 6000 }).catch(async (e) => { await page.screenshot({ path: '/tmp/wh-fail.png' }); console.log('[toast]', await page.evaluate(() => [...document.querySelectorAll('.toast,[role=status],[role=alert]')].map((x) => x.textContent).join(' / '))); throw e; });
@@ -282,14 +328,25 @@ try {
     const r = await post(shown, { content: `from the UI-made hook ${width}` });
     ok(r.status === 204, `UI ${width}: the URL from the UI works`);
     await page.$eval('[data-action="wh-hide"]', (b) => b.click());
-    await page.$$eval('.wh-row', (rs) => rs.find((x) => x.dataset.webhook === 'Relay')?.querySelector('[data-action="wh-open"]')?.click());
+    await page.$$eval('.wh-row', (rs) => rs.find((x) => x.dataset.webhook === 'Joins only')?.querySelector('[data-action="wh-open"]')?.click());
     await page.waitForSelector('[data-testid="wh-log"] tr', { timeout: 6000 }).catch(() => {});
     const logRows = await page.$$eval('[data-testid="wh-log"] tr', (t) => t.length);
     ok(logRows > 0 && logRows <= 20, `UI ${width}: recent deliveries listed (${logRows}, max 20)`);
-    await page.$eval('.wh-row[data-webhook="Relay"]', (d) => d.scrollIntoView({ block: 'start' }));
+    await page.$eval('.wh-row[data-webhook="Joins only"]', (d) => d.scrollIntoView({ block: 'start' }));
     await shot(page, `wh-settings-log-${width}`);
     const ov = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
     ok(!ov, `UI ${width}: settings fit without sideways scroll`);
+    await ctx.close();
+  }
+  for (const width of [1366, 390]) {
+    const { ctx, page } = await pageFor(globalThis.S, width);
+    await page.goto(BASE + '/admin', { waitUntil: 'domcontentloaded' }); await sleep(800); await dismiss(page);
+    await page.waitForSelector('.admin-tabs [data-tab="webhooks"]', { timeout: 8000 });
+    await page.$eval('.admin-tabs [data-tab="webhooks"]', (b) => b.click());
+    await page.waitForSelector('[data-admin-webhook]', { timeout: 6000 });
+    const n = await page.$$eval('[data-admin-webhook]', (r) => r.length);
+    ok(n >= 3, `ADMIN UI ${width}: webhooks tab lists hooks (${n})`);
+    await shot(page, `wh-admin-${width}`);
     await ctx.close();
   }
   // a member without the permission sees no webhooks section

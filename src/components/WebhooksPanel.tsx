@@ -120,7 +120,7 @@ function HookRow({ h, base, open, onToggle, reload, onReveal, toast }: { h: Webh
               <button type="button" className="btn ghost small-btn" data-action="wh-test" onClick={() => void act(() => api(`${one}/test`, {}), h.kind === 'incoming' ? 'Test message posted' : 'Test delivery queued')}>Test</button>
               <button type="button" className="btn ghost small-btn" data-action="wh-regenerate" onClick={() => void act(async () => { const r = await api<{ url?: string; secret?: string }>(`${one}/regenerate`, {}); onReveal(r.url ? { id: h.id, label: 'Webhook URL', value: r.url } : { id: h.id, label: 'Signing secret', value: r.secret! }); }, 'The old one no longer works')}>{h.kind === 'incoming' ? 'New URL' : 'New secret'}</button>
               {confirm
-                ? <><button type="button" className="btn danger small-btn" data-action="wh-delete-confirm" onClick={() => void act(() => api(one, undefined, 'DELETE'), 'Webhook deleted')}>Delete for good</button><button type="button" className="btn ghost small-btn" onClick={() => setConfirm(false)}>Keep</button></>
+                ? <><button type="button" className="btn danger-btn small-btn" data-action="wh-delete-confirm" onClick={() => void act(() => api(one, undefined, 'DELETE'), 'Webhook deleted')}>Delete for good</button><button type="button" className="btn ghost small-btn" onClick={() => setConfirm(false)}>Keep</button></>
                 : <button type="button" className="btn ghost small-btn danger-text" data-action="wh-delete" onClick={() => setConfirm(true)}>Delete…</button>}
             </div>
           </form>

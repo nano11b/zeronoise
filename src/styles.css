@@ -2633,3 +2633,4 @@ html[data-ui-theme="dark-orange"] {
 .danger-text { color: var(--danger, #d33); }
 .wh-create .seg input, .wh-events input, .wh-switch input { width: auto; flex: none; margin: 0; }
 .wh-create .seg label { justify-content: flex-start; text-align: left; }
+.wh-admin-wrap { overflow-x: auto; max-width: 100%; } .wh-admin-wrap code { overflow-wrap: anywhere; } .admin-webhooks .ok { color: var(--accent); } .admin-webhooks .bad { color: var(--danger, #d33); }
