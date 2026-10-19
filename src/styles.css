@@ -2653,3 +2653,15 @@ html[data-ui-theme="dark-orange"] {
 .whats-new { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 1100; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; max-width: min(40rem, calc(100% - 24px)); padding: 10px 14px; background: var(--panel-2); color: var(--text); border: 1px solid var(--accent); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.45); font-size: .92em; }
 .whats-new a { color: var(--accent); font-weight: 600; }
 @media (max-width: 800px) { .whats-new { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); width: calc(100% - 24px); } }
+/* batch MC2: gradient message colours. `color` (set inline) is the solid fallback for browsers without
+   background-clip:text; the gradient is never animated. Selection, search marks, mentions and links stay solid. */
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .md.msg-grad { background-image: var(--msg-grad); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .md.msg-grad a, .md.msg-grad code, .md.msg-grad mark, .md.msg-grad .mention, .md.msg-grad img { -webkit-text-fill-color: currentColor; }
+  .md.msg-grad mark { color: inherit; }
+  .md.msg-grad::selection, .md.msg-grad *::selection { -webkit-text-fill-color: var(--text); color: var(--text); background: color-mix(in srgb, var(--accent, #4caf50) 45%, transparent); }
+  .msg.mentioned .md.msg-grad, .msg.jump-hit .md.msg-grad { -webkit-text-fill-color: currentColor; background-image: none; }
+}
+.md.msg-grad { animation: none !important; transition: none; }
+@media (prefers-reduced-motion: reduce) { .md.msg-grad { animation: none !important; } }
+.msg-grad-swatch { background-image: var(--msg-grad); }

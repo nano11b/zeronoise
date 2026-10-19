@@ -6,7 +6,7 @@ import { TranslationLine, type TranslationState } from './TranslationLine';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { openWhispers } from '../dmStore';
 import { useIgnoreMsgColors } from '../msgColorPref';
-import { safeMsgColor } from '../../shared/msgColor';
+import { safeMsgStyle } from '../../shared/msgColor';
 import { useTileFit } from '../useTileFit';
 import { APP_NAME, LIMITS } from '../../shared/config';
 import type { ChatMessage, RoomState, RoomSummary, SignalData, UserInfo, WatchState, WhisperInfo, WhisperMessage } from '../../shared/types';
@@ -261,7 +261,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const [text, setText] = useState('');
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const ignoreMsgColors = useIgnoreMsgColors();
-  const lineColor = (m: { msgColor?: string | null; webhook?: unknown }) => (ignoreMsgColors || m.webhook ? null : safeMsgColor(m.msgColor));
+  const lineColor = (m: { msgColor?: string | null; webhook?: unknown }) => (ignoreMsgColors || m.webhook || !safeMsgStyle(m.msgColor) ? null : (m.msgColor as string));
   const longPressed = useRef(false);
   const pressTimer = useRef<number | null>(null);
   const pressStart = useRef<{ x: number; y: number } | null>(null);

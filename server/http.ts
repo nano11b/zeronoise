@@ -38,7 +38,7 @@ import { consumeNativeHandoff, issueNativeHandoff } from './nativeHandoff';
 import { registerDownloads } from './downloads';
 import { privacyHtml, termsHtml } from './legal';
 import { botApiHtml, botApiMarkdown, llmsTxt } from './botDocs';
-import { readableMsgColor } from '../shared/msgColor';
+import { readableMsgStyle } from '../shared/msgColor';
 import { loadChangelog, updatesHtml, UPDATES_JS } from './updatesPage';
 import { isValidNick, normalizeEmail } from './validate';
 import { hasFilteredWord } from './moderation';
@@ -622,25 +622,28 @@ export function createApp(roomList: () => unknown) {
     res.json({ ok: true, colors: CHAT_COLORS });
   });
 
-  /** batch X: message text colour. body { color: '#rrggbb' | null }. Unreadable picks come back lightened (adjusted: true). */
+  /** batch X/MC2: message text colour. body { color: '#rrggbb' | 'g:#a,#b[,#c]' | null } or { gradient: ['#a', '#b'(, '#c')] }.
+   *  Unreadable picks (or gradient stops) come back lightened (adjusted: true). */
   app.patch('/api/me/msg-color', (req, res) => {
     const a = reqAccount(req);
     if (!a) return fail(res, 401, 'Sign in first');
     if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
-    const raw = (req.body as { color?: unknown })?.color;
-    if (raw === null || raw === '') { repo.setMsgColor(a.id, null); live.profileChanged(a.id); return res.json({ ok: true, msgColor: null, adjusted: false }); }
-    const r = readableMsgColor(raw);
-    if (!r) return fail(res, 400, 'Pick a colour (#rrggbb)');
-    repo.setMsgColor(a.id, r.color);
+    const body = (req.body ?? {}) as { color?: unknown; gradient?: unknown };
+    const raw = Array.isArray(body.gradient) ? { stops: body.gradient } : body.color;
+    if (raw === null || raw === '' || raw === undefined) { repo.setMsgColor(a.id, null); live.profileChanged(a.id); return res.json({ ok: true, msgColor: null, adjusted: false }); }
+    const r = readableMsgStyle(raw);
+    if (!r) return fail(res, 400, 'Pick a colour (#rrggbb) or a gradient of 2-3 colours');
+    repo.setMsgColor(a.id, r.value);
     live.profileChanged(a.id);
-    res.json({ ok: true, msgColor: r.color, adjusted: r.adjusted });
+    res.json({ ok: true, msgColor: r.value, adjusted: r.adjusted });
   });
   app.patch('/api/me/color', (req, res) => {
     const a = reqAccount(req);
     if (!a) return fail(res, 401, 'Sign in first');
     if (!profileLimiter.take(clientIp(req))) return fail(res, 429, 'Too many attempts. Try again later.');
-    const raw = (req.body as { color?: unknown })?.color;
-    if (raw === null || raw === '') {
+    const body = (req.body ?? {}) as { color?: unknown; gradient?: unknown };
+    const raw = Array.isArray(body.gradient) ? { stops: body.gradient } : body.color;
+    if (raw === null || raw === '' || raw === undefined) {
       repo.setChatColor(a.id, null);
       live.profileChanged(a.id);
       return res.json({ ok: true, chatColor: null });
