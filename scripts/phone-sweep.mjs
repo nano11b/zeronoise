@@ -86,7 +86,7 @@ const click = async (page, sel) => {
   await sleep(600);
   return true;
 };
-const clickText = (page, re) => page.evaluate((src) => { const re = new RegExp(src); const e = [...document.querySelectorAll('button, a, [role="menuitem"], [role="tab"]')].find((x) => (re.test(x.getAttribute('aria-label') || '') || re.test(x.textContent.trim())) && x.getClientRects().length && !x.closest('[inert]')); if (e) { e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); return true; } return false; }, re.source);
+const clickText = (page, re) => page.evaluate((src) => { const re = new RegExp(src); const e = [...document.querySelectorAll('button, a, [role="menuitem"], [role="tab"]')].find((x) => (re.test(x.getAttribute('aria-label') || '') || re.test(x.textContent.trim())) && x.getClientRects().length && !x.closest('[inert]')); if (e) { e.click(); return true; } return false; }, re.source);
 const shots = [];
 async function snap(page, width, name, opened = true) {
   const file = path.join(OUT, `${width}-${name}.png`);
@@ -174,7 +174,7 @@ async function sweep(width) {
   await click(owner, '[data-action="more"]');
   o = await click(owner, '[data-action="people"]');
   await snap(owner, width, '19-people', o);
-  o = await owner.evaluate((nick) => { const e = [...document.querySelectorAll(`.user-row[data-nick="${nick}"]`)].find((x) => x.getClientRects().length); if (e) { e.click(); return true; } return false; }, `Ph_Pal${width}`);
+  o = await owner.evaluate((nick) => { const e = [...document.querySelectorAll(`.user-row[data-nick="${nick}"]`)].find((x) => x.getClientRects().length); if (e) { e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); return true; } return false; }, `Ph_Pal${width}`);
   await sleep(600);
   await snap(owner, width, '20-user-menu', o);
   o = await click(owner, '[data-action="whisper"]');
