@@ -25,7 +25,7 @@ import { RecorderControls, RecordingBanner } from './RoomRecording';
 import { LiveCaptions } from './LiveCaptions';
 import { enqueue, newClientId, useOutbox } from '../outbox';
 import { fmtTime, unreadBadge } from '../util';
-import { readRoomLocally } from '../mentions';
+import { openMessage, readRoomLocally, takePendingJump } from '../mentions';
 import { storedDeviceId } from '../api';
 import { BAN_DURATIONS, Dialog, DialogSpec } from './Dialog';
 import { NotifyDialog } from './NotifyDialog';
@@ -1469,9 +1469,17 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const onSearchJump = (h: SearchHit) => { void jumpToMessage(h.message.id); };
   const onSavedJump = (b: BookmarkEntry) => {
     if (b.roomId === initial.id) { void jumpToMessage(b.message.id); return; }
-    const r = roomList.find((x) => x.id === b.roomId);
-    if (r) void switchRoom(r); else toast(`#${b.roomName} is not open right now`, 'error');
+    openMessage(b.roomId, b.message.id);
   };
+  const jumpRef = useRef(jumpToMessage);
+  jumpRef.current = jumpToMessage;
+  useEffect(() => {
+    // a jump requested from outside this room (Saved list in the profile menu), now or before this room mounted
+    const t = window.setTimeout(() => { const id = takePendingJump(initial.id); if (id) void jumpRef.current(id); }, 900);
+    const on = (e: Event) => { const d = (e as CustomEvent<{ roomId: string; messageId: string }>).detail; if (d?.roomId === initial.id && takePendingJump(initial.id)) void jumpRef.current(d.messageId); };
+    window.addEventListener('zn:jump-message', on);
+    return () => { window.clearTimeout(t); window.removeEventListener('zn:jump-message', on); };
+  }, [initial.id]);
   const openProfile = (nick: string) => { setMenuFor(null); setBlockFor(null); setProfileFor(nick); };
   const [tileAspects, setTileAspects] = useState<Record<string, { ar: number; audioOnly: boolean }>>({});
   const onTileLayout = useCallback((id: string, info: { ar: number; audioOnly: boolean }) => {

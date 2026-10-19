@@ -4640,6 +4640,8 @@ function onConnection(socket: AppSocket) {
     if (!s.account || !s.user?.registered || socket.id.startsWith('bot:')) return ack({ ok: false, error: 'Sign in to save messages.', status: 401 });
     if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Slow down', status: 429 });
     const m = repo.messageById(String(p?.messageId ?? ''));
+    // batch MC2: removing one of your own bookmarks works from anywhere (the Saved list in the profile menu)
+    if (m && p?.on === false && repo2.isBookmarked(s.account.id, m.id)) { repo2.setBookmark(s.account.id, m.id, m.room_id, false); return ack({ ok: true, bookmarked: false }); }
     // only lines in the room you are in (you can see them), never burn messages
     if (!m || m.deleted || m.room_id !== s.roomId || m.burn_ttl != null) return ack({ ok: false, error: 'Message not found', status: 404 });
     const on = typeof p?.on === 'boolean' ? p.on : !repo2.isBookmarked(s.account.id, m.id);

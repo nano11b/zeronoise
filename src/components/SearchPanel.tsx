@@ -134,3 +134,45 @@ export function SavedPanel({ version, currentRoomId, onJump, onRemove }: {
     </div>
   );
 }
+
+/** batch MC2: "Saved messages" in the Your profile menu: every bookmark across rooms, private to you. */
+export function SavedDialogBody({ onJump }: { onJump: (roomId: string, messageId: string) => void }) {
+  const [list, setList] = useState<BookmarkEntry[] | null>(null);
+  const [error, setError] = useState('');
+  const [q, setQ] = useState('');
+  const [room, setRoom] = useState('');
+  useEffect(() => {
+    call<{ bookmarks: BookmarkEntry[] }>((ack) => socket.emit('bookmark:list', ack)).then((r) => setList(r.bookmarks)).catch((e) => setError((e as Error).message));
+  }, []);
+  const remove = (id: string) => {
+    socket.emit('bookmark:toggle', { messageId: id, on: false }, (r) => { if (r.ok) setList((cur) => (cur ?? []).filter((x) => x.message.id !== id)); else setError(r.error); });
+  };
+  const rooms = [...new Map((list ?? []).map((b) => [b.roomId, b.roomName])).entries()];
+  const n = q.trim().toLowerCase();
+  const shown = (list ?? []).filter((b) => (!room || b.roomId === room) && (!n || `${b.message.text} ${b.message.kind === 'chat' ? b.message.from : ''}`.toLowerCase().includes(n)));
+  return (
+    <div className="saved-dialog" data-testid="saved-dialog">
+      <p className="muted small">Only you can see this list. Save a message with its ☆ button.</p>
+      {list && list.length > 0 && (
+        <div className="row-actions saved-filters">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter saved messages" aria-label="Filter saved messages" data-field="saved-filter" />
+          {rooms.length > 1 && <select value={room} onChange={(e) => setRoom(e.target.value)} aria-label="Room" data-field="saved-room"><option value="">All rooms</option>{rooms.map(([id, name]) => <option key={id} value={id}>#{name}</option>)}</select>}
+        </div>
+      )}
+      {error && <p className="muted small" role="alert">{error}</p>}
+      {list === null && !error && <p className="muted small">Loading…</p>}
+      {list && list.length === 0 && <p className="muted small" data-testid="saved-empty">Nothing saved yet.</p>}
+      <ul className="hit-list">
+        {shown.map((b) => (
+          <li key={b.message.id} className="saved-row" data-saved-row={b.message.id}>
+            <button type="button" className="hit" onClick={() => onJump(b.roomId, b.message.id)} title={`Open in #${b.roomName}`} data-action="saved-open">
+              <span className="hit-meta"><strong>{b.message.kind === 'chat' ? b.message.from : ''}</strong><span className="muted small">#{b.roomName} · {when(b.message.ts)}</span></span>
+              <span className="hit-text">{snippet(b.message.text)}</span>
+            </button>
+            <button type="button" className="icon-btn" title="Remove from saved" aria-label="Remove from saved" data-action="saved-remove" onClick={() => remove(b.message.id)}>✕</button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

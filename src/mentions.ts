@@ -42,3 +42,18 @@ export function useMentions(): State {
 export function openRoomById(roomId: string) {
   window.dispatchEvent(new CustomEvent('zn:open-room', { detail: { roomId } }));
 }
+
+/** batch MC2: open a room (if needed) and jump to a message there. The room picks the pending jump up when it mounts. */
+let pendingJump: { roomId: string; messageId: string; at: number } | null = null;
+export function openMessage(roomId: string, messageId: string) {
+  pendingJump = { roomId, messageId, at: Date.now() };
+  window.dispatchEvent(new CustomEvent('zn:jump-message', { detail: { roomId, messageId } }));
+  openRoomById(roomId);
+}
+/** the pending jump for this room (taken once, valid for 20 s) */
+export function takePendingJump(roomId: string): string | null {
+  const p = pendingJump;
+  if (!p || p.roomId !== roomId || Date.now() - p.at > 20_000) return null;
+  pendingJump = null;
+  return p.messageId;
+}

@@ -10,7 +10,7 @@ import { RoleTag } from './RoleTag';
 import { NickLabel, UserAvatar } from './UserAvatar';
 import { useStaffCounts } from '../modq';
 import { Sheet } from './Sheet';
-import { useMentions } from '../mentions';
+import { openMessage, useMentions } from '../mentions';
 import { useDm, totalUnread, requestCount, type WhisperStart } from '../dmStore';
 import type { RoomState } from '../../shared/types';
 import { useEffect } from 'react';
@@ -23,8 +23,9 @@ const BotsDialogBody = lazyNamed(loadProfile, 'BotsDialogBody');
 const NotificationsDialogBody = lazyNamed(loadProfile, 'NotificationsDialogBody');
 const MentionsDialogBody = lazyNamed(() => import('./MentionsPanel'), 'MentionsDialogBody');
 const DmPanel = lazyNamed(() => import('./DmPanel'), 'DmPanel');
-type ProfileDialogKind = 'profile' | 'bots' | 'notifications' | 'mentions' | 'whispers';
-const DIALOG_TITLE: Record<ProfileDialogKind, string> = { profile: 'Profile', bots: 'Bots', notifications: 'Notifications', mentions: 'Mentions', whispers: 'Whispers' };
+const SavedDialogBody = lazyNamed(() => import('./SearchPanel'), 'SavedDialogBody');
+type ProfileDialogKind = 'profile' | 'bots' | 'notifications' | 'mentions' | 'whispers' | 'saved';
+const DIALOG_TITLE: Record<ProfileDialogKind, string> = { profile: 'Profile', bots: 'Bots', notifications: 'Notifications', mentions: 'Mentions', whispers: 'Whispers', saved: 'Saved messages' };
 
 /** Shared top bar: logo, centered section buttons, online status, and the name chip. */
 export function SiteBar({
@@ -195,6 +196,7 @@ export function SiteBar({
             {dialog === 'bots' && <BotsDialogBody toast={toast} />}
             {dialog === 'notifications' && <NotificationsDialogBody toast={toast} />}
             {dialog === 'whispers' && <DmPanel myId={account.id} toast={toast} startWith={dmWith} onJoinCall={onJoinCall ? (r) => { setDialog(null); onJoinCall(r); } : undefined} />}
+            {dialog === 'saved' && <SavedDialogBody onJump={(roomId, id) => { setDialog(null); openMessage(roomId, id); }} />}
             {dialog === 'mentions' && <MentionsDialogBody toast={toast} onJump={() => setDialog(null)} />}
           </Lazy>
         </Sheet>

@@ -2735,3 +2735,5 @@ html.no-avatar-fx .user-avatar.avatar-fx { box-shadow: none !important; animatio
 .mq-list img { border-radius: 4px; flex: none; } .mq-list li .btn { margin-left: auto; }
 .mq-now { margin: 0; }
 .event-recur { font-weight: 500; color: var(--muted); margin-left: 4px; white-space: nowrap; }
+.saved-dialog .saved-filters input { flex: 1; min-width: 0; }
+.saved-dialog .hit-list { max-height: min(60vh, 520px); overflow-y: auto; }
