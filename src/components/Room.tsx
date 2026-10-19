@@ -3,7 +3,8 @@ import { getTts, onQueue, onTts, queueState, roomMuted, setTts, speakable, ttsSa
 import type { RolesState } from './RolesPanel';
 import { RoleChip } from './RoleChip';
 import { TranslationLine, type TranslationState } from './TranslationLine';
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { openWhispers } from '../dmStore';
 import { useTileFit } from '../useTileFit';
 import { APP_NAME, LIMITS } from '../../shared/config';
 import type { ChatMessage, RoomState, RoomSummary, SignalData, UserInfo, WatchState, WhisperInfo, WhisperMessage } from '../../shared/types';
@@ -257,6 +258,10 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const [bigId, setBigId] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const longPressed = useRef(false);
+  const pressTimer = useRef<number | null>(null);
+  const pressStart = useRef<{ x: number; y: number } | null>(null);
+  const pressEndAt = useRef(0);
   const [blockFor, setBlockFor] = useState<string | null>(null);
   const [whispers, setWhispers] = useState<Record<string, WhisperConv>>({});
   const [openWhisper, setOpenWhisper] = useState<string | null>(null);
@@ -1494,7 +1499,6 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const { ref: tilesRef, fit: tileFit } = useTileFit(fitTilesInput);
   const tileBox = (id: string) => tileFit.sizes.find((s) => s.id === id);
   const visibleMsgs = messages.filter((m) => (m.kind === 'system' || !isIgnored(m.from)) && !(m.kind === 'chat' && m.parentId));
-  const modBot = users.find((u) => u.modBot) ?? null;
   const people = users.filter((u) => !u.modBot);
   const sortedUsers = [...people].sort((a, b) => Number(b.cam || b.mic) - Number(a.cam || a.mic) || a.nick.localeCompare(b.nick));
   const canActOn = (u: UserInfo) => u.id !== me.id && (isStaff ? rank[me.role] > rank[u.role] : isOwner ? rank[u.role] < 2
@@ -1704,7 +1708,6 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   };
   const peopleNeedle = peopleQuery.trim().toLowerCase();
   const shownUsers = peopleNeedle ? sortedUsers.filter((u) => u.nick.toLowerCase().includes(peopleNeedle)) : sortedUsers;
-  const shownMod = modBot && (!peopleNeedle || modBot.nick.toLowerCase().includes(peopleNeedle)) ? modBot : null;
   const stageItem: DockItem = wide ? docks.stage : 'cams';
   const railItem: DockItem = stageItem === 'cams' ? 'people' : 'cams';
   const cameraDock = (
@@ -1843,9 +1846,35 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
       </ul>
     </div>
   );
+  /** batch X: a person can get an inbox whisper (both registered accounts, not a bot or guest) */
+  const canInboxWhisper = (u: UserInfo) => me.registered && u.registered && u.accountId != null && !u.id.startsWith('bot:') && !u.id.startsWith('whip:');
+  /** batch X: click = whisper (yourself = profile); right-click, long-press, Shift+F10 or the Menu key = actions menu */
+  const personHandlers = (u: UserInfo) => ({
+    onClick: (e: ReactMouseEvent) => {
+      e.stopPropagation();
+      if (longPressed.current) { longPressed.current = false; if (Date.now() - pressEndAt.current < 700) return; }
+      if (u.id === me.id) { if (me.registered) openProfile(me.nick); else setMenuFor(menuFor === u.id ? null : u.id); return; }
+      if (canInboxWhisper(u)) { setMenuFor(null); setPeopleOpen(false); openWhispers(u.nick); return; }
+      setMenuFor(menuFor === u.id ? null : u.id);
+    },
+    onContextMenu: (e: ReactMouseEvent) => { e.preventDefault(); e.stopPropagation(); setMenuFor(u.id); },
+    onKeyDown: (e: ReactKeyboardEvent) => { if ((e.shiftKey && e.key === 'F10') || e.key === 'ContextMenu') { e.preventDefault(); e.stopPropagation(); setMenuFor(u.id); } },
+    onPointerDown: (e: ReactPointerEvent) => {
+      if (e.pointerType === 'mouse') return;
+      longPressed.current = false;
+      const x = e.clientX, y = e.clientY;
+      if (pressTimer.current) window.clearTimeout(pressTimer.current);
+      pressStart.current = { x, y };
+      pressTimer.current = window.setTimeout(() => { longPressed.current = true; pressTimer.current = null; setMenuFor(u.id); try { navigator.vibrate?.(15); } catch { /* */ } }, 500);
+    },
+    onPointerMove: (e: ReactPointerEvent) => { const p = pressStart.current; if (pressTimer.current && p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > 10) { window.clearTimeout(pressTimer.current); pressTimer.current = null; } },
+    onPointerUp: () => { if (pressTimer.current) { window.clearTimeout(pressTimer.current); pressTimer.current = null; } if (longPressed.current) pressEndAt.current = Date.now(); },
+    onPointerCancel: () => { if (pressTimer.current) { window.clearTimeout(pressTimer.current); pressTimer.current = null; } },
+  });
   const renderUser = (u: UserInfo) => (
               <li key={u.id} className={`user ${isIgnored(u.nick) ? 'ignored' : ''}`}>
-                <button className="user-row" onClick={(e) => { e.stopPropagation(); if (u.id !== me.id) setMenuFor(menuFor === u.id ? null : u.id); }} data-nick={u.nick} aria-expanded={u.id !== me.id ? menuFor === u.id : undefined} aria-controls={menuFor === u.id ? `umenu-${u.id}` : undefined}>
+                <button className="user-row" {...personHandlers(u)} data-nick={u.nick} aria-haspopup="menu" aria-expanded={menuFor === u.id} aria-controls={menuFor === u.id ? `umenu-${u.id}` : undefined}
+                  title={u.id === me.id ? 'Your profile (right-click for more)' : canInboxWhisper(u) ? `Whisper ${u.nick} (right-click or Shift+F10 for more)` : `${u.nick} (right-click or Shift+F10 for actions)`}>
                   <UserAvatar nick={u.nick} accountId={u.accountId} chatColor={u.chatColor} hasAvatar={u.hasAvatar} size={28} />
                   <span className="user-id">
                     <NickLabel nick={u.nick} chatColor={roleOfAcct(u.accountId)?.color ?? u.chatColor} chatEffect={u.chatEffect} className="nick" /><LevelBadge level={u.level} /><RoleChip role={roleOfAcct(u.accountId)} />
@@ -1876,11 +1905,15 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     </button>
                   )}
                 {menuFor === u.id && (
-                  <div className="menu" id={`umenu-${u.id}`} role="group" aria-label={`Actions for ${u.nick}`} ref={focusFirstOnOpen} onClick={(e) => e.stopPropagation()}>
+                  <div className="menu person-menu" id={`umenu-${u.id}`} role="group" aria-label={`Actions for ${u.nick}`} ref={focusFirstOnOpen} onClick={(e) => e.stopPropagation()} onClickCapture={(e) => { if (Date.now() - pressEndAt.current < 700) { e.preventDefault(); e.stopPropagation(); } }} data-person-menu={u.nick}>
                     {!u.id.startsWith('bot:') && <BadgeCard ids={u.badges} />}
-                    {u.registered && u.accountId != null && !u.id.startsWith('bot:') && <button data-action="view-profile" onClick={() => openProfile(u.nick)}>View profile</button>}
-                    {!u.id.startsWith('whip:') && !u.id.startsWith('bot:') && <button onClick={() => { openPm({ id: u.id, nick: u.nick }); setMenuFor(null); }}>Private message</button>}
-                    {canWhisper(u) && <button data-action="whisper" onClick={() => { startWhisper(u); setMenuFor(null); setPeopleOpen(false); }}>🤫 Whisper</button>}
+                    {u.registered && u.accountId != null && !u.id.startsWith('bot:') && <button data-action="view-profile" onClick={() => openProfile(u.nick)}>👤 {u.id === me.id ? 'Your profile' : 'View profile'}</button>}
+                    {u.id !== me.id && canInboxWhisper(u) && <button data-action="dm-whisper" onClick={() => { setMenuFor(null); setPeopleOpen(false); openWhispers(u.nick); }}>✉️ Whisper</button>}
+                    {u.id !== me.id && canInboxWhisper(u) && <button data-action="dm-call" onClick={() => { setMenuFor(null); setPeopleOpen(false); openWhispers(u.nick, true); }}>📞 Call</button>}
+                    {u.id !== me.id && canInboxWhisper(u) && <button data-action="add-friend" onClick={() => { setMenuFor(null); void call((ack) => socket.emit('friends:request', { username: u.nick }, ack)).then(() => toast(`Friend request sent to ${u.nick}`)).catch((e) => toast((e as Error).message, 'error')); }}>🤝 Add friend</button>}
+                    {u.id !== me.id && <button data-action="mention" onClick={() => { setMenuFor(null); setPeopleOpen(false); setText((t) => `${t}${t && !t.endsWith(' ') ? ' ' : ''}@${u.nick} `); window.setTimeout(() => chatInputRef.current?.focus(), 0); }}>@ Mention</button>}
+                    {u.id !== me.id && !canInboxWhisper(u) && !u.id.startsWith('whip:') && !u.id.startsWith('bot:') && <button onClick={() => { openPm({ id: u.id, nick: u.nick }); setMenuFor(null); }}>Private message</button>}
+                    {canWhisper(u) && <button data-action="whisper" onClick={() => { startWhisper(u); setMenuFor(null); setPeopleOpen(false); }}>🤫 Whisper in room</button>}
                     {canWhisper(u) && whisperTargets(u).map((c) => (
                       <button key={c.info.id} data-action="whisper-add" onClick={() => { addToWhisper(c.info.id, u); setMenuFor(null); setPeopleOpen(false); }}>🤫 Add to {whisperLabel(c.info, me.id)}</button>
                     ))}
@@ -1890,8 +1923,8 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                         ? (stageInvited(u) && <button data-action="stage-down" onClick={() => { stageDown(u.id); setMenuFor(null); }}>Move to audience</button>)
                         : <button data-action="stage-invite" onClick={() => { stageInvite(u.id); setMenuFor(null); }}>Bring up to speak</button>
                     )}
-                    <button data-action="block" onClick={() => { toggleIgnore(u.nick); setMenuFor(null); }}>{isIgnored(u.nick) ? 'Unblock' : 'Block'}</button>
-                    <button onClick={() => reportUser(u)} data-action="report-user">Report…</button>
+                    {u.id !== me.id && <button data-action="block" onClick={() => { toggleIgnore(u.nick); setMenuFor(null); }}>🚫 {isIgnored(u.nick) ? 'Unblock' : 'Block'}</button>}
+                    {u.id !== me.id && <button onClick={() => reportUser(u)} data-action="report-user">⚑ Report…</button>}
                     {!canActOn(u) && !u.id.startsWith('bot:') && !u.id.startsWith('whip:') && (roleCanActOn(u, 'mute') || roleCanActOn(u, 'kick')) && (
                       <>
                         <div className="menu-sep">Moderation · {myRole?.name}</div>
@@ -1927,15 +1960,6 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
           <div className="users-scroll">
           {handQueue}
           <ul>
-            {shownMod && (
-              <li key={shownMod.id} className="user modbot" data-modbot="1">
-                <div className="user-row modbot" title="Automated moderator" data-nick={shownMod.nick} onClick={(e) => e.stopPropagation()}>
-                  <UserAvatar nick={shownMod.nick} accountId={shownMod.accountId} chatColor={shownMod.chatColor} hasAvatar={shownMod.hasAvatar} size={28} />
-                  <NickLabel nick={shownMod.nick} chatColor={shownMod.chatColor} chatEffect={shownMod.chatEffect} className="nick" />
-                  <span className="tag role-modbot" title="Automated moderator">mod bot</span>
-                </div>
-              </li>
-            )}
             {stageOn ? (
               <>
                 <li className="people-section" data-section="speakers">Speakers <span className="muted small">{stage.speakers.length}/{stage.cap}</span></li>
@@ -1946,7 +1970,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
               </>
             ) : shownUsers.map(renderUser)}
           </ul>
-          <p className="muted small hint">Click a name to message, block or report{canRoomManage ? ', or moderate' : ''}.</p>
+          <p className="muted small hint">{me.registered ? 'Click a name to whisper.' : 'Click a name for options.'} Right-click, long-press or Shift+F10 for profile, call, friend, block, report{canRoomManage ? ' and moderation' : ''}.</p>
           </div>
           {wide && mediaControls}
         </div>

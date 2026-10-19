@@ -320,7 +320,7 @@ try {
       const o = await pageFor(other, width);
       await enterRoom(o.page, troom);
       if (phone) { await o.page.evaluate(() => document.querySelector('[data-action="more"]')?.click()); await sleep(300); await o.page.evaluate(() => document.querySelector('[data-action="people"]')?.click()); await sleep(400); }
-      await o.page.evaluate(() => document.querySelector('.user-row[data-nick="CcMember"]')?.click()); await sleep(400);
+      await o.page.evaluate(() => document.querySelector('.user-row[data-nick="CcMember"]')?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))); await sleep(400);
       await o.page.evaluate(() => document.querySelector('[data-action="view-profile"]')?.click());
       const card = await o.page.waitForSelector('[data-profile="CcMember"]', { timeout: 6000 }).catch(() => null);
       ok(!!card, `${width}: profile card opens`);

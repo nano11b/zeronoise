@@ -2634,3 +2634,7 @@ html[data-ui-theme="dark-orange"] {
 .wh-create .seg input, .wh-events input, .wh-switch input { width: auto; flex: none; margin: 0; }
 .wh-create .seg label { justify-content: flex-start; text-align: left; }
 .wh-admin-wrap { overflow-x: auto; max-width: 100%; } .wh-admin-wrap code { overflow-wrap: anywhere; } .admin-webhooks .ok { color: var(--accent); } .admin-webhooks .bad { color: var(--danger, #d33); }
+.user-row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+@media (max-width: 800px) {
+  .users .menu.person-menu { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); top: auto; width: auto; max-height: 70vh; overflow-y: auto; z-index: 1200; box-shadow: 0 -8px 30px rgba(0,0,0,.45); }
+}

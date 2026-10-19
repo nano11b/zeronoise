@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { DM, DM_FILE_TYPES, disappearLabel, type DmConvo, type DmMessage, type DmPolicy } from '../../shared/dm';
-import { dmCall, dmSock, loadDm, loadOlder, markRead, openConvo, requestCount, setDmPrefs, totalUnread, useDm, blockLocally } from '../dmStore';
+import { dmCall, dmSock, loadDm, loadOlder, markRead, openConvo, requestCount, setDmPrefs, totalUnread, useDm, blockLocally, type WhisperStart } from '../dmStore';
 import { call, socket } from '../socket';
 import { fmtTime } from '../util';
 import { storedDeviceId } from '../api';
@@ -20,7 +20,7 @@ type Tab = 'chats' | 'requests' | 'archived';
 export const convoTitle = (c: DmConvo, myId: number) =>
   c.name ?? (c.members.filter((m) => m.userId !== myId && !m.left).map((m) => m.username).join(', ') || 'Just you');
 
-export function DmPanel({ myId, toast, startWith, onJoinCall }: { myId: number; toast: Toast; startWith?: string | null; onJoinCall?: (room: RoomState) => void }) {
+export function DmPanel({ myId, toast, startWith, onJoinCall }: { myId: number; toast: Toast; startWith?: WhisperStart | null; onJoinCall?: (room: RoomState) => void }) {
   const s = useDm();
   const [tab, setTab] = useState<Tab>('chats');
   const [composing, setComposing] = useState(false);
@@ -30,9 +30,12 @@ export function DmPanel({ myId, toast, startWith, onJoinCall }: { myId: number; 
   useEffect(() => { void loadDm().catch((e) => toast((e as Error).message, 'error')); }, [toast]);
   useEffect(() => {
     if (!startWith) return;
-    void dmCall<{ convo: DmConvo }>('dm:start', { usernames: [startWith] })
-      .then((r) => openConvo(r.convo.id)).catch((e) => toast((e as Error).message, 'error'));
-  }, [startWith, toast]);
+    void dmCall<{ convo: DmConvo }>('dm:start', { usernames: [startWith.username] })
+      .then(async (r) => {
+        openConvo(r.convo.id);
+        if (startWith.call) { const c = await dmCall<{ room: RoomState }>('dm:call', { convoId: r.convo.id, video: false }); onJoinCall?.(c.room); }
+      }).catch((e) => toast((e as Error).message, 'error'));
+  }, [startWith, toast]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (query.trim().length < 2) { setResults(null); return; }
     const t = window.setTimeout(() => {

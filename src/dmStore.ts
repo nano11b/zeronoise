@@ -111,4 +111,8 @@ export function setDmPrefs(p: Partial<Pick<State, 'policy' | 'typingOn' | 'recei
 /** Ask App to add a username to the block list (it syncs the list to the server). */
 export function blockLocally(username: string) { window.dispatchEvent(new CustomEvent('zn:block', { detail: { username } })); }
 /** Open the whispers sheet from anywhere (profile menu, push notification link, "Whisper" buttons). */
-export function openWhispers(withUsername?: string) { window.dispatchEvent(new CustomEvent('zn:open-whispers', { detail: { username: withUsername } })); }
+export type WhisperStart = { username: string; call?: boolean; n: number };
+/** Open the Whispers inbox, optionally with a 1:1 conversation (message requests and blocks apply server side), optionally ringing a voice call. */
+export function openWhispers(withUsername?: string, call = false) {
+  window.dispatchEvent(new CustomEvent('zn:open-whispers', { detail: withUsername ? { username: withUsername, call, n: Date.now() } : undefined }));
+}

@@ -399,7 +399,7 @@ try {
       ok(!!chip && col === 'rgb(124, 196, 255)', `${width}: G4: role name colour shows in chat`, col);
       await m.page.evaluate(() => document.querySelector('[data-action="rec-ok"]')?.click());
       if (width < 800) { await m.page.evaluate(() => document.querySelector('[data-action="people"], [data-action="toggle-people"], [aria-label*="Online"]')?.click()); await sleep(400); }
-      const opened = await m.page.evaluate(() => { const li = [...document.querySelectorAll('.users li')].find((e) => e.textContent.includes('GgOther')); const b = li?.querySelector('button, .user-row, [role=button]') || li; b?.click(); return !!li; });
+      const opened = await m.page.evaluate(() => { const li = [...document.querySelectorAll('.users li')].find((e) => e.textContent.includes('GgOther')); const b = li?.querySelector('button, .user-row, [role=button]') || li; b?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); return !!li; });
       await sleep(400);
       const menu = await m.page.evaluate(() => [...document.querySelectorAll('.users [data-action]')].map((b) => b.dataset.action));
       ok(opened && menu.includes('kick') && !menu.includes('room-ban') && !menu.includes('room-mute'), `${width}: G4: holder's menu shows exactly their powers`, JSON.stringify(menu));

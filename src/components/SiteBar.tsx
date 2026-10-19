@@ -11,7 +11,7 @@ import { NickLabel, UserAvatar } from './UserAvatar';
 import { useStaffCounts } from '../modq';
 import { Sheet } from './Sheet';
 import { useMentions } from '../mentions';
-import { useDm, totalUnread, requestCount } from '../dmStore';
+import { useDm, totalUnread, requestCount, type WhisperStart } from '../dmStore';
 import type { RoomState } from '../../shared/types';
 import { useEffect } from 'react';
 import { DmCallHost } from './DmCallHost';
@@ -62,10 +62,10 @@ export function SiteBar({
   const { unread: mentionsUnread } = useMentions();
   const dm = useDm();
   const dmBadge = account ? totalUnread(dm) + requestCount(dm) : 0;
-  const [dmWith, setDmWith] = useState<string | null>(null);
+  const [dmWith, setDmWith] = useState<WhisperStart | null>(null);
   useEffect(() => {
     if (!account) return;
-    const on = (e: Event) => { setDmWith((e as CustomEvent<string | undefined>).detail ?? null); setProfileOpen(false); setDialog('whispers'); };
+    const on = (e: Event) => { const d = (e as CustomEvent<string | WhisperStart | undefined>).detail; setDmWith(typeof d === 'string' ? { username: d, n: Date.now() } : d?.username ? d : null); setProfileOpen(false); setDialog('whispers'); };
     window.addEventListener('zn:open-whispers', on);
     return () => window.removeEventListener('zn:open-whispers', on);
   }, [account]);

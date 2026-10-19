@@ -312,7 +312,7 @@ try {
     ok(!!(await admin.$('[data-action="admin"]')), `admin ${ADMIN} sees the Mod panel button`);
     await admin.click('.room-card[data-room="lobby"]');
     await admin.waitForSelector('.chat-form input');
-    await admin.click(`.user-row[data-nick="Bob_${tag}"]`);
+    await admin.click(`.user-row[data-nick="Bob_${tag}"]`, { button: 'right' });
     await admin.click('[data-action="camoff"]');
     const off = await bob.waitForFunction(() => !document.querySelector('[data-action="cam"].on'), { timeout: 5000 }).then(() => true, () => false);
     ok(off, 'moderator turns Bob\'s cam off from the user menu; Bob\'s camera stops');
