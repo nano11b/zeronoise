@@ -401,7 +401,7 @@ try {
       if (width < 800) { await m.page.evaluate(() => document.querySelector('[data-action="people"], [data-action="toggle-people"], [aria-label*="Online"]')?.click()); await sleep(400); }
       const opened = await m.page.evaluate(() => { const li = [...document.querySelectorAll('.users li')].find((e) => e.textContent.includes('GgOther')); const b = li?.querySelector('button, .user-row, [role=button]') || li; b?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })); return !!li; });
       await sleep(400);
-      const menu = await m.page.evaluate(() => [...document.querySelectorAll('.users [data-action]')].map((b) => b.dataset.action));
+      const menu = await m.page.evaluate(() => [...document.querySelectorAll('.menu.person-menu [data-action]')].map((b) => b.dataset.action)); // MC2 part 3: the person menu is portaled to <body>
       ok(opened && menu.includes('kick') && !menu.includes('room-ban') && !menu.includes('room-mute'), `${width}: G4: holder's menu shows exactly their powers`, JSON.stringify(menu));
       await shot(m.page, `g4-holder-menu-${width}`);
       await m.ctx.close(); await fresh(mem); await emit(mem.s, 'room:join', { roomId: rr });
