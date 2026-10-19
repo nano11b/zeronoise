@@ -2636,7 +2636,9 @@ html[data-ui-theme="dark-orange"] {
 .wh-admin-wrap { overflow-x: auto; max-width: 100%; } .wh-admin-wrap code { overflow-wrap: anywhere; } .admin-webhooks .ok { color: var(--accent); } .admin-webhooks .bad { color: var(--danger, #d33); }
 .user-row { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
 @media (max-width: 800px) {
-  .users .menu.person-menu { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); top: auto; width: auto; max-height: 70vh; overflow-y: auto; z-index: 1200; box-shadow: 0 -8px 30px rgba(0,0,0,.45); }
+  .users .menu.person-menu { position: fixed; left: 8px; right: 8px; bottom: calc(72px + env(safe-area-inset-bottom, 0px)); top: auto; width: auto; max-height: calc(100dvh - 140px); overflow-y: auto; z-index: 1200; box-shadow: 0 -8px 30px rgba(0,0,0,.45); }
+  /* the drawer is moved with transform, which would trap the fixed sheet inside it */
+  .room.people-open .users:has(.person-menu) { transform: none; }
 }
 /* batch X: message colour */
 .msg-color-previews { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px; margin-top: 6px; }
