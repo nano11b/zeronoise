@@ -5,7 +5,7 @@ import { call, socket } from '../socket';
 const rcall = (ev: string, p: unknown) => call((ack) => (socket.emit as unknown as (e: string, p: unknown, a: (r: unknown) => void) => void)(ev, p, ack));
 
 /** Batch G4: owner defines custom roles (name, contrast-checked colour, chosen powers) and hands them out. */
-export const PERM_LABEL: Record<RoomRolePerm, string> = { messages: 'Delete messages', pin: 'Pin messages', mute: 'Mute in this room', kick: 'Kick from room', floor: 'Give / take the voice floor', webhooks: 'Manage webhooks' };
+export const PERM_LABEL: Record<RoomRolePerm, string> = { messages: 'Delete messages', pin: 'Pin messages', mute: 'Mute in this room', kick: 'Kick from room', floor: 'Give / take the voice floor', webhooks: 'Manage webhooks', music: 'Skip / remove songs in the music queue' };
 const PERMS = Object.keys(PERM_LABEL) as RoomRolePerm[];
 type Toast = (msg: string, kind?: 'error' | 'info') => void;
 export interface RolesState { roles: RoomRoleInfo[]; members: Record<string, number> }

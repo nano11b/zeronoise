@@ -278,6 +278,11 @@ export interface ClientToServer {
   'trivia:start': (p: { count: number; category: string }, ack: Ack<{ state: TriviaState }>) => void;
   'trivia:answer': (p: { roundId: string; index: number; choice: number }, ack: Ack) => void;
   'trivia:stop': (ack: Ack) => void;
+  'queue:add': (p: { url: string }, ack: Ack) => void;
+  'queue:remove': (p: { id: string }, ack: Ack) => void;
+  'queue:skip': (ack: Ack) => void;
+  'queue:ended': (p: { videoId: string; durationSec: number }, ack: Ack) => void;
+  'queue:get': (ack: Ack<{ queue: import('./musicQueue').QueueState }>) => void;
   'game:act': (p: { game: 'ttt' | 'chain'; action: 'open' | 'join' | 'move' | 'end' | 'start' | 'play' | 'stop'; cell?: number; gameId?: string; word?: string }, ack: Ack) => void;
   'game:get': (ack: Ack<{ state: import('./roomGames').RoomGamesState; boards: Record<'ttt' | 'chain' | 'trivia', import('./roomGames').GameBoardRow[]> }>) => void;
   'trivia:get': (ack: Ack<{ state: TriviaState | null; myChoice: number | null; board: TriviaScore[] }>) => void;
@@ -515,6 +520,7 @@ export interface ServerToClient {
   'whisper:seen': (p: { whisperId: string; messageId: string; by: string; nick: string }) => void;
   /** You are no longer in this whisper (it ended, or you left / left the room). */
   'whisper:ended': (p: { whisperId: string; reason: 'ended' | 'left' }) => void;
+  'queue:state': (q: import('./musicQueue').QueueState) => void;
   'game:state': (s: import('./roomGames').RoomGamesState) => void;
   'trivia:state': (s: TriviaState) => void;
   'trivia:progress': (p: { roundId: string; index: number; answered: number; players: number }) => void;
@@ -744,5 +750,5 @@ export interface RoomAnalytics {
 }
 
 /** Batch G4: custom room roles */
-export type RoomRolePerm = 'messages' | 'pin' | 'mute' | 'kick' | 'floor' | 'webhooks';
+export type RoomRolePerm = 'messages' | 'pin' | 'mute' | 'kick' | 'floor' | 'webhooks' | 'music';
 export interface RoomRoleInfo { id: number; name: string; color: string | null; perms: RoomRolePerm[] }

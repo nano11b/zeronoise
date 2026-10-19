@@ -22,6 +22,8 @@ export interface AdapterHooks {
   /** any play / pause / seek / buffering change, user-caused or not */
   onChange: () => void;
   onError: (msg: string) => void;
+  /** the video played to its end (YouTube only); duration in seconds */
+  onEnded?: (durationSec: number) => void;
 }
 
 const scripts = new Map<string, Promise<void>>();
@@ -44,7 +46,7 @@ function loadScript(src: string, ready?: (done: () => void) => void): Promise<vo
 // ---- YouTube ----
 interface YtPlayer {
   playVideo(): void; pauseVideo(): void; seekTo(s: number, allow: boolean): void;
-  getCurrentTime(): number; getPlayerState(): number; setVolume(v: number): void; destroy(): void;
+  getCurrentTime(): number; getPlayerState(): number; setVolume(v: number): void; destroy(): void; getDuration(): number;
 }
 type YtNs = { Player: new (el: HTMLElement, opts: unknown) => YtPlayer; PlayerState: Record<string, number> };
 declare global {
@@ -82,7 +84,7 @@ export async function createYouTube(host: HTMLElement, w: WatchState, startSec: 
   player = new YT.Player(iframe, {
     events: {
       onReady: () => { ready = true; hooks.onReady(); },
-      onStateChange: () => hooks.onChange(),
+      onStateChange: (e: { data: number }) => { hooks.onChange(); if (e?.data === 0 && player) { try { hooks.onEnded?.(player.getDuration() || 0); } catch { /* gone */ } } },
       onError: (e: { data: number }) => hooks.onError(e.data === 101 || e.data === 150 || e.data === 153
         ? 'This video cannot be embedded. Try another link.' : 'YouTube could not play this video.'),
     },

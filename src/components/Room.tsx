@@ -1801,6 +1801,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
               isCreator={isOwner}
               onClose={() => setWatchOpen(false)}
               toast={toast}
+              me={me.nick}
             /></Lazy>
           )}
           <Lazy fallback={null} inline><Whiteboard open={boardOpen} canClear={canManageRoom} initial={initial.board ?? []} /></Lazy>

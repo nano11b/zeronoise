@@ -24,7 +24,7 @@ import { BRAND_NAME, DEFAULT_ROOMS, LIMITS } from '../shared/config';
 import { gifMarkdown } from '../shared/gifs';
 import type { BanKind, BoardColor, BoardStroke, ChatMessage, ClientToServer, PrivateMessage, Role, RoomState, RoomSummary, ServerToClient, UserInfo, WatchAction, WatchState, WhisperInfo, WhisperMessage, VoiceNoteInfo, TriviaScore } from '../shared/types';
 import { WHISPER_MIN_MEMBERS, whisperAddError } from '../shared/whisper';
-import { canControlWatch, cleanPosition, parseWatchUrl } from '../shared/watch';
+import { canControlWatch, cleanPosition, expectedPosition, parseWatchUrl } from '../shared/watch';
 import { publicChatEffect } from '../shared/colors';
 import { isReactionEmoji } from '../shared/reactions';
 import { migrate } from './db';
@@ -46,6 +46,7 @@ import { deleteRoomSoundFiles, soundPlayAllowed } from './sounds';
 import { deleteVoiceForMessages, deleteVoiceForRoom, isVoiceUploader, sweepVoiceNotes } from './voiceNotes';
 import { TriviaRound, pickQuestions, type TriviaPlayer } from './trivia';
 import { RoomGames, gameTop } from './roomGames';
+import { MusicQueue } from './musicQueue';
 import { canPlayTrivia, isTriviaCount, isTriviaPick, TRIVIA_PAUSE_MS, TRIVIA_QUESTION_MS, TRIVIA_TOP } from '../shared/trivia';
 import { BADGES, badgeById, crossedBadges, hourIn, isNightOwlHour, isValidTimeZone, shownBadges, type BadgeDef, type BadgeStat } from '../shared/badges';
 import { fxCooldown, isFxId, fxSlashCommand } from '../shared/fx';
@@ -964,6 +965,22 @@ function gamesOf(room: Room): RoomGames {
   if (!g) { g = new RoomGames(room.id, (st) => io.to(`room:${room.id}`).emit('game:state', st)); roomGames.set(room.id, g); }
   return g;
 }
+// ---------- music queue (batch MC2) ----------
+const musicQueues = new Map<string, MusicQueue>();
+const queueOf = (room: Room) => { let m = musicQueues.get(room.id); if (!m) { m = new MusicQueue(); musicQueues.set(room.id, m); } return m; };
+const emitQueue = (room: Room) => io.to(`room:${room.id}`).emit('queue:state', queueOf(room).state());
+/** Put the next queued song on the room player (or stop when the queue ran out and the queue owns the player). */
+function queueAdvance(room: Room, by: string) {
+  const mq = queueOf(room);
+  const wasQueue = !!mq.current && room.watch?.id === mq.current.videoId;
+  const it = mq.next();
+  const now = Date.now();
+  if (it) room.watch = { provider: 'youtube', kind: 'video', id: it.videoId, url: it.url, playing: true, positionSec: 0, updatedAt: now, by: it.by };
+  else if (wasQueue) room.watch = null;
+  else { emitQueue(room); return; }
+  io.to(`room:${room.id}`).emit('watch:state', { watch: room.watch, locked: room.watchLocked, action: it ? 'load' : 'clear', by, serverNow: now });
+  emitQueue(room);
+}
 // ---------- trivia ----------
 /** Test-only overrides (default 15 s / 4 s). */
 const TRIVIA_Q_MS = Math.min(60_000, Math.max(500, Number(process.env.TRIVIA_QUESTION_MS) || TRIVIA_QUESTION_MS));
@@ -1137,7 +1154,7 @@ function dropMembership(id: string, s: Session, notice: string) {
   if (room.members.size === 0) { room.stage.speakers.clear(); room.stage.hands.clear(); }
   else if (room.stage.on) emitStage(room);
   if (room.trivia && triviaHumans(room) === 0) stopTrivia(room, null);
-  if (room.members.size === 0) { roomGames.get(room.id)?.dispose(); roomGames.delete(room.id); }
+  if (room.members.size === 0) { roomGames.get(room.id)?.dispose(); roomGames.delete(room.id); musicQueues.delete(room.id); }
   if (room.members.size === 0) { room.board = []; room.watch = null; room.whispers.clear(); room.triviaGuests.clear(); }
   if (s.user) io.to(`room:${room.id}`).emit('chat:typing', { id, nick: s.user.nick, typing: false });
   io.to(`room:${room.id}`).emit('user:left', { id });
@@ -2948,6 +2965,55 @@ function onConnection(socket: AppSocket) {
     ack({ ok: true, state: round ? round.publicState() : null, myChoice: round ? round.myChoice(triviaPlayerOf(s).key) : null, board: triviaBoard(room) });
   });
 
+  const queueRl = new RateLimiter(5, 10_000);
+  const queueCtx = () => {
+    const s = session();
+    if (socket.id.startsWith('bot:')) return { error: 'Bots cannot use the music queue' } as const;
+    const room = s.user && s.roomId ? rooms.get(s.roomId) : undefined;
+    if (!room || !room.members.has(socket.id)) return { error: 'Not in a room' } as const;
+    return { s, room, key: triviaPlayerOf(s).key, ctl: roomPerm(s, room, 'music') } as const;
+  };
+  socket.on('queue:add', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = queueCtx(); if ('error' in c) return ack({ ok: false, error: c.error });
+    if (!queueRl.take()) return ack({ ok: false, error: 'Slow down', status: 429 });
+    const r = queueOf(c.room).add(p?.url, c.s.user!.nick, c.key);
+    if (!r.ok) return ack(r);
+    if (!c.room.watch) queueAdvance(c.room, c.s.user!.nick); else emitQueue(c.room);
+    ack({ ok: true });
+  });
+  socket.on('queue:remove', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = queueCtx(); if ('error' in c) return ack({ ok: false, error: c.error });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited', status: 429 });
+    const r = queueOf(c.room).remove(p?.id, c.key, c.ctl);
+    if (r.ok) emitQueue(c.room);
+    ack(r);
+  });
+  socket.on('queue:skip', (ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = queueCtx(); if ('error' in c) return ack({ ok: false, error: c.error });
+    if (!c.ctl) return ack({ ok: false, error: 'Only the room owner or a role with music control can skip', status: 403 });
+    if (limited(actRl, ipAct)) return ack({ ok: false, error: 'Rate limited', status: 429 });
+    queueAdvance(c.room, c.s.user!.nick);
+    ack({ ok: true });
+  });
+  socket.on('queue:ended', (p, ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = queueCtx(); if ('error' in c) return ack({ ok: false, error: c.error });
+    const w = c.room.watch;
+    const dur = Number(p?.durationSec);
+    // any viewer may report the end, but only when the room clock agrees the video has run its length
+    if (!w || w.provider !== 'youtube' || w.id !== p?.videoId || !Number.isFinite(dur) || dur <= 0) return ack({ ok: false, error: 'Not the current video' });
+    if (expectedPosition(w, Date.now()) < dur - 5) return ack({ ok: false, error: 'The video has not finished yet' });
+    queueAdvance(c.room, 'queue');
+    ack({ ok: true });
+  });
+  socket.on('queue:get', (ackRaw) => {
+    const ack = safeAck(ackRaw);
+    const c = queueCtx(); if ('error' in c) return ack({ ok: false, error: c.error });
+    ack({ ok: true, queue: { ...queueOf(c.room).state(), canControl: c.ctl } });
+  });
   const gameRl = new RateLimiter(6, 3000);
   socket.on('game:act', (p, ackRaw) => {
     const ack = safeAck(ackRaw);

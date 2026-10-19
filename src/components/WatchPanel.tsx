@@ -3,6 +3,7 @@ import type { WatchState } from '../../shared/types';
 import { WATCH_DRIFT_SEC, expectedPosition, parseWatchUrl } from '../../shared/watch';
 import { socket, call } from '../socket';
 import { createTwitch, createYouTube, type WatchAdapter } from '../watchPlayers';
+import { MusicQueuePanel } from './MusicQueuePanel';
 
 const VOLUME_KEY = 'camchat.watchVolume';
 /** Player events this soon after we applied remote state are ours, not the user's. */
@@ -25,11 +26,12 @@ interface Props {
   isCreator: boolean;
   onClose: () => void;
   toast: (t: string, tone?: 'error' | 'info') => void;
+  me?: string;
 }
 
 const keyOf = (w: WatchState | null) => (w ? `${w.provider}:${w.kind}:${w.id}` : '');
 
-export function WatchPanel({ watch, skewMs, canControl, locked, isCreator, onClose, toast }: Props) {
+export function WatchPanel({ watch, skewMs, canControl, locked, isCreator, onClose, toast, me }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const adapterRef = useRef<WatchAdapter | null>(null);
   const readyRef = useRef(false);
@@ -117,6 +119,7 @@ export function WatchPanel({ watch, skewMs, canControl, locked, isCreator, onClo
       },
       onChange: () => { if (!cancelled) onChange(); },
       onError: (msg: string) => { if (!cancelled) setError(msg); },
+      onEnded: (durationSec: number) => { if (!cancelled && w.provider === 'youtube') socket.emit('queue:ended', { videoId: w.id, durationSec }, () => { /* only advances when the room agrees */ }); },
     };
     const make = w.provider === 'youtube' ? createYouTube : createTwitch;
     make(host, w, expected(), hooks)
@@ -195,6 +198,7 @@ export function WatchPanel({ watch, skewMs, canControl, locked, isCreator, onClo
           {watch && <button type="button" className="btn ghost small-btn" data-action="watch-clear" onClick={() => { socket.emit('watch:update', { action: 'clear' }, (r) => { if (!r.ok) toast(r.error, 'error'); }); }}>Stop</button>}
         </form>
       )}
+      <MusicQueuePanel toast={toast} me={me} />
       <div className="watch-tools">
         <label className="watch-volume">
           <span className="muted small">Volume</span>

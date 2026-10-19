@@ -6,7 +6,7 @@
 import { q } from './db';
 import { readableOnAllThemes } from '../shared/uiTheme';
 
-export const ROLE_PERMS = ['messages', 'pin', 'mute', 'kick', 'floor', 'webhooks'] as const;
+export const ROLE_PERMS = ['messages', 'pin', 'mute', 'kick', 'floor', 'webhooks', 'music'] as const;
 export type RolePerm = (typeof ROLE_PERMS)[number];
 export const MAX_ROLES = 8;
 export interface RoomRole { id: number; name: string; color: string | null; perms: RolePerm[] }

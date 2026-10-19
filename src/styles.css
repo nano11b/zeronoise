@@ -2727,3 +2727,10 @@ html.no-avatar-fx .user-avatar.avatar-fx { box-shadow: none !important; animatio
 .rg-letter { font-size: 1.15em; }
 .rg-words, .rg-top { margin: 6px 0 0; padding-left: 1.4em; }
 .rg-top li span { color: var(--muted); }
+/* batch MC2: music queue */
+.music-queue { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; display: grid; gap: 6px; }
+.mq-head { display: flex; align-items: center; gap: 8px; } .mq-head .btn { margin-left: auto; }
+.mq-list { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; max-height: 180px; overflow-y: auto; }
+.mq-list li { display: flex; align-items: center; gap: 6px; } .mq-list li a { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mq-list img { border-radius: 4px; flex: none; } .mq-list li .btn { margin-left: auto; }
+.mq-now { margin: 0; }
