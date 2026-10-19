@@ -8,6 +8,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type Butt
 import { openWhispers } from '../dmStore';
 import { useIgnoreMsgColors } from '../msgColorPref';
 import { MessageColorPicker } from './MessageColor';
+import { CommandHints } from './CommandsPanel';
 import { safeMsgStyle } from '../../shared/msgColor';
 import { useTileFit } from '../useTileFit';
 import { APP_NAME, LIMITS } from '../../shared/config';
@@ -103,6 +104,7 @@ const StatsPanel = lazyNamed(loadManage, 'StatsPanel');
 const FiltersPanel = lazyNamed(loadManage, 'FiltersPanel');
 const RolesPanel = lazyNamed(() => import('./RolesPanel'), 'RolesPanel');
 const WebhooksPanel = lazyNamed(() => import('./WebhooksPanel'), 'WebhooksPanel');
+const CommandsPanel = lazyNamed(() => import('./CommandsPanel'), 'CommandsPanel');
 const TemplatePicker = lazyNamed(() => import('./TemplatePicker'), 'TemplatePicker');
 const EventsPanel = lazyNamed(() => import('./EventsPanel'), 'EventsPanel');
 const panelFallback = <p className="muted small" aria-busy="true">Loading…</p>;
@@ -263,6 +265,9 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
   const [text, setText] = useState('');
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const ignoreMsgColors = useIgnoreMsgColors();
+  // MC2: the room's custom commands, for the "/" hints in the message box
+  const [roomCmds, setRoomCmds] = useState<string[]>([]);
+  useEffect(() => { if (initial.isPrivate) return; let gone = false; void fetch(`/api/rooms/${encodeURIComponent(initial.id)}/commands`).then((r) => r.json()).then((r: { commands?: { name: string }[] }) => { if (!gone) setRoomCmds((r.commands ?? []).map((c) => c.name)); }).catch(() => {}); return () => { gone = true; }; }, [initial.id, initial.isPrivate]);
   const lineColor = (m: { msgColor?: string | null; webhook?: unknown }) => (ignoreMsgColors || m.webhook || !safeMsgStyle(m.msgColor) ? null : (m.msgColor as string));
   const longPressed = useRef(false);
   const pressTimer = useRef<number | null>(null);
@@ -2301,6 +2306,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                 <button type="button" className="btn ghost small-btn" data-action="tts-stop" onClick={ttsStop}>Stop</button>
               </div>
             )}
+            <CommandHints text={text} roomCommands={roomCmds} onPick={(c) => { setText(c); chatInputRef.current?.focus(); }} />
             <form className="chat-form" onSubmit={send}>
               <div className="composer-plus" onClick={(e) => e.stopPropagation()}>
                 <button type="button" className="btn ghost icon-act" title="More message tools" aria-label="More message tools" aria-expanded={plusOpen} data-action="composer-plus" onClick={() => setPlusOpen((v) => !v)}><Icon name="plus" /></button>
@@ -2509,6 +2515,12 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                 <details className="manage-sec" data-section="roles">
                   <summary>Custom roles{roomRoles.roles.length ? ` · ${roomRoles.roles.length}` : ''}</summary>
                   <Lazy fallback={panelFallback} inline><RolesPanel state={roomRoles} people={people} ownerNick={initial.ownerNick ?? null} toast={toast} /></Lazy>
+                </details>
+              )}
+              {!initial.isPrivate && canManageRoom && (
+                <details className="manage-sec" data-section="commands">
+                  <summary>Chat commands</summary>
+                  <Lazy fallback={panelFallback} inline><CommandsPanel roomId={initial.id} toast={toast} /></Lazy>
                 </details>
               )}
               {!initial.isPrivate && me.accountId != null && (canManageRoom || (myRole?.perms ?? []).includes('webhooks')) && (

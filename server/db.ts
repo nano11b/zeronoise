@@ -999,6 +999,18 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE users ADD COLUMN avatar_fx TEXT;
   `,
+  // 50 batch MC2: owner-defined text commands per room (/name -> response)
+  `
+  CREATE TABLE IF NOT EXISTS room_commands (
+    room_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    response TEXT NOT NULL,
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    uses INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (room_id, name)
+  );
+  `,
 ];
 
 /**

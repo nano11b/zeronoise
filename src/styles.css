@@ -2696,3 +2696,12 @@ html.no-avatar-fx .user-avatar.avatar-fx { box-shadow: none !important; animatio
 .avatar-fx-pick { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px 6px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--text); font-size: .8rem; }
 .avatar-fx-pick.on { border-color: var(--accent, #4caf50); background: color-mix(in srgb, var(--accent, #4caf50) 12%, transparent); }
 .avatar-fx-section .check-row { display: flex; gap: 8px; align-items: flex-start; margin-top: 8px; } .avatar-fx-section .check-row input { width: auto; flex: none; margin-top: 3px; }
+/* batch MC2: chat commands */
+.cmd-hints { list-style: none; margin: 0 0 4px; padding: 4px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; max-height: 40vh; overflow-y: auto; }
+.cmd-hints button { width: 100%; text-align: left; background: none; border: 0; color: var(--text); padding: 6px 8px; border-radius: 8px; display: flex; gap: 8px; align-items: baseline; }
+.cmd-hints button:hover, .cmd-hints button:focus-visible { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.cmd-list { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 6px; }
+.cmd-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.cmd-list .cmd-resp { flex: 1 1 160px; overflow-wrap: anywhere; }
+.cmd-form { display: grid; gap: 6px; }
+.cmd-form textarea, .cmd-form input { width: 100%; }

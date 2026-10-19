@@ -82,6 +82,12 @@ export const live = {
   /** Room webhooks: may this account manage the room's hooks? (owner, site staff, or a custom role with "webhooks") */
   webhookCanManage: (_roomId: string, _accountId: number, _role: string): boolean => false,
   webhookRoom: (_roomId: string): null | { id: string; name: string; isPrivate: boolean } => null,
+  /** MC2 extras: room owner or site staff (custom-role perms are checked per feature) */
+  roomCanManage: (_roomId: string, _accountId: number, _role: string): boolean => false,
+  /** MC2 extras: does the room exist and is it not a private call room */
+  roomVisible: (_roomId: string): boolean => false,
+  /** MC2 extras: write to the room's mod log */
+  roomLog: (_roomId: string, _actor: string, _action: string, _detail: string): void => undefined,
   /** Bearer API: put an allowed bot in a room. Cam, mic, and screen stay off. */
   botJoin: (_roomId: string, _bot: BotIdentity): BotResult => ({ ok: false, status: 503, error: 'Not ready' }),
   /** Bearer API: post a chat line as the bot. Rate-limited by the socket layer. */

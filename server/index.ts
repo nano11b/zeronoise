@@ -1,3 +1,4 @@
+import { expandCommand } from './extras';
 import { publicAvatarFx } from '../shared/avatarFx';
 import './quiet';
 import http from 'http';
@@ -1707,6 +1708,13 @@ repo.onLogAction((e) => {
 });
 hooks.onAutoDisable((h, reason) => repo.logAction('system', null, 'webhook-auto-disable', h.name, h.room_id, reason));
 live.webhookRoom = (roomId) => { const r = rooms.get(roomId); return r ? { id: r.id, name: r.name, isPrivate: r.isPrivate } : null; };
+live.roomCanManage = (roomId, accountId, role) => {
+  const r = rooms.get(roomId);
+  if (!r || r.isPrivate) return false;
+  return role === 'admin' || role === 'moderator' || r.ownerUserId === accountId;
+};
+live.roomVisible = (roomId) => { const r = rooms.get(roomId); return !!r && !r.isPrivate; };
+live.roomLog = (roomId, actor, action, detail) => { try { repo.logAction(actor, null, action, detail, roomId); } catch { /* log is best effort */ } };
 live.webhookCanManage = (roomId, accountId, role) => {
   const r = rooms.get(roomId);
   if (!r || r.isPrivate) return false;
@@ -3223,7 +3231,10 @@ function onConnection(socket: AppSocket) {
       if (!isBurnTtl(p.burnTtl)) return ack({ ok: false, error: 'Burn timer must be 10, 30 or 60 seconds' });
       burnTtl = p.burnTtl;
     }
-    const prepared = prepareChatText(s, p?.text);
+    // MC2: /me, /shrug, /roll, /flip and the room's own text commands
+    const cmd = expandCommand(s.roomId!, s.user.nick, p?.text);
+    if (cmd && 'error' in cmd) return ack({ ok: false, error: cmd.error });
+    const prepared = prepareChatText(s, cmd ? cmd.text : p?.text);
     if ('error' in prepared) return ack({ ok: false, error: prepared.error });
     const text = prepared.text;
     const room = rooms.get(s.roomId)!;

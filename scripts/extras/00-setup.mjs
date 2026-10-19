@@ -3,6 +3,15 @@ const lum = (h) => { const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 
 const cr = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
 const worstOf = (hexes) => Math.min(...Object.values(UI_PALETTES).flatMap((p) => [p.bg, p.bg2, p.panel, p.panel2, p.primaryBg].flatMap((b) => hexes.map((h) => cr(h, b)))));
 const setVal = (page, sel, v) => page.$eval(sel, (i, v) => { const proto = i instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, 'value').set.call(i, v); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); }, v);
+/** room settings (Info tab) -> a details section, opened and scrolled to */
+const openSettings = async (page, width, section) => {
+  if (width < 800) { await page.$eval('[data-action="collapse-panel"]', (b) => b.click()).catch(() => {}); await sleep(400); }
+  await page.$eval('[data-action="tab-info"]', (b) => b.click()).catch(() => {}); await sleep(400);
+  const ok2 = await page.waitForSelector(`details[data-section="${section}"]`, { timeout: 6000 }).then(() => true, () => false);
+  if (ok2) await page.$eval(`details[data-section="${section}"]`, (d) => { d.open = true; d.scrollIntoView({ block: 'start' }); });
+  await sleep(500);
+  return ok2;
+};
 try {
   const S = await nodeUser('PpAdmin'), D = await nodeUser(`XD${R}`), E = await nodeUser(`XE${R}`);
   sockets.push(S.s, D.s, E.s);
