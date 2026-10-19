@@ -648,6 +648,14 @@ export function createApp(roomList: () => unknown) {
       live.profileChanged(a.id);
       return res.json({ ok: true, chatColor: null });
     }
+    // MC2: name gradients (same model as message gradients: 2-3 stops, each readable on all four themes)
+    if (typeof raw === 'object' || (typeof raw === 'string' && raw.trim().toLowerCase().startsWith('g:'))) {
+      const g = readableMsgStyle(raw);
+      if (!g || g.style.kind !== 'gradient') return fail(res, 400, 'A name gradient needs 2-3 colours (#rrggbb)');
+      repo.setChatColor(a.id, g.value);
+      live.profileChanged(a.id);
+      return res.json({ ok: true, chatColor: g.value, adjusted: g.adjusted });
+    }
     const color = normalizeChatColor(raw);
     if (!color) return fail(res, 400, 'Pick a color from the palette');
     repo.setChatColor(a.id, color);

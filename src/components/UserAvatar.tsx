@@ -1,3 +1,4 @@
+import { msgStyleCss, safeMsgStyle } from '../../shared/msgColor';
 import { chatColorClass, chatColorHex, chatEffectClass, isChatColorId } from '../../shared/colors';
 import { colorFor } from '../util';
 
@@ -57,9 +58,13 @@ export function NickLabel({
   className?: string;
 }) {
   const id = isChatColorId(chatColor) ? chatColor : null;
-  const cls = chatColorClass(id);
-  const fx = chatEffectClass(chatEffect);
-  const style = cls ? undefined : { color: colorFor(nick) };
+  // MC2: name gradient (stored as g:...; every stop re-checked); the gradient/pulse effects would fight it, glow is kept
+  const grad = !id ? safeMsgStyle(chatColor) : null;
+  const gcss = grad?.kind === 'gradient' ? msgStyleCss(grad) : null;
+  const cls = gcss ? 'nick-grad' : chatColorClass(id);
+  const fx0 = chatEffectClass(chatEffect);
+  const fx = gcss && fx0 && fx0 !== 'nick-fx-glow' ? undefined : fx0;
+  const style = gcss ? (gcss.style as React.CSSProperties) : cls ? undefined : { color: colorFor(nick) };
   return (
     <span className={`nick-label ${cls || ''} ${fx || ''} ${className}`.trim()} style={style}>
       {nick}
