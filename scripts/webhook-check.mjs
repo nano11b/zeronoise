@@ -248,6 +248,59 @@ try {
   }
   // @@API-END
   // @@UI
+  fs.mkdirSync(OUT, { recursive: true });
+  browser = await puppeteer.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--lang=en-US'] });
+  await post(IN_URL, { content: 'Build **#412** passed ✅ on `main`', username: 'CI', embeds: [{ title: 'Deploy finished', url: 'https://example.com/run/412', description: 'All checks green. [Logs](https://example.com/logs)', color: 0x3fb950, fields: [{ name: 'Duration', value: '2m 14s', inline: true }, { name: 'Commit', value: 'abc1234', inline: true }], footer: { text: 'GitHub Actions' }, timestamp: new Date().toISOString() }] });
+  for (const width of [1366, 390]) {
+    const phone = width < 800;
+    const { ctx, page } = await pageFor(O, width);
+    await page.goto(`${BASE}/?room=${encodeURIComponent(ROOM)}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.chat-log', { timeout: 15000 });
+    await dismiss(page); await sleep(800);
+    const ui = await page.evaluate(() => ({ tags: document.querySelectorAll('[data-testid="wh-tag"]').length, embeds: document.querySelectorAll('.wh-embed').length, injected: !!document.querySelector('.chat-log img[src="x"]'), jsLink: [...document.querySelectorAll('.chat-log a')].some((a) => a.href.startsWith('javascript')), overflow: document.documentElement.scrollWidth > window.innerWidth + 1 }));
+    ok(ui.tags >= 3 && ui.embeds >= 1, `UI ${width}: webhook lines show the badge and embeds (${ui.tags} badges, ${ui.embeds} embeds)`);
+    ok(!ui.injected && !ui.jsLink, `UI ${width}: HTML and javascript: links in webhook text are not rendered`);
+    ok(!ui.overflow, `UI ${width}: no sideways scroll`);
+    await page.evaluate(() => document.querySelector('.chat-log')?.scrollTo(0, 1e9)); await sleep(300);
+    if (process.env.PROBE) console.log('[probe]', await page.evaluate(() => { const m = [...document.querySelectorAll('[data-testid="wh-tag"]')].pop().closest('.msg'); const cs = getComputedStyle(m); return JSON.stringify({ disp: cs.display, cols: cs.gridTemplateColumns, kids: [...m.children].map((c) => c.className + ' ' + Math.round(c.getBoundingClientRect().width) + 'x' + Math.round(c.getBoundingClientRect().height)) }); }));
+    await page.evaluate(() => [...document.querySelectorAll('[data-testid="wh-embeds"]')].pop()?.closest('.msg')?.scrollIntoView({ block: 'center' })); await sleep(300);
+    await shot(page, `wh-chat-${width}`);
+    if (phone) { await page.$eval('[data-action="collapse-panel"]', (b) => b.click()).catch(() => {}); await sleep(400); }
+    await page.$eval('[data-action="tab-info"]', (b) => b.click()); await sleep(400);
+    await page.waitForSelector('details[data-section="webhooks"]', { timeout: 6000 });
+    await page.$eval('details[data-section="webhooks"]', (d) => { d.open = true; d.scrollIntoView({ block: 'start' }); });
+    await page.waitForSelector('.wh-row', { timeout: 6000 });
+    const rows = await page.$$eval('.wh-row', (r) => r.length);
+    ok(rows >= 3, `UI ${width}: settings list the room's webhooks (${rows})`);
+    await page.type('[data-field="wh-name"]', `UI hook ${width}`);
+    await page.$eval('[data-action="wh-create"]', (b) => { b.scrollIntoView({ block: 'center' }); b.click(); });
+    await page.waitForSelector('[data-testid="wh-secret"]', { timeout: 6000 }).catch(async (e) => { await page.screenshot({ path: '/tmp/wh-fail.png' }); console.log('[toast]', await page.evaluate(() => [...document.querySelectorAll('.toast,[role=status],[role=alert]')].map((x) => x.textContent).join(' / '))); throw e; });
+    const shown = await page.$eval('[data-field="wh-secret"]', (i) => i.value);
+    ok(/\/api\/webhooks\/[a-f0-9]+\/[\w-]{40,}$/.test(shown), `UI ${width}: new URL shown once with a copy button`);
+    await page.$eval('[data-testid="wh-secret"]', (d) => d.scrollIntoView({ block: 'center' }));
+    await shot(page, `wh-settings-created-${width}`);
+    const r = await post(shown, { content: `from the UI-made hook ${width}` });
+    ok(r.status === 204, `UI ${width}: the URL from the UI works`);
+    await page.$eval('[data-action="wh-hide"]', (b) => b.click());
+    await page.$$eval('.wh-row', (rs) => rs.find((x) => x.dataset.webhook === 'Relay')?.querySelector('[data-action="wh-open"]')?.click());
+    await page.waitForSelector('[data-testid="wh-log"] tr', { timeout: 6000 }).catch(() => {});
+    const logRows = await page.$$eval('[data-testid="wh-log"] tr', (t) => t.length);
+    ok(logRows > 0 && logRows <= 20, `UI ${width}: recent deliveries listed (${logRows}, max 20)`);
+    await page.$eval('.wh-row[data-webhook="Relay"]', (d) => d.scrollIntoView({ block: 'start' }));
+    await shot(page, `wh-settings-log-${width}`);
+    const ov = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+    ok(!ov, `UI ${width}: settings fit without sideways scroll`);
+    await ctx.close();
+  }
+  // a member without the permission sees no webhooks section
+  {
+    const { ctx, page } = await pageFor(M, 1366);
+    await page.goto(`${BASE}/?room=${encodeURIComponent(ROOM)}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.chat-log', { timeout: 15000 }); await dismiss(page);
+    await page.$eval('[data-action="tab-info"]', (b) => b.click()); await sleep(500);
+    ok(!(await page.$('details[data-section="webhooks"]')), 'UI: members without the permission do not see webhook settings');
+    await ctx.close();
+  }
 } catch (e) {
   failed++; console.log('FAIL  crashed:', e.stack || e.message);
 } finally {
