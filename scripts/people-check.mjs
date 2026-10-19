@@ -258,21 +258,19 @@ try {
         if (width === 1366) await shot(page, `x-msg-color-${theme}-${width}`);
       }
       await page.evaluate(() => document.documentElement.removeAttribute('data-ui-theme'));
-      // Profile dialog: section + viewer opt-out
-      await page.$eval('[data-action="profile"]', (b) => b.click()); await sleep(500);
-      await page.waitForSelector('[data-action="open-profile"]', { timeout: 6000 });
-      await page.$eval('[data-action="open-profile"]', (b) => b.click());
+      // MC2: the picker lives in the chat bar (composer + menu, next to the name colour control) + viewer opt-out
+      await page.$eval('[data-action="composer-plus"]', (b) => b.click()); await sleep(300);
+      await page.$eval('[data-action="msg-style"]', (b) => b.click());
       await page.waitForSelector('[data-section="msg-color"]', { timeout: 6000 });
-      await page.$eval('[data-section="msg-color"]', (d) => d.scrollIntoView({ block: 'start' }));
       // type an unreadable custom colour: the dialog warns it will be lightened
       await page.$eval('[data-field="msg-color"]', (i) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, '#202020'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); });
       await sleep(200);
-      ok(!!(await page.$('[data-testid="msg-color-adjusted"]')), `A4 ${width}: the dialog warns before saving a colour that would be lightened`);
+      ok(!!(await page.$('[data-testid="msg-color-adjusted"]')), `A4 ${width}: the picker warns before saving a colour that would be lightened`);
       const ov = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
-      ok(!ov, `A4 ${width}: the Profile dialog fits`);
-      await shot(page, `x-msg-color-profile-${width}`);
+      ok(!ov, `A4 ${width}: the colour picker fits`);
+      await shot(page, `x-msg-color-composer-${width}`);
       await page.$eval('[data-action="ignore-msg-colors"]', (c) => c.click()); await sleep(200);
-      await page.keyboard.press('Escape'); await sleep(300);
+      await page.keyboard.press('Escape'); await sleep(200); await page.keyboard.press('Escape'); await sleep(300);
       const after = await page.evaluate((t) => { const el = [...document.querySelectorAll('.chat-log .md')].find((e) => e.textContent.includes(t)); return el?.dataset.msgColor ?? null; }, `coloured ${R}`);
       ok(after === null, `A4 ${width}: "ignore custom message colours" shows the line in the normal colour`);
       await page.evaluate(() => localStorage.removeItem('zn.ignoreMsgColors'));

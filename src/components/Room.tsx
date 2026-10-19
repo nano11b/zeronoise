@@ -6,6 +6,7 @@ import { TranslationLine, type TranslationState } from './TranslationLine';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { openWhispers } from '../dmStore';
 import { useIgnoreMsgColors } from '../msgColorPref';
+import { MessageColorPicker } from './MessageColor';
 import { safeMsgStyle } from '../../shared/msgColor';
 import { useTileFit } from '../useTileFit';
 import { APP_NAME, LIMITS } from '../../shared/config';
@@ -2298,6 +2299,7 @@ export function Room({ me, initial, onLeave, toast, ignored, toggleIgnore, openP
                     )}
                     {!editingId && <button type="button" className="plus-item" data-action="new-poll" onClick={() => { setPlusOpen(false); setPollDraft({ question: '', options: [] }); }}>📊 Poll</button>}
                     {account && onAccount && <NameStylePicker account={account} onAccount={onAccount} toast={toast} />}
+                    {account && onAccount && <MessageColorPicker account={account} onAccount={onAccount} toast={toast} />}
                     {ttsSupported() && <button type="button" className={`plus-item${ttsP.mode !== 'off' ? ' on' : ''}`} data-action="tts-plus" onClick={() => { ttsToggle(); setPlusOpen(false); }}>{ttsP.mode === 'off' ? '🔈 Read messages aloud' : '🔇 Stop reading aloud'}</button>}
                     <button type="button" className={`plus-item${pingMuted ? ' on' : ''}`} data-action="ping-mute" onClick={() => setPingMuted((v) => { const next = !v; try { localStorage.setItem(`${APP_NAME.toLowerCase()}.pingMute`, next ? '1' : '0'); } catch { /* ignore */ } return next; })}>{pingMuted ? 'Unmute mention sounds' : 'Mute mention sounds'}</button>
                   </div>
