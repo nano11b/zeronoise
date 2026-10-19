@@ -39,6 +39,7 @@ import { registerDownloads } from './downloads';
 import { privacyHtml, termsHtml } from './legal';
 import { botApiHtml, botApiMarkdown, llmsTxt } from './botDocs';
 import { readableMsgColor } from '../shared/msgColor';
+import { loadChangelog, updatesHtml, UPDATES_JS } from './updatesPage';
 import { isValidNick, normalizeEmail } from './validate';
 import { hasFilteredWord } from './moderation';
 import { clientPrecompressed, clientTextAssets, sendIndexHtml, staticHeaders } from './staticAssets';
@@ -2757,6 +2758,11 @@ export function createApp(roomList: () => unknown) {
     for (const f of KIT_FILES) app.get(`/docs/bots/bridge-kit/${f}`, publicDoc(kitText(f)!, f.endsWith('.md') ? 'text/markdown; charset=utf-8' : f.endsWith('.json') ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8'));
   } else console.warn('[docs] bridge-kit/ not found; /docs/bots/bridge-kit.zip disabled');
   app.get('/llms.txt', publicDoc(llmsTxt(PUBLIC_URL), 'text/plain; charset=utf-8'));
+  // batch X: public changelog (shared/changelog.json)
+  const changelog = loadChangelog();
+  app.get('/updates', publicDoc(updatesHtml(changelog), 'text/html; charset=utf-8'));
+  app.get('/updates.json', publicDoc(JSON.stringify({ entries: changelog }), 'application/json; charset=utf-8'));
+  app.get('/updates.js', publicDoc(UPDATES_JS, 'text/javascript; charset=utf-8'));
 
   app.use('/api', (_req, res) => fail(res, 404, 'Not found'));
 

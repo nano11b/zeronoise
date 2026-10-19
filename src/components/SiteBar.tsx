@@ -125,6 +125,7 @@ export function SiteBar({
           {statusOpen && (
             <div className="status-menu" role="menu" aria-label="Account">
               <a role="menuitem" href="/download" data-action="get-app-menu">Get the app</a>
+              <a role="menuitem" href="/updates" data-action="whats-new-menu">What's new</a>
               <button type="button" role="menuitem" onClick={() => { setStatusOpen(false); wantAccount('signin'); }}>Sign in</button>
               <button type="button" role="menuitem" onClick={() => { setStatusOpen(false); wantAccount('register'); }}>Register</button>
               <ThemePicker />

@@ -285,6 +285,58 @@ try {
       await ctx.close();
     }
   }
+  // @@UPDATES
+  {
+    const res = await fetch(BASE + '/updates'); const html = await res.text();
+    const cl = JSON.parse(fs.readFileSync(path.join(ROOT, 'shared/changelog.json'), 'utf8')).entries;
+    const order = cl.map((e) => html.indexOf(`id="${e.id}"`));
+    ok(res.status === 200 && order.every((x) => x > 0), 'U: /updates lists every release');
+    ok(order.every((x, i) => i === 0 || x > order[i - 1]) && cl.every((e, i) => i === 0 || e.date <= cl[i - 1].date), 'U: newest first');
+    ok(/Room webhooks/.test(html) && /people list/i.test(html) && /Message colours/.test(html) && /CamChat/.test(html), 'U: covers this batch and the CamChat beginnings');
+    const banned = /\b(?:\d{1,3}\.){3}\d{1,3}\b|\/home\/|\/etc\/|\/var\/|\/opt\/|CAMCHAT_|SECRET_KEY|keystore|\.jks|\.pem|ssh|signing key|password hash|manager@/i;
+    ok(!banned.test(html) && !banned.test(JSON.stringify(cl)), 'U: no internal details (addresses, paths, key names, keystore)');
+    const js = await fetch(BASE + '/updates.json'); ok(js.status === 200 && (await js.json()).entries.length === cl.length, 'U: /updates.json for tools');
+    for (const width of [1366, 390]) {
+      const { ctx, page } = await pageFor(A, width);
+      await page.goto(BASE + '/updates', { waitUntil: 'domcontentloaded' }); await sleep(300);
+      const st = await page.evaluate(() => ({ open: [...document.querySelectorAll('details.rel')].map((d) => d.open), ov: document.documentElement.scrollWidth > window.innerWidth + 1 }));
+      ok(st.open[0] === true && st.open.slice(1).every((o) => !o), `U ${width}: newest release open, older ones collapsed`);
+      ok(!st.ov, `U ${width}: fits without sideways scroll`);
+      await shot(page, `x-updates-${width}`);
+      await page.click('#all-open'); await sleep(150);
+      ok(await page.evaluate(() => [...document.querySelectorAll('details.rel')].every((d) => d.open)), `U ${width}: Expand all`);
+      await page.evaluate(() => { localStorage.setItem('zn.uiTheme', 'dark-orange'); }); await page.reload({ waitUntil: 'domcontentloaded' }); await sleep(300);
+      const th = await page.evaluate(() => ({ attr: document.documentElement.getAttribute('data-ui-theme'), bg: getComputedStyle(document.body).backgroundColor }));
+      ok(th.attr === 'dark-orange', `U ${width}: follows the chosen theme (${th.attr})`);
+      await shot(page, `x-updates-dark-orange-${width}`);
+      await page.goto(`${BASE}/updates#2026-10-17-whispers`, { waitUntil: 'domcontentloaded' }); await sleep(300);
+      ok(await page.evaluate(() => document.getElementById('2026-10-17-whispers').open), `U ${width}: #release links open that release`);
+      // What's new notice for a returning visitor (has an older seen id)
+      await page.evaluate(() => { localStorage.setItem('zn.seenUpdate', '2026-10-17-whispers'); localStorage.removeItem('zn.uiTheme'); });
+      await page.goto(BASE + '/', { waitUntil: 'domcontentloaded' });
+      const note = await page.waitForSelector('[data-testid="whats-new"]', { timeout: 8000 }).then(() => true, () => false);
+      ok(note, `U ${width}: a short What's new note appears after an update`);
+      const href = await page.$eval('[data-action="whats-new-open"]', (a) => a.getAttribute('href')).catch(() => '');
+      ok(href === `/updates#${cl[0].id}`, `U ${width}: it links to the newest entry`);
+      await shot(page, `x-whats-new-note-${width}`);
+      await page.$eval('[data-action="whats-new-dismiss"]', (b) => b.click()); await sleep(200);
+      await page.reload({ waitUntil: 'domcontentloaded' }); await sleep(1200);
+      ok(!(await page.$('[data-testid="whats-new"]')), `U ${width}: dismissed notes stay gone`);
+      // profile menu link
+      await page.$eval('[data-action="profile"]', (b) => b.click()).catch(() => {}); await sleep(500);
+      ok(!!(await page.$('[data-action="whats-new-menu"][href="/updates"]')), `U ${width}: What's new is in the Your profile menu`);
+      await ctx.close();
+      // brand-new visitor: no note; login footer link
+      const ctx2 = await browser.createBrowserContext(); const p2 = await ctx2.newPage();
+      await p2.setViewport(width < 800 ? { width, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : { width, height: 800 });
+      await p2.goto(BASE + '/', { waitUntil: 'networkidle0' }); await sleep(800);
+      ok(!(await p2.$('[data-testid="whats-new"]')), `U ${width}: first-time visitors are not shown the note`);
+      ok(!!(await p2.$('[data-action="whats-new-footer"][href="/updates"]')), `U ${width}: footer links to What's new`);
+      await ctx2.close();
+    }
+    const dl = await (await fetch(BASE + '/download')).text();
+    ok(dl.includes('href="/updates"'), 'U: the Get the app page links to What\'s new');
+  }
 } catch (e) {
   failed++; console.log('FAIL  crashed:', e.stack || e.message);
 } finally {

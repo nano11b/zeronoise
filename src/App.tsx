@@ -1,4 +1,5 @@
 import { BanAppeal } from './components/BanAppeal';
+import { WhatsNewNotice } from './components/WhatsNew';
 import { TwoFactorGate } from './components/TwoFactor';
 import { badgeLabel, clientTimeZone } from './components/Badges';
 import { isUiTheme } from '../shared/uiTheme';
@@ -748,6 +749,7 @@ export default function App() {
           gifs={!!boot?.gifs}
         /></Lazy>
       )}
+      <WhatsNewNotice />
       <div className="toasts" role="status" aria-live="polite">
         {toasts.map((t) => <div key={t.id} className={`toast ${t.tone ?? ''}`}>{t.text}</div>)}
       </div>

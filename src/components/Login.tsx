@@ -158,7 +158,7 @@ export function Login({ onAccount, mode, setMode, google, discord, tiktok }: {
         <ul className="feature-pills">
           <li>Public rooms</li><li>Webcam + voice</li><li>Private messages</li><li>Account required</li>
         </ul>
-        <p className="muted small center legal-links"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></p>
+        <p className="muted small center legal-links"><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/updates" data-action="whats-new-footer">What's new</a></p>
         <p className="muted small center get-app"><a href="/download">Get the app</a></p>
         <details className="login-theme"><summary className="muted small center">Theme</summary><ThemePicker /></details>
       </section>

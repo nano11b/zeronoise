@@ -269,7 +269,7 @@ export async function renderDownloadPage(device: DeviceKind): Promise<string> {
     <div class="cards">
       ${cards.join('\n')}
     </div>
-    <p class="back"><a href="/">Open ${esc(BRAND_NAME)} in the browser</a></p>
+    <p class="back"><a href="/">Open ${esc(BRAND_NAME)} in the browser</a> · <a href="/updates">What's new</a></p>
   </main>
   <script>
     (function () {

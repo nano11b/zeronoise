@@ -1,0 +1,152 @@
+{
+  "about": "Public changelog for /updates. Newest first. Add one entry per release: id (unique, used for the What's new notice), date (YYYY-MM-DD, Eastern time), title, optional period (shown instead of the date), and sections of short, user-facing items. No internal details: no secrets, server names, addresses, file paths or signing details.",
+  "entries": [
+    {
+      "id": "2026-10-18-webhooks",
+      "date": "2026-10-18",
+      "title": "Room webhooks, a friendlier people list and message colours",
+      "sections": [
+        { "heading": "Room webhooks", "items": [
+          "Room owners, and members whose custom role allows it, can add webhooks under Room settings → Webhooks (up to 10 per room).",
+          "Incoming webhooks give you a secret link that game servers, GitHub, CI tools and other scripts can post to. They work with most tools built for Discord webhooks. Posts show the webhook's name and picture with a \"webhook\" badge.",
+          "Mass pings like @everyone are turned off for webhook posts, there are sensible rate limits, and messages can be up to 2000 characters with rich cards (embeds).",
+          "Outgoing webhooks send room events (new messages, people joining or leaving, someone going live, polls, moderation actions) to your own HTTPS server. Each delivery is signed, so your server can check it really came from us. Failed deliveries are retried, and a webhook that keeps failing turns itself off.",
+          "Each webhook shows its last 20 deliveries. You can test it, get a new link or secret, switch it off, or delete it, and every change is written to the room's moderation log.",
+          "The Bot API docs have a new webhooks section with copy-paste examples, including signature checks in Node and in Lua for FiveM. The game bridge kit can now post through a webhook and receive signed events."
+        ]},
+        { "heading": "People list", "items": [
+          "The automatic moderator no longer appears in the people list. It still keeps rooms tidy in the background.",
+          "Click or tap someone in the list to open a whisper with them. Message requests and blocks still apply. Click your own name to see your profile.",
+          "Right-click someone (or long-press on a phone, or press Shift+F10 / the Menu key) to see their profile, whisper, call, add them as a friend, mention them, block or report, plus any moderation actions you are allowed to use."
+        ]},
+        { "heading": "Message colours", "items": [
+          "Pick a colour for your message text in the Profile dialog, from the palette or your own.",
+          "Every colour is checked against all four themes. Colours that would be hard to read are lightened automatically.",
+          "Prefer plain text? Turn on \"ignore custom message colours\" in the Profile dialog. It applies in rooms and whispers."
+        ]},
+        { "heading": "Also new", "items": [
+          "This page: a full history of what has changed. After each update you'll see a short \"What's new\" note with a link here."
+        ]}
+      ]
+    },
+    {
+      "id": "2026-10-17-whispers",
+      "date": "2026-10-17",
+      "title": "Whispers grow up: groups, calls, files and more",
+      "sections": [
+        { "heading": "Whispers", "items": [
+          "Group whispers for 3 to 10 people, with names and a creator who can add, remove and rename. Leaving hands the group over.",
+          "Start a voice or video call straight from a whisper, one to one or with the whole group.",
+          "Send files and pictures (up to 10 MB) and push-to-talk voice notes. Pictures are cleaned of location data.",
+          "React, reply, edit and delete in whispers, just like in rooms. You can also see when someone is typing, and switch that off.",
+          "Disappearing messages (1 hour, 1 day or 7 days), plus pinned and archived conversations.",
+          "Message requests: first whispers from people who aren't your friends wait in Requests. You choose who can reach you.",
+          "Block and report right from a whisper."
+        ]},
+        { "heading": "Rooms and voice", "items": [
+          "Tap to translate a message into your language.",
+          "Room owners can trim a clip of up to 60 seconds from a voice-room recording and share it.",
+          "Custom room roles: give trusted members chosen powers (pin, mute, kick, give the floor), each role with its own readable name colour.",
+          "Room templates (Gaming, Study, Music, Chill, Support) to set up a new room in one go.",
+          "Optional \"Seen by\" read receipts in whispers.",
+          "Read messages aloud: an opt-in voice reader for all messages or just mentions and whispers."
+        ]},
+        { "heading": "Getting started and accessibility", "items": [
+          "A short, skippable welcome tour with interest picks and suggested rooms for new accounts.",
+          "An accessibility pass: full keyboard use, visible focus everywhere, screen-reader friendly announcements and reduced motion support.",
+          "Faster room joins and search, with smaller downloads when you enter a busy room."
+        ]},
+        { "heading": "Security and reliability", "items": [
+          "Passkeys: sign in with your device's fingerprint, face or PIN, or use one as a second factor. Setting up an authenticator app now shows a QR code.",
+          "Two-factor secrets are now encrypted at rest.",
+          "If you're banned from a room, you can appeal to its moderators.",
+          "Your unsent message drafts follow you across devices, and messages typed while offline are sent when you reconnect.",
+          "Voice-room recording for owners, with a clear notice for everyone in the room, and live captions in voice rooms.",
+          "Room analytics for owners: active members, newcomers, growth and peak times.",
+          "Better uptime monitoring and daily backup checks behind the scenes."
+        ]}
+      ]
+    },
+    {
+      "id": "2026-10-16-rooms",
+      "date": "2026-10-16",
+      "title": "Unread badges, voice rooms, levels and two-factor sign-in",
+      "sections": [
+        { "heading": "Staying on top of chat", "items": [
+          "Unread badges on the room rail and a \"new messages\" divider, synced across your devices.",
+          "A mentions inbox under the bell.",
+          "Whispers in rooms are kept for 30 days for the people in them.",
+          "A compact profile menu with Profile, Mentions, Friends, Start a room, Bots and Notifications."
+        ]},
+        { "heading": "Rooms", "items": [
+          "Voice rooms: audio-only rooms with a talk queue (raise your hand, get the floor) and speaking indicators.",
+          "Custom emoji reactions, slow mode, and word and link filters run by the room's automatic moderator.",
+          "Scheduled banners and event reminders, and previews for links, X posts and images (you can turn previews off).",
+          "Polls inside threads, and scheduled polls that post themselves once, daily or weekly.",
+          "A Browse page to discover rooms: trending, newest, most members, by category or tag. Private calls and password rooms are never listed."
+        ]},
+        { "heading": "You", "items": [
+          "Profiles 2.0: a banner image, links, what you're playing, and mutual friends and rooms.",
+          "XP and levels for taking part, with fair limits. You can hide your level.",
+          "Two-factor sign-in with an authenticator app and recovery codes.",
+          "Download all your data (profile, settings, messages, whispers) from the Profile dialog.",
+          "Ban appeals: one appeal per ban, reviewed by staff."
+        ]},
+        { "heading": "For game servers", "items": [
+          "A game bridge kit that connects FiveM, BeamMP, log files and other tools to a room."
+        ]}
+      ]
+    },
+    {
+      "id": "2026-10-15-themes",
+      "date": "2026-10-15",
+      "title": "Pick your theme",
+      "sections": [
+        { "heading": "Looks", "items": [
+          "Four interface themes: Dark (the classic look), Dark/Red, Dark/Green and Dark/Orange. Pick one on the sign-in screen or in your profile; your choice follows your account."
+        ]}
+      ]
+    },
+    {
+      "id": "2026-10-14-foundations",
+      "date": "2026-10-14",
+      "title": "Safer updates and a status page",
+      "sections": [
+        { "heading": "New", "items": [
+          "A public status page that shows whether everything is running.",
+          "Away indicators on camera tiles, search filters, notification settings and room themes (banner, accent colour and a welcome message).",
+          "Bots joined to a room now stay joined after a restart, and bot owners get an activity log."
+        ]},
+        { "heading": "Behind the scenes", "items": [
+          "Updates are signed and can be rolled back safely, and backups are taken in a way that never catches the database mid-write.",
+          "Many small fixes for phones."
+        ]}
+      ]
+    },
+    {
+      "id": "early-days",
+      "date": "2026-10-13",
+      "period": "Before October 14, 2026",
+      "title": "From CamChat to zeronoise",
+      "sections": [
+        { "heading": "Where it started: CamChat", "items": [
+          "Public camera and voice chat rooms in the browser, with text chat alongside.",
+          "Accounts with Google, Discord or TikTok sign-in, friends, password resets, and private calls.",
+          "Name colours and effects, avatars, and emoji reactions on messages."
+        ]},
+        { "heading": "Growing up", "items": [
+          "Threads, edits and pinned messages. Room passwords and room moderators.",
+          "Streaming into a room from broadcasting software, a soundboard for each room, and push-to-talk voice notes.",
+          "Chat bots with their own tokens and a public Bot API, plus one site-wide moderator bot.",
+          "Image uploads in chat, trivia with an all-time leaderboard, burn-after-reading messages and activity badges.",
+          "Bookmarks and full-text search, scheduled events with RSVPs and reminders, and push notifications.",
+          "Link previews, polls, profile bios and custom room icons and thumbnails.",
+          "Room categories and tags, announcement banners, scheduled messages, room stats and custom emotes.",
+          "A moderation queue with reasons and auto-hide, a smarter lobby with friend presence and recent rooms, and invite links.",
+          "Camera quality controls, stage mode for big rooms, edit history for moderators, and per-room notification levels.",
+          "The new name and look: zeronoise, with apps for Android and Windows."
+        ]}
+      ]
+    }
+  ]
+}
