@@ -54,7 +54,8 @@ npm run test:pwa
 **Full suite:** `scripts/run-all.sh <log dir>` runs build, typecheck and every suite in parallel
 lanes and writes `<log dir>/summary.txt`. It takes about 8-9 minutes and needs Chrome for the
 browser suites. It exits non-zero if any suite fails. Run it before asking for a release.
-Note: the `sig-rollback` lane needs `ssh-keygen`; without it that one test fails/skips.
+Note: the `sig-rollback` lane (`scripts/test-upgrade-sig-rollback.sh`) calls `ssh-keygen` and has no skip path,
+so it fails on a machine without `ssh-keygen`.
 
 ## Database migrations
 
@@ -86,11 +87,13 @@ Note: the `sig-rollback` lane needs `ssh-keygen`; without it that one test fails
 
 ## Release process (for awareness: agents do not do this)
 
-1. A tested commit is packed with `scripts/make-release.sh` into `camchat.tar.gz` plus `.sha256`.
+1. A tested commit is packed with `scripts/make-release.sh <out.tar.gz> <apk-path>`: git-tracked files of a
+   clean checkout plus the Android APK, with `MANIFEST.sha256` and `RELEASE.json`; it prints the tarball sha256.
 2. The **owner** signs it on their PC with the release key (`deploy/sign-release.ps1`,
    `deploy/RELEASE-SIGNING.md`), producing `.sig`.
 3. The owner copies the files to the server and runs `deploy/camchat-upgrade.sh` as root.
-   Rollback: `--rollback` (restores code and database) or `--rollback --keep-db` (code only).
+   Rollback: `--rollback` puts back the newest `/opt/camchat.bak-*` code and the database copy from that
+   upgrade; `--rollback --keep-db` restores code only and leaves the current database in place.
 4. `/api/health` and `/status` then report the live package and commit.
 
 Before any release: the full suite passes, an upgrade test from the currently live version
